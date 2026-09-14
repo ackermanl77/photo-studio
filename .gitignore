@@ -29,6 +29,9 @@ PhotoStudio-*-Windows/
 .photo-studio/
 *.log
 
+# Claude Code local-only config (personal permissions, not shared)
+.claude/settings.local.json
+
 # OS
 Thumbs.db
 Desktop.ini

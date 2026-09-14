@@ -9,8 +9,11 @@ from PIL import Image
 
 from app.config import MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES, BACKEND_HOST, BACKEND_PORT
 from app.image_processor import PhotoProcessor
+from app.layer_workspace import LayerWorkspace, WorkspaceLayer
 from app.observability import ProcessingAudit, configure_json_logger, log_audit
+from app.portrait_tools import smooth_skin
 from app.presets import PRESETS, apply_preset
+from app.raw_import import is_raw_path
 from app.reliability import new_request_id, validate_image_bytes
 
 app = Flask(__name__)
@@ -47,46 +50,78 @@ def _image_mask(file_storage, size: tuple[int, int]) -> Image.Image:
     return mask
 
 
-def process_image(image_file, options: dict, removal_mask=None, local_mask=None) -> Image.Image:
+def process_image(image_file, options: dict, removal_mask=None, local_mask=None, layer_file=None) -> Image.Image:
+    """Mirrors the exact step order of the unified UI's tabs (Tone -> Color -> Detail -> Layers ->
+    Masks -> Portrait -> Crop) so that routing the frontend's edits through this endpoint produces
+    the same image as applying them in-process. Keeping this order in sync with
+    app/frontend_unified_app.py matters: a mismatched order is exactly the class of bug documented
+    under "Recently Fixed" in docs/PROJECT_STATUS.md (layers/masks silently producing a different
+    result than what the UI showed).
+    """
     source_bytes = image_file.read()
-    validate_image_bytes(source_bytes, image_file.filename or "image")
-    processor = PhotoProcessor.from_bytes(source_bytes, image_file.filename)
+    filename = image_file.filename or "image"
+    # PIL (via validate_image_bytes) cannot decode camera RAW -- PhotoProcessor.from_bytes() routes
+    # RAW through rawpy and raises its own (already-tested) RuntimeError on failure, so RAW uploads
+    # skip this PIL-based check instead of always failing it.
+    if not is_raw_path(filename):
+        validate_image_bytes(source_bytes, filename)
+    processor = PhotoProcessor.from_bytes(source_bytes, filename)
     source_exif = processor.image.getexif().tobytes()
     source_icc = processor.image.info.get("icc_profile")
-    image = processor.image
+
+    # Tone
     processor.apply_brightness(_number(options, "brightness", 1.0))
     processor.apply_exposure(_number(options, "exposure", 1.0))
     processor.apply_contrast(_number(options, "contrast", 1.0))
-    processor.apply_saturation(_number(options, "saturation", 1.0))
     processor.apply_highlights_shadows(_number(options, "highlights", 0), _number(options, "shadows", 0))
-    processor.apply_temperature_tint(_number(options, "temperature", 0), _number(options, "tint", 0))
-    processor.apply_texture_clarity(_number(options, "texture", 0), _number(options, "clarity", 0))
-
-    curve = options.get("curve")
-    if curve:
-        processor.apply_curves([(int(point[0]), int(point[1])) for point in curve])
-    if options.get("denoise", 0):
-        processor.apply_denoise(int(options["denoise"]))
-    if options.get("sharpen", False):
-        processor.apply_sharpen()
     if options.get("preset") and options["preset"] != "None":
         if options["preset"] not in PRESETS:
             raise ValueError(f"Unknown preset: {options['preset']}")
         apply_preset(processor, options["preset"])
+
+    # Color
+    processor.apply_temperature_tint(_number(options, "temperature", 0), _number(options, "tint", 0))
+    processor.apply_saturation(_number(options, "saturation", 1.0))
+    curve = options.get("curve")
+    if curve:
+        processor.apply_curves([(int(point[0]), int(point[1])) for point in curve])
+
+    # Detail
+    processor.apply_texture_clarity(_number(options, "texture", 0), _number(options, "clarity", 0))
+    if options.get("denoise", 0):
+        processor.apply_denoise(int(options["denoise"]))
+    if options.get("sharpen", False):
+        processor.apply_sharpen()
+
     if removal_mask:
-        processor.remove_objects(_image_mask(removal_mask, image.size))
+        processor.remove_objects(_image_mask(removal_mask, processor.image.size))
+
+    # Layers
+    if layer_file:
+        overlay = Image.open(layer_file.stream).convert("RGBA")
+        overlay_layer = WorkspaceLayer("Overlay", overlay, _number(options, "layer_opacity", 1.0), options.get("layer_blend", "normal"))
+        processor.image = LayerWorkspace(processor.image).add(overlay_layer).composite().convert("RGB")
+
+    # Masks
     if local_mask:
         processor.apply_masked_adjustments(
-            _image_mask(local_mask, image.size),
+            _image_mask(local_mask, processor.image.size),
             exposure=_number(options, "mask_exposure", 1.0),
             contrast=_number(options, "mask_contrast", 1.0),
             saturation=_number(options, "mask_saturation", 1.0),
         )
 
+    # Portrait
+    portrait_smoothing = _number(options, "portrait_smoothing", 0.0)
+    if portrait_smoothing > 0:
+        processor.image = smooth_skin(processor.image, portrait_smoothing)
+
+    # Crop
     aspect = options.get("aspect", "Original")
     if aspect != "Original":
-        ratios = {"1:1": (1, 1), "4:5": (4, 5), "3:2": (3, 2), "16:9": (16, 9)}
+        ratios = {"1:1": (1, 1), "4:5": (4, 5), "5:4": (5, 4), "3:2": (3, 2), "16:9": (16, 9), "9:16": (9, 16)}
         processor.fit_aspect_ratio(*ratios[aspect])
+
     if source_exif and not options.get("strip_metadata", False):
         processor.image.info["exif"] = source_exif
     if source_icc and not options.get("strip_metadata", False):
@@ -109,6 +144,7 @@ def process():
             options,
             request.files.get("removal_mask"),
             request.files.get("local_mask"),
+            request.files.get("layer"),
         )
         output_format = options.get("output_format", "PNG")
         mime = "image/jpeg" if output_format == "JPEG" else "image/png"
