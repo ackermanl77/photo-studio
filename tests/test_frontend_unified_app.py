@@ -14,6 +14,7 @@ frontend assembles the request would still be caught.
 """
 
 import io
+import json
 import re
 from pathlib import Path
 
@@ -50,13 +51,14 @@ class _FakeFileStorage:
         return self.stream.read()
 
 
-def _fake_process_via_backend(image_bytes_, filename, options, local_mask_bytes=None, layer_bytes=None):
+def _fake_process_via_backend(image_bytes_, filename, options, local_mask_bytes=None, layer_bytes=None, removal_mask_bytes=None):
     request_options = dict(options)
     request_options["output_format"] = "PNG"
     image_file = _FakeFileStorage(filename, image_bytes_)
     local_mask = _FakeFileStorage("mask.png", local_mask_bytes) if local_mask_bytes else None
     layer_file = _FakeFileStorage("layer.png", layer_bytes) if layer_bytes else None
-    return process_image(image_file, request_options, removal_mask=None, local_mask=local_mask, layer_file=layer_file)
+    removal_mask = _FakeFileStorage("removal_mask.png", removal_mask_bytes) if removal_mask_bytes else None
+    return process_image(image_file, request_options, removal_mask=removal_mask, local_mask=local_mask, layer_file=layer_file)
 
 
 @pytest.fixture(autouse=True)
@@ -107,7 +109,7 @@ def test_uploading_image_renders_every_tab_without_errors():
 
     assert not at.exception
     assert [t.label for t in at.tabs] == [
-        "☼ Tone", "⛶ Crop", "\U0001f3a8 Color", "\U0001f52c Detail", "◈ Layers",
+        "☼ Tone", "⛶ Crop", "\U0001f3a8 Color", "\U0001f52c Detail", "🩹 Repair", "◈ Layers",
         "◉ Masks", "◌ Portrait", "✦ Presets", "☰ Batch & Library",
     ]
     assert canvas_dims(at) == (40, 30)
@@ -145,6 +147,38 @@ def test_mask_stack_target_adjustment_is_reflected_in_final_image():
 
     assert not at.exception
     assert canvas_hash(at) != baseline
+
+
+def test_repair_selection_removes_content_and_changes_the_final_image():
+    """Regression coverage for the Repair tab (object removal) -- PhotoProcessor.remove_objects()
+    was previously only reachable via the CLI or the raw backend API, never the unified UI. Unlike
+    Masks, no separate "target adjustment" slider is needed -- adding an enabled selection alone
+    triggers removal."""
+    at = run_with_uploaded_image(color=(80, 80, 80))
+    baseline = canvas_hash(at)
+
+    at.selectbox(key="rm-new-kind").set_value("Radial")
+    at.run(timeout=30)
+    at.button(key="rm-add-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["removal_mask_layers"], "expected the removal selection to be added"
+    assert canvas_hash(at) != baseline
+
+
+def test_repair_softness_slider_disabled_until_a_selection_exists():
+    at = run_with_uploaded_image()
+
+    assert at.slider(key="rm-radius").disabled
+
+    at.selectbox(key="rm-new-kind").set_value("Radial")
+    at.run(timeout=30)
+    at.button(key="rm-add-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert not at.slider(key="rm-radius").disabled
 
 
 def test_crop_tab_changes_output_dimensions():
@@ -206,6 +240,61 @@ def test_reset_button_restores_defaults_without_touching_the_layer():
     assert at.slider(key="d-text").value == 0
     # The layer itself survives the reset -- same composited image as right after uploading it.
     assert canvas_hash(at) == with_layer_hash
+
+
+def test_auto_enhance_button_applies_photoprocessor_auto_enhance_values():
+    """Mirrors PhotoProcessor.auto_enhance()'s fixed constants (app/image_processor.py) --
+    a regression here would mean the button and the CLI's --auto-enhance flag have drifted
+    apart."""
+    at = run_with_uploaded_image()
+
+    at.button(key="auto-enhance-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="t-exp").value == 1.12
+    assert at.slider(key="t-cont").value == 1.15
+    assert at.slider(key="c-sat").value == 1.08
+    assert at.slider(key="d-den").value == 3
+    assert at.checkbox(key="d-sharp").value is True
+
+
+def test_import_presets_adds_new_ones_and_shows_a_toast(monkeypatch, tmp_path):
+    """Redirects Path.home() so PresetStore (which always resolves to ~/.photo-studio/presets.json
+    with no override) reads/writes a throwaway location instead of the real one."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    payload = json.dumps({"version": 1, "presets": {"Imported Look": {"exposure": 1.2}}}).encode("utf-8")
+
+    at = run_with_uploaded_image()
+    at.get_by_key("preset-import-upload").set_value(("presets.json", payload, "application/json"))
+    at.run(timeout=30)
+    at.button(key="preset-import-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("Imported 1 preset" in t.value for t in at.toast)
+    saved = json.loads((tmp_path / ".photo-studio" / "presets.json").read_text(encoding="utf-8"))
+    assert "Imported Look" in saved
+
+
+def test_import_presets_skips_names_that_already_exist(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    presets_path = tmp_path / ".photo-studio" / "presets.json"
+    presets_path.parent.mkdir(parents=True)
+    presets_path.write_text(json.dumps({"Existing Look": {"exposure": 1.0}}), encoding="utf-8")
+    payload = json.dumps({"version": 1, "presets": {"Existing Look": {"exposure": 1.5}}}).encode("utf-8")
+
+    at = run_with_uploaded_image()
+    at.get_by_key("preset-import-upload").set_value(("presets.json", payload, "application/json"))
+    at.run(timeout=30)
+    at.button(key="preset-import-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("already exist" in t.value for t in at.toast)
+    # Untouched -- import_presets() defaults to overwrite=False.
+    saved = json.loads(presets_path.read_text(encoding="utf-8"))
+    assert saved["Existing Look"]["exposure"] == 1.0
 
 
 def test_save_preset_without_a_name_shows_a_warning_toast():
