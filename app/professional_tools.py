@@ -39,6 +39,15 @@ def zoom_preview(image: Image.Image, zoom: float = 1.0, center: tuple[float, flo
     return result
 
 
+def compute_histogram(image: Image.Image, bins: int = 64) -> dict[str, np.ndarray]:
+    """Per-channel pixel-value counts, binned for a compact UI chart (e.g. st.line_chart)."""
+    rgb = np.asarray(image.convert("RGB"))
+    return {
+        channel: np.histogram(rgb[..., index], bins=bins, range=(0, 255))[0]
+        for index, channel in enumerate(("Red", "Green", "Blue"))
+    }
+
+
 def normalize_mask(mask: Image.Image | np.ndarray, size: tuple[int, int], invert: bool = False, feather: int = 0) -> Image.Image:
     result = mask if isinstance(mask, Image.Image) else Image.fromarray(np.asarray(mask).astype(np.uint8), mode="L")
     result = result.convert("L").resize(size, Image.Resampling.NEAREST)

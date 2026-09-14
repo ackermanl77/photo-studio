@@ -18,7 +18,7 @@ from app.library import index_folder
 from app.major_features import PhotoCatalog
 from app.presets import PRESETS
 from app.portrait_tools import detect_faces
-from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, export_profile, preview_image, zoom_preview
+from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
 
 # Aspect ratios offered on the Crop tab (width, height).
@@ -89,10 +89,12 @@ def _restore_recipe_to_state(recipe: dict) -> None:
         st.session_state["l-blend"] = layer_payload.get("blend", "normal")
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner="🎨 Applying edits…")
 def _cached_process_via_backend(image_bytes: bytes, filename: str, options: dict, local_mask_bytes: bytes | None, layer_bytes: bytes | None):
     """Cached so that reruns triggered by controls that don't affect the pipeline (zoom, Show
-    Original, etc.) don't repeat a full HTTP round trip with the whole image."""
+    Original, etc.) don't repeat a full HTTP round trip with the whole image. The spinner message
+    is the only feedback the user gets that an edit is being sent over the network to
+    app/backend.py -- without it, a slider drag on a large image can look like the app hung."""
     return process_via_backend(image_bytes, filename, options, local_mask_bytes, layer_bytes)
 
 
@@ -194,11 +196,19 @@ footer { visibility: hidden; }
     padding: 0.55rem 0.85rem;
 }
 
-/* Workspace tab styling */
-button[data-baseweb="tab"] {
+/* Workspace tab styling -- wrap onto a second row instead of hiding tabs behind a scroll arrow;
+   with 9 tabs in a narrow column, scrolling silently hid Crop/Presets/More from first-time users.
+   Streamlit 1.6x renders tabs via React Aria (role="tablist"/"tab"), not the older BaseWeb
+   data-baseweb attributes -- these selectors target the current markup (data-testid="stTab(s)"). */
+[data-testid="stTab"] {
     font-size: 0.78rem !important;
     font-weight: 700 !important;
     padding: 0.35rem 0.6rem !important;
+}
+[data-testid="stTabs"] [role="tablist"] {
+    flex-wrap: wrap !important;
+    overflow-x: visible !important;
+    row-gap: 0.2rem;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -592,7 +602,7 @@ with tools_col:
 
 with canvas_col:
     # Canvas Header Bar
-    top_c1, top_undo, top_redo, top_c2, top_c3 = st.columns([1.05, 0.2, 0.2, 0.85, 1], gap="small")
+    top_c1, top_undo, top_redo, top_reset, top_c2, top_c3 = st.columns([0.95, 0.18, 0.18, 0.18, 0.75, 0.95], gap="small")
     with top_c1:
         st.markdown(f'<div class="panel-header-title">🖼️ Live View: <span>{upload_name} ({edited_image.width}×{edited_image.height})</span></div>', unsafe_allow_html=True)
     with top_undo:
@@ -602,6 +612,12 @@ with canvas_col:
     with top_redo:
         if st.button("↷", key="hist-redo-btn", disabled=not history.can_redo, help="Redo", use_container_width=True):
             st.session_state["_pending_restore"] = history.redo() or {}
+            st.rerun()
+    with top_reset:
+        # Resets exactly the same "recipe" fields Undo/Redo operate on (see _build_recipe), so it
+        # deliberately leaves an uploaded layer/RAW source alone -- only the adjustment values reset.
+        if st.button("↺", key="hist-reset-btn", help="Reset all adjustments to defaults", use_container_width=True):
+            st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": []}
             st.rerun()
     with top_c2:
         zoom_level = st.selectbox("Zoom View", [1.0, 0.5, 1.5, 2.0, 4.0], format_func=lambda z: f"🔍 {int(z*100)}%" if z>=1 else f"🔍 {int(z*100)}% (Fit)", key="cv-zoom", label_visibility="collapsed")
@@ -629,6 +645,11 @@ with canvas_col:
     else:
         st.image(zoom_preview(edited_image, zoom_level, (pan_x, pan_y)), caption="Current Edited Image", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
+
+    # Histogram -- always reflects edited_image (the backend-processed result), not whichever
+    # view (Original / Split) happens to be toggled above, since that's the reference exposure
+    # decisions are actually made against.
+    st.line_chart(compute_histogram(edited_image), height=90, color=["#f87171", "#4ade80", "#60a5fa"])
 
     # Export Footer Bar
     st.markdown('<div class="export-panel">', unsafe_allow_html=True)
