@@ -754,7 +754,13 @@ with st.container(key="workspace-split"):
         # Histogram -- always reflects edited_image (the backend-processed result), not whichever
         # view (Original / Split) happens to be toggled above, since that's the reference exposure
         # decisions are actually made against.
-        st.line_chart(compute_histogram(edited_image), height=90, color=["#f87171", "#4ade80", "#60a5fa"])
+        histogram_bins = 64
+        histogram = compute_histogram(edited_image, bins=histogram_bins)
+        # st.line_chart plots a dict's values against a plain 0..N-1 index by default, which would
+        # label this axis in bin numbers instead of the pixel brightness (0-255) each bin covers --
+        # give it an explicit "Pixel Value" column (each bin's center) to chart against instead.
+        histogram["Pixel Value"] = [round(255 * (i + 0.5) / histogram_bins) for i in range(histogram_bins)]
+        st.line_chart(histogram, x="Pixel Value", y=["Red", "Green", "Blue"], height=90, color=["#f87171", "#4ade80", "#60a5fa"])
 
         # Export Footer Bar
         st.markdown('<div class="export-panel">', unsafe_allow_html=True)
