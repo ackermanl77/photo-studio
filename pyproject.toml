@@ -1,0 +1,23 @@
+[project]
+name = "photo-professional-tool"
+version = "0.1.0"
+description = "CPU-friendly professional photo editing utilities in Python"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "Pillow>=10.0.0",
+    "numpy>=1.26.0",
+    "opencv-python-headless>=4.9.0",
+    "scikit-image>=0.22.0",
+    "pytest>=8.0.0",
+    "streamlit>=1.40.0",
+    "Flask>=3.0.0",
+    "requests>=2.31.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
