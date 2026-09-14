@@ -598,7 +598,9 @@ with st.container(key="workspace-split"):
                         "temperature": temp_val,
                         "tint": tint_val,
                     })
-                    st.success(f"Preset '{p_new_name}' saved!")
+                    st.toast(f"Preset '{p_new_name.strip()}' saved", icon="💾")
+                else:
+                    st.toast("Type a name before saving a preset", icon="⚠️")
 
             st.markdown("---")
             if "edit_history" not in st.session_state:
@@ -620,6 +622,7 @@ with st.container(key="workspace-split"):
                 project = ProjectBundle(source_name=upload_name, source_bytes=upload_bytes, recipe=project_recipe, layer_workspace=layer_workspace_json)
                 proj_buf = io.BytesIO()
                 project.save(proj_buf)
+                st.toast("Project packaged — click Download to save it", icon="💾")
                 st.download_button(
                     "⬇️ Download .photoproject",
                     proj_buf.getvalue(),
@@ -636,7 +639,7 @@ with st.container(key="workspace-split"):
                 lib_db = Path.home() / ".photo-studio" / "catalog.sqlite"
                 if st.button("Scan Folder", key="lib-btn"):
                     st.session_state.records = index_folder(lib_folder, lib_db, True)
-                    st.success("Indexed!")
+                    st.toast(f"Indexed {len(st.session_state.records)} photo(s)", icon="✅")
                 rec = st.session_state.get("records", [])
                 q = st.text_input("Search", key="lib-q-in")
                 r_min = st.slider("Min Stars", 0, 5, 0, key="lib-r-in")

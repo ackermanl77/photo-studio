@@ -208,6 +208,31 @@ def test_reset_button_restores_defaults_without_touching_the_layer():
     assert canvas_hash(at) == with_layer_hash
 
 
+def test_save_preset_without_a_name_shows_a_warning_toast():
+    """Doesn't click Save with an actual preset name -- that would write to the real
+    ~/.photo-studio/presets.json on whatever machine runs this test. The empty-name path is
+    safe: PresetStore.save() is never called, only the toast fires."""
+    at = run_with_uploaded_image()
+
+    at.button(key="p-save-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("name" in t.value.lower() for t in at.toast)
+
+
+def test_save_project_shows_a_toast_pointing_at_the_download_button():
+    """Safe to click for real: ProjectBundle.save() here writes to an in-memory io.BytesIO,
+    not disk."""
+    at = run_with_uploaded_image()
+
+    at.button(key="proj-save-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("Download" in t.value for t in at.toast)
+
+
 def test_split_view_renders_the_before_after_comparison_without_error():
     """Regression guard for _before_after_html()/components.html() -- AppTest can't inspect
     inside the rendered iframe, but it does catch any exception building or embedding it
