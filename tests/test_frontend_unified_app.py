@@ -107,8 +107,8 @@ def test_uploading_image_renders_every_tab_without_errors():
 
     assert not at.exception
     assert [t.label for t in at.tabs] == [
-        "☼ Tone", "\U0001f3a8 Color", "\U0001f52c Detail", "◈ Layers",
-        "◉ Masks", "◌ Portrait", "⛶ Crop", "✦ Presets", "☰ Batch & Library",
+        "☼ Tone", "⛶ Crop", "\U0001f3a8 Color", "\U0001f52c Detail", "◈ Layers",
+        "◉ Masks", "◌ Portrait", "✦ Presets", "☰ Batch & Library",
     ]
     assert canvas_dims(at) == (40, 30)
 
@@ -206,6 +206,34 @@ def test_reset_button_restores_defaults_without_touching_the_layer():
     assert at.slider(key="d-text").value == 0
     # The layer itself survives the reset -- same composited image as right after uploading it.
     assert canvas_hash(at) == with_layer_hash
+
+
+def test_split_view_renders_the_before_after_comparison_without_error():
+    """Regression guard for _before_after_html()/components.html() -- AppTest can't inspect
+    inside the rendered iframe, but it does catch any exception building or embedding it
+    (e.g. a before/after size mismatch after a crop not being reconciled)."""
+    at = run_with_uploaded_image()
+
+    at.checkbox(key="cv-split").set_value(True)
+    at.run(timeout=30)
+
+    assert not at.exception
+    # Split View takes priority over "Original" -- it's disabled while Split View is checked.
+    assert at.checkbox(key="cv-orig").disabled
+
+
+def test_split_view_still_works_after_a_crop_changes_the_edited_size():
+    """The before/after comparison must reconcile before/after size itself when a crop makes
+    edited_image smaller than source -- otherwise embedding two different-sized previews would
+    raise instead of silently misaligning."""
+    at = run_with_uploaded_image(size=(40, 30))
+
+    at.selectbox(key="crop-aspect").set_value("1:1 Square")
+    at.run(timeout=30)
+    at.checkbox(key="cv-split").set_value(True)
+    at.run(timeout=30)
+
+    assert not at.exception
 
 
 def test_free_form_crop_changes_output_dimensions_to_the_selected_box():
