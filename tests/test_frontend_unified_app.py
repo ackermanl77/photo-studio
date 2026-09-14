@@ -157,6 +157,20 @@ def test_crop_tab_changes_output_dimensions():
     assert canvas_dims(at) == (30, 30)
 
 
+def test_free_form_crop_changes_output_dimensions_to_the_selected_box():
+    at = run_with_uploaded_image(size=(40, 30))
+    assert canvas_dims(at) == (40, 30)
+
+    at.selectbox(key="crop-aspect").set_value("Free-form")
+    at.run(timeout=30)
+    at.slider(key="crop-x").set_value((5, 25))
+    at.slider(key="crop-y").set_value((2, 20))
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_dims(at) == (20, 18)
+
+
 def test_undo_restores_previous_control_value():
     at = run_with_uploaded_image()
 

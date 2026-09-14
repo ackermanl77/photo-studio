@@ -192,6 +192,39 @@ def test_process_endpoint_skips_pil_validation_for_raw_uploads(monkeypatch):
     assert response.status_code == 200
 
 
+def test_process_endpoint_applies_a_free_form_crop_box():
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes(size=(40, 30))), "input.png"),
+            "options": json.dumps({"crop_box": [10, 5, 30, 25]}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    result = Image.open(io.BytesIO(response.data))
+    assert result.size == (20, 20)
+
+
+def test_process_endpoint_crop_box_takes_priority_over_aspect():
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes(size=(40, 30))), "input.png"),
+            "options": json.dumps({"crop_box": [0, 0, 12, 8], "aspect": "1:1"}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    result = Image.open(io.BytesIO(response.data))
+    # A 1:1 aspect fit on a 40x30 source would land at 30x30 -- confirms crop_box won, not aspect.
+    assert result.size == (12, 8)
+
+
 def test_process_endpoint_still_validates_non_raw_uploads():
     client = app.test_client()
     response = client.post(

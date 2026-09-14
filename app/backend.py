@@ -116,11 +116,17 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     if portrait_smoothing > 0:
         processor.image = smooth_skin(processor.image, portrait_smoothing)
 
-    # Crop
-    aspect = options.get("aspect", "Original")
-    if aspect != "Original":
-        ratios = {"1:1": (1, 1), "4:5": (4, 5), "5:4": (5, 4), "3:2": (3, 2), "16:9": (16, 9), "9:16": (9, 16)}
-        processor.fit_aspect_ratio(*ratios[aspect])
+    # Crop -- an explicit crop_box (free-form, from the unified UI's Crop tab) takes priority over
+    # the named aspect-ratio fit; the frontend only ever sends one of the two at a time.
+    crop_box = options.get("crop_box")
+    if crop_box:
+        left, top, right, bottom = (int(value) for value in crop_box)
+        processor.crop(left, top, right, bottom)
+    else:
+        aspect = options.get("aspect", "Original")
+        if aspect != "Original":
+            ratios = {"1:1": (1, 1), "4:5": (4, 5), "5:4": (5, 4), "3:2": (3, 2), "16:9": (16, 9), "9:16": (9, 16)}
+            processor.fit_aspect_ratio(*ratios[aspect])
 
     if source_exif and not options.get("strip_metadata", False):
         processor.image.info["exif"] = source_exif
