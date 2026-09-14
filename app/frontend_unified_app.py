@@ -5,6 +5,7 @@ import io
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image, ImageDraw
 
 from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, radial_mask, soften_mask
@@ -87,6 +88,51 @@ def _restore_recipe_to_state(recipe: dict) -> None:
         st.session_state["restored_layer_bytes"] = base64.b64decode(layer_payload["image_b64"])
         st.session_state["l-opac"] = layer_payload.get("opacity", 1.0)
         st.session_state["l-blend"] = layer_payload.get("blend", "normal")
+
+
+def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, int]:
+    """A draggable before/after comparison: a single range input drives a CSS clip-path on the
+    "before" image layered over the "after" image. Pure inline HTML/CSS/JS via
+    st.components.v1.html -- no component library dependency, consistent with keeping this app's
+    UI free of extra dependencies after removing streamlit-drawable-canvas.
+
+    `before` and `after` must already be the same pixel size (the caller resizes if a crop made
+    them differ) -- that's what makes the overlay line up.
+    """
+    width, height = after.size
+    display_height = max(220, min(560, int(700 * height / width))) if width else 320
+
+    def _b64_png(image: Image.Image) -> str:
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    before_b64 = _b64_png(before)
+    after_b64 = _b64_png(after)
+    html = f"""
+    <div style="position:relative;width:100%;background:#090d16;border-radius:8px;overflow:hidden;line-height:0;">
+      <img src="data:image/png;base64,{after_b64}" style="display:block;width:100%;height:auto;">
+      <img id="ba-before" src="data:image/png;base64,{before_b64}"
+           style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;clip-path:inset(0 50% 0 0);">
+      <div id="ba-handle" style="position:absolute;top:0;bottom:0;left:50%;width:2px;margin-left:-1px;
+           background:#fff;box-shadow:0 0 6px rgba(0,0,0,.7);pointer-events:none;"></div>
+      <div style="position:absolute;top:8px;left:12px;color:#fff;font:600 11px system-ui;text-shadow:0 1px 3px rgba(0,0,0,.8);letter-spacing:.05em;">BEFORE</div>
+      <div style="position:absolute;top:8px;right:12px;color:#fff;font:600 11px system-ui;text-shadow:0 1px 3px rgba(0,0,0,.8);letter-spacing:.05em;">AFTER</div>
+      <input id="ba-range" type="range" min="0" max="100" value="50" aria-label="Before/after comparison position"
+             style="position:absolute;left:8px;right:8px;bottom:10px;width:calc(100% - 16px);">
+    </div>
+    <script>
+      const range = document.getElementById('ba-range');
+      const before = document.getElementById('ba-before');
+      const handle = document.getElementById('ba-handle');
+      range.addEventListener('input', () => {{
+        const v = range.value;
+        before.style.clipPath = `inset(0 ${{100 - v}}% 0 0)`;
+        handle.style.left = v + '%';
+      }});
+    </script>
+    """
+    return html, display_height
 
 
 @st.cache_data(show_spinner=False)
@@ -336,8 +382,15 @@ with st.container(key="workspace-split"):
     with tools_col:
         st.markdown('<div class="panel-header-title">🛠️ Tool Workspace</div>', unsafe_allow_html=True)
         
-        tab_tone, tab_color, tab_detail, tab_layers, tab_masks, tab_portrait, tab_crop, tab_presets, tab_more = st.tabs([
-            "☼ Tone", "🎨 Color", "🔬 Detail", "◈ Layers", "◉ Masks", "◌ Portrait", "⛶ Crop", "✦ Presets", "☰ Batch & Library"
+        # Crop sits right after Tone in this visual order -- a workflow convenience (see most photo
+        # editors: framing first, before fine-tuning tone/color) that's independent of the actual
+        # processing order. app/backend.py::process_image() always applies the crop last, after
+        # Masks/Portrait, regardless of where this tab sits in the UI -- every tab's code already
+        # runs on every rerun no matter which one is visually selected (see the note below the
+        # tabs), so reordering this tuple/list is purely cosmetic and doesn't change what gets sent
+        # to the backend or when.
+        tab_tone, tab_crop, tab_color, tab_detail, tab_layers, tab_masks, tab_portrait, tab_presets, tab_more = st.tabs([
+            "☼ Tone", "⛶ Crop", "🎨 Color", "🔬 Detail", "◈ Layers", "◉ Masks", "◌ Portrait", "✦ Presets", "☰ Batch & Library"
         ])
 
         show_original = False
@@ -366,6 +419,38 @@ with st.container(key="workspace-split"):
             cont_val = st.slider("Contrast", 0.5, 1.5, 1.0, 0.01, key="t-cont")
             high_val = st.slider("Highlights", -100, 100, 0, key="t-high")
             shad_val = st.slider("Shadows", -100, 100, 0, key="t-shad")
+
+        # TAB: CROP & ASPECT RATIO -- placed right after Tone for workflow convenience (frame the
+        # shot before fine-tuning tone/color); still applied last in the actual pipeline, see the
+        # note above the tabs() call.
+        with tab_crop:
+            st.markdown("**Crop / Aspect Ratio**")
+            crop_choice = st.selectbox("Aspect Ratio", ["Original", "Free-form", *ASPECT_RATIOS], key="crop-aspect")
+            if crop_choice == "Free-form":
+                st.caption("Drag the handles to choose an arbitrary crop box.")
+                src_w, src_h = source.size
+                # A slider's stored session_state value can't exceed the bounds passed to it -- if the
+                # user opened a smaller image after setting these against a larger one, drop the stale
+                # value so the widget falls back to its full-frame default instead of raising.
+                for axis_key, bound in (("crop-x", src_w), ("crop-y", src_h)):
+                    stored = st.session_state.get(axis_key)
+                    if stored and (stored[0] > bound or stored[1] > bound):
+                        del st.session_state[axis_key]
+                x_range = st.slider("Horizontal (X)", 0, src_w, (0, src_w), key="crop-x")
+                y_range = st.slider("Vertical (Y)", 0, src_h, (0, src_h), key="crop-y")
+                if x_range[1] - x_range[0] < 1 or y_range[1] - y_range[0] < 1:
+                    st.warning("Select a non-empty region.")
+                else:
+                    crop_box = (x_range[0], y_range[0], x_range[1], y_range[1])
+                    preview = source.copy()
+                    ImageDraw.Draw(preview).rectangle(crop_box, outline=(255, 60, 40), width=max(2, src_w // 200))
+                    st.image(preview, caption=f"Crop preview: {crop_box[2] - crop_box[0]}×{crop_box[3] - crop_box[1]}px", use_container_width=True)
+            elif crop_choice != "Original":
+                crop_w_ratio, crop_h_ratio = ASPECT_RATIOS[crop_choice]
+                st.caption(f"Center-cropping to {crop_choice} ({crop_w_ratio}:{crop_h_ratio}).")
+                aspect_code = f"{crop_w_ratio}:{crop_h_ratio}"
+            else:
+                st.caption("No crop applied — showing the full frame.")
 
         # TAB 2: COLOR & CURVES
         with tab_color:
@@ -497,36 +582,6 @@ with st.container(key="workspace-split"):
             )
             detected_faces = detect_faces(source)
             st.caption(f"👤 Detected faces: {len(detected_faces)}")
-
-        # TAB: CROP & ASPECT RATIO
-        with tab_crop:
-            st.markdown("**Crop / Aspect Ratio**")
-            crop_choice = st.selectbox("Aspect Ratio", ["Original", "Free-form", *ASPECT_RATIOS], key="crop-aspect")
-            if crop_choice == "Free-form":
-                st.caption("Drag the handles to choose an arbitrary crop box.")
-                src_w, src_h = source.size
-                # A slider's stored session_state value can't exceed the bounds passed to it -- if the
-                # user opened a smaller image after setting these against a larger one, drop the stale
-                # value so the widget falls back to its full-frame default instead of raising.
-                for axis_key, bound in (("crop-x", src_w), ("crop-y", src_h)):
-                    stored = st.session_state.get(axis_key)
-                    if stored and (stored[0] > bound or stored[1] > bound):
-                        del st.session_state[axis_key]
-                x_range = st.slider("Horizontal (X)", 0, src_w, (0, src_w), key="crop-x")
-                y_range = st.slider("Vertical (Y)", 0, src_h, (0, src_h), key="crop-y")
-                if x_range[1] - x_range[0] < 1 or y_range[1] - y_range[0] < 1:
-                    st.warning("Select a non-empty region.")
-                else:
-                    crop_box = (x_range[0], y_range[0], x_range[1], y_range[1])
-                    preview = source.copy()
-                    ImageDraw.Draw(preview).rectangle(crop_box, outline=(255, 60, 40), width=max(2, src_w // 200))
-                    st.image(preview, caption=f"Crop preview: {crop_box[2] - crop_box[0]}×{crop_box[3] - crop_box[1]}px", use_container_width=True)
-            elif crop_choice != "Original":
-                crop_w_ratio, crop_h_ratio = ASPECT_RATIOS[crop_choice]
-                st.caption(f"Center-cropping to {crop_choice} ({crop_w_ratio}:{crop_h_ratio}).")
-                aspect_code = f"{crop_w_ratio}:{crop_h_ratio}"
-            else:
-                st.caption("No crop applied — showing the full frame.")
 
         # TAB 7: PRESETS
         with tab_presets:
@@ -666,8 +721,8 @@ with st.container(key="workspace-split"):
         with top_c2:
             zoom_level = st.selectbox("Zoom View", [1.0, 0.5, 1.5, 2.0, 4.0], format_func=lambda z: f"🔍 {int(z*100)}%" if z>=1 else f"🔍 {int(z*100)}% (Fit)", key="cv-zoom", label_visibility="collapsed")
         with top_c3:
-            show_original = st.checkbox("👁️ Original", value=False, key="cv-orig")
-            compare_mode = st.checkbox("⇄ Split View", value=False, key="cv-split")
+            compare_mode = st.checkbox("⇄ Split View", value=False, key="cv-split", help="Drag to compare before/after")
+            show_original = st.checkbox("👁️ Original", value=False, key="cv-orig", disabled=compare_mode)
 
         if zoom_level > 1.0:
             pan_c1, pan_c2 = st.columns(2)
@@ -677,18 +732,24 @@ with st.container(key="workspace-split"):
                 pan_y = st.slider("Pan Vertical", 0.0, 1.0, 0.5, 0.01, key="cv-pany")
 
         # Main Image Canvas
-        st.markdown('<div class="canvas-container">', unsafe_allow_html=True)
-        if show_original and compare_mode:
-            split_l, split_r = st.columns(2)
-            with split_l:
-                st.image(preview_image(source), caption="Original", use_container_width=True)
-            with split_r:
-                st.image(zoom_preview(edited_image, zoom_level, (pan_x, pan_y)), caption="Edited Output", use_container_width=True)
-        elif show_original:
-            st.image(preview_image(source), caption="Original Untouched", use_container_width=True)
+        if compare_mode:
+            # Split View: a draggable before/after slider (see _before_after_html) rather than a
+            # static side-by-side -- takes priority over the plain "Original" toggle since it
+            # already shows both. The two previews share the same zoom/pan as the normal view; if
+            # a crop left them different sizes, resize "before" to match so the overlay lines up.
+            before_preview = zoom_preview(source, zoom_level, (pan_x, pan_y))
+            after_preview = zoom_preview(edited_image, zoom_level, (pan_x, pan_y))
+            if before_preview.size != after_preview.size:
+                before_preview = before_preview.resize(after_preview.size, Image.Resampling.LANCZOS)
+            compare_html, compare_height = _before_after_html(before_preview, after_preview)
+            components.html(compare_html, height=compare_height + 10)
         else:
-            st.image(zoom_preview(edited_image, zoom_level, (pan_x, pan_y)), caption="Current Edited Image", use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('<div class="canvas-container">', unsafe_allow_html=True)
+            if show_original:
+                st.image(preview_image(source), caption="Original Untouched", use_container_width=True)
+            else:
+                st.image(zoom_preview(edited_image, zoom_level, (pan_x, pan_y)), caption="Current Edited Image", use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
         # Histogram -- always reflects edited_image (the backend-processed result), not whichever
         # view (Original / Split) happens to be toggled above, since that's the reference exposure
