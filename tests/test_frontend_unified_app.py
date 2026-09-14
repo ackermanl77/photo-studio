@@ -157,6 +157,29 @@ def test_crop_tab_changes_output_dimensions():
     assert canvas_dims(at) == (30, 30)
 
 
+def test_reset_button_restores_defaults_without_touching_the_layer():
+    """Reset restores the same recipe fields Undo/Redo operate on (see _build_recipe) -- it must
+    not silently drop an uploaded layer, since that's a separate, deliberate user action."""
+    at = run_with_uploaded_image(color=(80, 80, 80))
+    at.get_by_key("l-file").set_value(("overlay.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
+    at.run(timeout=30)
+    with_layer_hash = canvas_hash(at)
+
+    at.slider(key="t-exp").set_value(1.4)
+    at.slider(key="d-text").set_value(60)
+    at.run(timeout=30)
+    assert at.slider(key="t-exp").value == 1.4
+
+    at.button(key="hist-reset-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="t-exp").value == 1.0
+    assert at.slider(key="d-text").value == 0
+    # The layer itself survives the reset -- same composited image as right after uploading it.
+    assert canvas_hash(at) == with_layer_hash
+
+
 def test_free_form_crop_changes_output_dimensions_to_the_selected_box():
     at = run_with_uploaded_image(size=(40, 30))
     assert canvas_dims(at) == (40, 30)

@@ -3,7 +3,7 @@ import io
 import numpy as np
 from PIL import Image
 
-from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, export_profile, normalize_mask, validate_project_bytes, zoom_preview
+from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, normalize_mask, validate_project_bytes, zoom_preview
 
 
 def test_zoom_preview_crops_and_preserves_valid_image():
@@ -36,3 +36,17 @@ def test_export_profiles_produce_expected_formats_and_sizes():
 
 def test_project_manifest_validation():
     assert validate_project_bytes(b'{"version": 1, "recipe": {}}')["version"] == 1
+
+
+def test_compute_histogram_bins_each_channel_and_counts_every_pixel():
+    image = Image.new("RGB", (10, 4), (10, 200, 0))
+    histogram = compute_histogram(image, bins=32)
+
+    assert set(histogram) == {"Red", "Green", "Blue"}
+    for channel_counts in histogram.values():
+        assert channel_counts.shape == (32,)
+        assert channel_counts.sum() == 40  # 10x4 pixels, every one falls in some bin
+    # A solid (10, 200, 0) image: the Red bin near value 10 and the Green bin near value 200
+    # should hold all 40 pixels, and the (near-zero) Blue channel should peak in the first bin.
+    assert histogram["Red"].argmax() * (256 / 32) <= 10 + (256 / 32)
+    assert histogram["Blue"][0] == 40
