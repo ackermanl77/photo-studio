@@ -24,6 +24,7 @@ from streamlit.testing.v1 import AppTest
 from app import backend_client
 from app.backend import process_image
 from app.layer_workspace import LayerWorkspace, WorkspaceLayer
+from app.presets import PRESETS
 from app.project import PhotoProject
 from app.project_bundle import ProjectBundle
 
@@ -107,7 +108,7 @@ def test_uploading_image_renders_every_tab_without_errors():
     assert not at.exception
     assert [t.label for t in at.tabs] == [
         "☼ Tone", "\U0001f3a8 Color", "\U0001f52c Detail", "◈ Layers",
-        "◉ Masks", "◌ Portrait", "⛶ Crop", "✦ Presets", "☰ More",
+        "◉ Masks", "◌ Portrait", "⛶ Crop", "✦ Presets", "☰ Batch & Library",
     ]
     assert canvas_dims(at) == (40, 30)
 
@@ -155,6 +156,33 @@ def test_crop_tab_changes_output_dimensions():
 
     assert not at.exception
     assert canvas_dims(at) == (30, 30)
+
+
+def test_mask_target_sliders_disabled_until_an_enabled_mask_layer_exists():
+    at = run_with_uploaded_image()
+
+    assert at.slider(key="m-texp").disabled
+    assert at.slider(key="m-tcont").disabled
+    assert at.slider(key="m-tsat").disabled
+
+    at.selectbox(key="m-new-kind").set_value("Radial")
+    at.run(timeout=30)
+    at.button(key="m-add-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert not at.slider(key="m-texp").disabled
+    assert not at.slider(key="m-tcont").disabled
+    assert not at.slider(key="m-tsat").disabled
+
+
+def test_preset_thumbnails_render_for_every_preset_option():
+    at = run_with_uploaded_image()
+
+    captions = [c.value for c in at.caption]
+    assert "None" in captions
+    for preset_name in PRESETS:
+        assert preset_name in captions
 
 
 def test_reset_button_restores_defaults_without_touching_the_layer():
