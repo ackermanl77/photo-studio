@@ -117,13 +117,13 @@ footer { visibility: hidden; }
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 2px solid #e2e8f0;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.12);
     padding: 0.2rem 0 0.5rem 0;
     margin-bottom: 0.6rem;
 }
 .brand-title {
     font: 800 1.5rem/1.1 'Segoe UI', system-ui, -apple-system, sans-serif;
-    color: #0f172a;
+    color: #f1f5f9;
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -492,20 +492,11 @@ with tools_col:
                 st.success(f"Preset '{p_new_name}' saved!")
 
         st.markdown("---")
-        st.markdown("**Edit History**")
         if "edit_history" not in st.session_state:
             st.session_state.edit_history = EditHistory()
         history = st.session_state.edit_history
         history.record(_build_recipe())
-        hist_c1, hist_c2 = st.columns(2)
-        with hist_c1:
-            if st.button("↶ Undo", key="hist-undo-btn", disabled=not history.can_undo, use_container_width=True):
-                st.session_state["_pending_restore"] = history.undo() or {}
-                st.rerun()
-        with hist_c2:
-            if st.button("↷ Redo", key="hist-redo-btn", disabled=not history.can_redo, use_container_width=True):
-                st.session_state["_pending_restore"] = history.redo() or {}
-                st.rerun()
+        st.caption("↶ Undo / ↷ Redo are always available in the bar above the canvas, not just here.")
 
         st.markdown("---")
         st.markdown("**Project File**")
@@ -601,9 +592,17 @@ with tools_col:
 
 with canvas_col:
     # Canvas Header Bar
-    top_c1, top_c2, top_c3 = st.columns([1.5, 1, 1], gap="small")
+    top_c1, top_undo, top_redo, top_c2, top_c3 = st.columns([1.05, 0.2, 0.2, 0.85, 1], gap="small")
     with top_c1:
         st.markdown(f'<div class="panel-header-title">🖼️ Live View: <span>{upload_name} ({edited_image.width}×{edited_image.height})</span></div>', unsafe_allow_html=True)
+    with top_undo:
+        if st.button("↶", key="hist-undo-btn", disabled=not history.can_undo, help="Undo", use_container_width=True):
+            st.session_state["_pending_restore"] = history.undo() or {}
+            st.rerun()
+    with top_redo:
+        if st.button("↷", key="hist-redo-btn", disabled=not history.can_redo, help="Redo", use_container_width=True):
+            st.session_state["_pending_restore"] = history.redo() or {}
+            st.rerun()
     with top_c2:
         zoom_level = st.selectbox("Zoom View", [1.0, 0.5, 1.5, 2.0, 4.0], format_func=lambda z: f"🔍 {int(z*100)}%" if z>=1 else f"🔍 {int(z*100)}% (Fit)", key="cv-zoom", label_visibility="collapsed")
     with top_c3:
