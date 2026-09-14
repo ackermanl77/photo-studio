@@ -5,7 +5,7 @@ import io
 from pathlib import Path
 
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, radial_mask, soften_mask
 from app.backend_client import ensure_backend_running, process_via_backend
@@ -304,6 +304,7 @@ with tools_col:
     l_opacity = 1.0
     l_blend = "normal"
     aspect_code = "Original"
+    crop_box = None
 
     # TAB 1: TONE & EXPOSURE
     with tab_tone:
@@ -446,8 +447,27 @@ with tools_col:
     # TAB: CROP & ASPECT RATIO
     with tab_crop:
         st.markdown("**Crop / Aspect Ratio**")
-        crop_choice = st.selectbox("Aspect Ratio", ["Original", *ASPECT_RATIOS], key="crop-aspect")
-        if crop_choice != "Original":
+        crop_choice = st.selectbox("Aspect Ratio", ["Original", "Free-form", *ASPECT_RATIOS], key="crop-aspect")
+        if crop_choice == "Free-form":
+            st.caption("Drag the handles to choose an arbitrary crop box.")
+            src_w, src_h = source.size
+            # A slider's stored session_state value can't exceed the bounds passed to it -- if the
+            # user opened a smaller image after setting these against a larger one, drop the stale
+            # value so the widget falls back to its full-frame default instead of raising.
+            for axis_key, bound in (("crop-x", src_w), ("crop-y", src_h)):
+                stored = st.session_state.get(axis_key)
+                if stored and (stored[0] > bound or stored[1] > bound):
+                    del st.session_state[axis_key]
+            x_range = st.slider("Horizontal (X)", 0, src_w, (0, src_w), key="crop-x")
+            y_range = st.slider("Vertical (Y)", 0, src_h, (0, src_h), key="crop-y")
+            if x_range[1] - x_range[0] < 1 or y_range[1] - y_range[0] < 1:
+                st.warning("Select a non-empty region.")
+            else:
+                crop_box = (x_range[0], y_range[0], x_range[1], y_range[1])
+                preview = source.copy()
+                ImageDraw.Draw(preview).rectangle(crop_box, outline=(255, 60, 40), width=max(2, src_w // 200))
+                st.image(preview, caption=f"Crop preview: {crop_box[2] - crop_box[0]}×{crop_box[3] - crop_box[1]}px", use_container_width=True)
+        elif crop_choice != "Original":
             crop_w_ratio, crop_h_ratio = ASPECT_RATIOS[crop_choice]
             st.caption(f"Center-cropping to {crop_choice} ({crop_w_ratio}:{crop_h_ratio}).")
             aspect_code = f"{crop_w_ratio}:{crop_h_ratio}"
@@ -564,6 +584,7 @@ with tools_col:
         "mask_saturation": m_sat,
         "portrait_smoothing": p_smooth,
         "aspect": aspect_code,
+        "crop_box": list(crop_box) if crop_box else None,
     }
 
     local_mask_bytes = None
