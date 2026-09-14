@@ -2,7 +2,7 @@ import io
 import json
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.backend import app
 from app.config import MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES
@@ -190,6 +190,41 @@ def test_process_endpoint_skips_pil_validation_for_raw_uploads(monkeypatch):
     )
 
     assert response.status_code == 200
+
+
+def test_process_endpoint_removes_the_selected_region():
+    """PhotoProcessor.remove_objects() (cv2.inpaint) via the removal_mask form field -- this
+    endpoint plumbing existed before the unified UI ever sent it (see docs/PROJECT_STATUS.md's
+    Repair tab entry); this is the first test exercising it through /process."""
+    size = (40, 40)
+    object_box = (15, 15, 25, 25)
+    base = Image.new("RGB", size, (30, 30, 30))
+    ImageDraw.Draw(base).rectangle(object_box, fill=(220, 20, 20))
+    base_buffer = io.BytesIO()
+    base.save(base_buffer, format="PNG")
+
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).rectangle(object_box, fill=255)
+    mask_buffer = io.BytesIO()
+    mask.save(mask_buffer, format="PNG")
+
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(base_buffer.getvalue()), "input.png"),
+            "removal_mask": (io.BytesIO(mask_buffer.getvalue()), "mask.png"),
+            "options": json.dumps({}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    result = np.array(Image.open(io.BytesIO(response.data)))
+    # Inpainting blends the removed region in from the surrounding dark background -- the red
+    # object (220, 20, 20) should be gone, replaced by something close to the background (30).
+    removed_region_mean = result[15:25, 15:25].mean()
+    assert abs(removed_region_mean - 30) < 10
 
 
 def test_process_endpoint_applies_a_free_form_crop_box():

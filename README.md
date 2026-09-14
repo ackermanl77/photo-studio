@@ -51,17 +51,21 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 
 ## Core Features
 
-- Exposure, contrast, highlights, shadows, temperature, tint, texture, clarity, curves, sharpening, and denoise, all live in the unified UI. Crop / aspect-ratio fitting exists in `PhotoProcessor` and the CLI but is **not yet exposed** in the unified UI — see Known Issues in `docs/PROJECT_STATUS.md`.
-- Built-in and custom presets with JSON exchange.
-- Non-destructive edit stacks with ordering, enable/disable, and JSON recipes (`app/edit_stack.py`) — implemented and tested, **not yet wired** into the unified UI (no undo/redo button today).
-- Named masks with opacity, inversion, feathering, gradients, radial, luminance, and color selection. Only one mask can be active at a time in the unified UI; combining several masks (`app/advanced_masks.py::MaskStack`) is implemented but not yet exposed there.
-- Layers with opacity, visibility, masks, normal/multiply/screen blending, duplication, deletion, and ordering.
-- Optional RAW import through `requirements-raw.txt` — wired into the CLI (`app/cli.py`) via `PhotoProcessor`, but the unified UI's file uploader does not yet route RAW files through it. See Known Issues.
+- Exposure, contrast, highlights, shadows, temperature, tint, texture, clarity, curves, sharpening, denoise, and a one-click "✨ Auto Enhance" pass, all live in the unified UI. Free-form or named-aspect-ratio crop, positioned right after Tone.
+- Object removal / repair: select a blemish or object with the same Luminance/Color/gradient/Radial selection tools as Masks, then it's inpainted away.
+- Built-in presets with live thumbnail previews, plus custom presets you can save, and export/import as a shareable `.json` file.
+- Undo/Redo and a one-click Reset to defaults, always available in the bar above the canvas regardless of which tab is open.
+- Combinable named masks (`app/advanced_masks.py::MaskStack`) — any number of Luminance/Color/gradient/Radial selections, each with opacity/invert/soften, unioned into one target adjustment.
+- Layers with opacity, blending (normal/multiply/screen), preserved through Save/Load Project.
+- Camera RAW import (`.cr2/.cr3/.nef/.arw/.dng`, optional via `requirements-raw.txt`) directly from the unified UI's uploader.
+- A draggable before/after comparison ("Split View"), plus a live per-channel histogram.
 - ICC profile preservation and tested 16-bit TIFF export support.
 - Local photo library with scanning, thumbnails, ratings, tags, and search.
 - Batch profiles, filename templates, error reports, and ZIP delivery.
-- Project bundles that persist source images, recipes, layers, and masks (`app/project.py`, `app/project_bundle.py`) — implemented and tested, **not yet wired** into the unified UI (no save/load project button today).
+- Save/Load Project (`.photoproject`, `app/project_bundle.py`) persisting the source image, recipe, layer, and mask selections.
 - Preview caching, diagnostics, request IDs, image validation, and structured audit logs.
+
+See `docs/PROJECT_STATUS.md`'s "Known Issues" for the current gaps (e.g. free-form crop not yet in Undo/Redo, no draggable rectangle on the canvas for it).
 
 ## Test
 

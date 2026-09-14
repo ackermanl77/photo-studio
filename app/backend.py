@@ -94,7 +94,7 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
         processor.apply_sharpen()
 
     if removal_mask:
-        processor.remove_objects(_image_mask(removal_mask, processor.image.size))
+        processor.remove_objects(_image_mask(removal_mask, processor.image.size), radius=_number(options, "removal_radius", 3.0))
 
     # Layers
     if layer_file:
