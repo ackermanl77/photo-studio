@@ -18,6 +18,7 @@ from app.layer_workspace import LayerWorkspace, WorkspaceLayer
 from app.library import index_folder
 from app.major_features import PhotoCatalog
 from app.presets import PRESETS, apply_preset
+from app.preset_exchange import export_presets, import_presets
 from app.portrait_tools import detect_faces
 from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
@@ -43,7 +44,7 @@ RECIPE_WIDGET_KEYS = {
     "texture": "d-text", "clarity": "d-clar", "denoise": "d-den", "sharpen": "d-sharp",
     "portrait_smoothing": "port-sm",
     "mask_target_exposure": "m-texp", "mask_target_contrast": "m-tcont", "mask_target_saturation": "m-tsat",
-    "crop_aspect": "crop-aspect",
+    "crop_aspect": "crop-aspect", "removal_radius": "rm-radius",
 }
 RECIPE_DEFAULTS = {
     "exposure": 1.0, "contrast": 1.0, "highlights": 0, "shadows": 0, "preset": "None",
@@ -52,7 +53,7 @@ RECIPE_DEFAULTS = {
     "texture": 0, "clarity": 0, "denoise": 0, "sharpen": False,
     "portrait_smoothing": 0.0,
     "mask_target_exposure": 1.0, "mask_target_contrast": 1.0, "mask_target_saturation": 1.0,
-    "crop_aspect": "Original",
+    "crop_aspect": "Original", "removal_radius": 3,
 }
 
 
@@ -65,6 +66,7 @@ def _build_recipe() -> dict:
     """
     recipe = {key: st.session_state.get(widget_key, RECIPE_DEFAULTS[key]) for key, widget_key in RECIPE_WIDGET_KEYS.items()}
     recipe["mask_layers"] = st.session_state.get("mask_layers", [])
+    recipe["removal_mask_layers"] = st.session_state.get("removal_mask_layers", [])
     return recipe
 
 
@@ -83,11 +85,84 @@ def _restore_recipe_to_state(recipe: dict) -> None:
             st.session_state[widget_key] = recipe[key]
     if "mask_layers" in recipe:
         st.session_state.mask_layers = recipe["mask_layers"]
+    if "removal_mask_layers" in recipe:
+        st.session_state.removal_mask_layers = recipe["removal_mask_layers"]
     layer_payload = recipe.get("layer")
     if layer_payload:
         st.session_state["restored_layer_bytes"] = base64.b64decode(layer_payload["image_b64"])
         st.session_state["l-opac"] = layer_payload.get("opacity", 1.0)
         st.session_state["l-blend"] = layer_payload.get("blend", "normal")
+
+
+def _build_mask_image(source: Image.Image, kind: str, params: dict) -> Image.Image:
+    if kind == "Luminance":
+        return luminance_mask(source, params["low"], params["high"])
+    if kind == "Color":
+        return color_mask(source, params["color"], params["tolerance"])
+    if kind == "Radial":
+        return radial_mask(source.size)
+    return gradient_mask(source.size, "horizontal" if "Horizontal" in kind else "vertical")
+
+
+def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image, include_opacity: bool = True) -> MaskStack:
+    """Shared "add a named selection (Luminance/Color/gradient/Radial), then list/edit/remove
+    existing ones" UI used by both the Masks tab (local tone/color adjustments) and the Repair
+    tab (object removal) -- same selection tools, a different session_state list and widget-key
+    prefix per caller so the two tabs' widgets don't collide. Returns the combined MaskStack; the
+    caller decides what to do with it (masked adjustments vs. inpainting).
+    """
+    if state_key not in st.session_state:
+        st.session_state[state_key] = []
+    layers = st.session_state[state_key]
+
+    with st.expander("➕ Add a selection", expanded=not layers):
+        new_kind = st.selectbox(
+            "Selection Type", ["Luminance", "Color", "Horizontal gradient", "Vertical gradient", "Radial"], key=f"{key_prefix}-new-kind",
+        )
+        new_params: dict = {}
+        if new_kind == "Luminance":
+            new_params["low"] = st.slider("Min Luma", 0, 255, 0, key=f"{key_prefix}-new-lmin")
+            new_params["high"] = st.slider("Max Luma", 0, 255, 255, key=f"{key_prefix}-new-lmax")
+        elif new_kind == "Color":
+            new_color_hex = st.color_picker("Target Color", "#806450", key=f"{key_prefix}-new-color")
+            new_params["color"] = tuple(int(new_color_hex.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
+            new_params["tolerance"] = st.slider("Color Tolerance", 0, 255, 50, key=f"{key_prefix}-new-ctol")
+        new_soften = st.slider("Soften edges (px)", 0, 40, 0, key=f"{key_prefix}-new-soften")
+        new_invert = st.checkbox("Invert selection", key=f"{key_prefix}-new-invert")
+        new_name = st.text_input("Layer name", value=f"{new_kind} {len(layers) + 1}", key=f"{key_prefix}-new-name")
+        if st.button("Add selection", key=f"{key_prefix}-add-btn"):
+            layers.append(
+                {
+                    "name": new_name.strip() or new_kind,
+                    "kind": new_kind,
+                    "params": new_params,
+                    "soften": new_soften,
+                    "invert": new_invert,
+                    "opacity": 1.0,
+                    "enabled": True,
+                }
+            )
+            st.rerun()
+
+    mask_stack = MaskStack(source.size)
+    for idx, layer in enumerate(layers):
+        status_icon = "✅" if layer["enabled"] else "⬜"
+        with st.expander(f"{status_icon} {layer['name']} — {layer['kind']}", expanded=False):
+            layer["name"] = st.text_input("Name", layer["name"], key=f"{key_prefix}-name-{idx}")
+            layer["enabled"] = st.checkbox("Enabled", layer["enabled"], key=f"{key_prefix}-en-{idx}")
+            layer["invert"] = st.checkbox("Invert", layer["invert"], key=f"{key_prefix}-inv-{idx}")
+            if include_opacity:
+                layer["opacity"] = st.slider("Opacity", 0.0, 1.0, layer["opacity"], 0.05, key=f"{key_prefix}-op-{idx}")
+            layer["soften"] = st.slider("Soften edges (px)", 0, 40, layer.get("soften", 0), key=f"{key_prefix}-sf-{idx}")
+            if st.button("🗑️ Remove", key=f"{key_prefix}-rm-{idx}"):
+                layers.pop(idx)
+                st.rerun()
+        base_mask = _build_mask_image(source, layer["kind"], layer["params"])
+        if layer["soften"]:
+            base_mask = soften_mask(base_mask, layer["soften"])
+        mask_stack.add(MaskLayer(layer["name"], base_mask, layer["enabled"], layer["invert"], layer["opacity"]))
+
+    return mask_stack
 
 
 def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, int]:
@@ -157,12 +232,12 @@ def _preset_thumbnails(image_bytes: bytes, filename: str) -> dict[str, bytes]:
 
 
 @st.cache_data(show_spinner="🎨 Applying edits…")
-def _cached_process_via_backend(image_bytes: bytes, filename: str, options: dict, local_mask_bytes: bytes | None, layer_bytes: bytes | None):
+def _cached_process_via_backend(image_bytes: bytes, filename: str, options: dict, local_mask_bytes: bytes | None, layer_bytes: bytes | None, removal_mask_bytes: bytes | None = None):
     """Cached so that reruns triggered by controls that don't affect the pipeline (zoom, Show
     Original, etc.) don't repeat a full HTTP round trip with the whole image. The spinner message
     is the only feedback the user gets that an edit is being sent over the network to
     app/backend.py -- without it, a slider drag on a large image can look like the app hung."""
-    return process_via_backend(image_bytes, filename, options, local_mask_bytes, layer_bytes)
+    return process_via_backend(image_bytes, filename, options, local_mask_bytes, layer_bytes, removal_mask_bytes)
 
 
 st.set_page_config(page_title="Photo Studio Pro", page_icon="🎨", layout="wide", initial_sidebar_state="collapsed")
@@ -389,8 +464,12 @@ with st.container(key="workspace-split"):
         # runs on every rerun no matter which one is visually selected (see the note below the
         # tabs), so reordering this tuple/list is purely cosmetic and doesn't change what gets sent
         # to the backend or when.
-        tab_tone, tab_crop, tab_color, tab_detail, tab_layers, tab_masks, tab_portrait, tab_presets, tab_more = st.tabs([
-            "☼ Tone", "⛶ Crop", "🎨 Color", "🔬 Detail", "◈ Layers", "◉ Masks", "◌ Portrait", "✦ Presets", "☰ Batch & Library"
+        # Repair sits right after Detail, matching where app/backend.py::process_image() applies
+        # removal_mask in the actual pipeline (right after Detail, before Layers) -- unlike Crop,
+        # there's no workflow reason to decouple this one's visual position from its pipeline
+        # position, so they're kept in sync.
+        tab_tone, tab_crop, tab_color, tab_detail, tab_repair, tab_layers, tab_masks, tab_portrait, tab_presets, tab_more = st.tabs([
+            "☼ Tone", "⛶ Crop", "🎨 Color", "🔬 Detail", "🩹 Repair", "◈ Layers", "◉ Masks", "◌ Portrait", "✦ Presets", "☰ Batch & Library"
         ])
 
         show_original = False
@@ -407,6 +486,16 @@ with st.container(key="workspace-split"):
 
         # TAB 1: TONE & EXPOSURE
         with tab_tone:
+            # Mirrors PhotoProcessor.auto_enhance() (app/image_processor.py) exactly -- that method
+            # is otherwise only reachable from the CLI's --auto-enhance flag. Writing straight into
+            # _pending_restore reuses the same "one rerun to apply" mechanism as Undo/Redo/Reset,
+            # and only touches these five recipe fields, leaving everything else (crop, masks,
+            # curve, temperature, ...) exactly as the user left it.
+            if st.button("✨ Auto Enhance", key="auto-enhance-btn", help="Apply a quick, balanced exposure/contrast/saturation/denoise/sharpen pass", use_container_width=True):
+                st.session_state["_pending_restore"] = {
+                    "exposure": 1.12, "contrast": 1.15, "saturation": 1.08, "denoise": 3, "sharpen": True,
+                }
+                st.rerun()
             preset_names = ["None", *sorted(PRESETS)]
             preset_thumbs = _preset_thumbnails(upload_bytes, upload_name)
             thumb_cols = st.columns(len(preset_names))
@@ -473,6 +562,29 @@ with st.container(key="workspace-split"):
             denoise_val = st.slider("Denoise", 0, 9, 0, step=2, key="d-den")
             sharp_en = st.checkbox("Sharpen (Unsharp Mask)", value=False, key="d-sharp")
 
+        # TAB: REPAIR (OBJECT REMOVAL)
+        with tab_repair:
+            st.markdown("**Remove Objects**")
+            st.caption("Select the blemish or object to remove with the same selection tools as Masks (below). The selected area is painted over by blending in nearby texture.")
+
+            removal_stack = _render_selection_stack("removal_mask_layers", "rm", source, include_opacity=False)
+            removal_combined_mask = removal_stack.combined()
+            removal_active = any(layer["enabled"] for layer in st.session_state.removal_mask_layers)
+
+            if not st.session_state.removal_mask_layers:
+                st.caption("No selections yet — nothing will be removed.")
+            elif not removal_active:
+                st.caption("All selections are disabled — nothing will be removed.")
+
+            removal_radius = st.slider(
+                "Repair Softness", 1, 15, 3, key="rm-radius", disabled=not removal_active,
+                help="How far the repair blends into the surrounding area -- higher softens a wider edge.",
+            )
+
+            if st.checkbox("👁️ Preview removal selection", key="rm-preview-overlay") and st.session_state.removal_mask_layers:
+                # Yellow (vs. Masks' red) so the two overlays are never confused with each other.
+                st.image(apply_mask_overlay(source, removal_combined_mask, color=(255, 200, 0)), caption="Yellow = will be removed", use_container_width=True)
+
         # TAB 4: LAYERS & COMPOSITING
         with tab_layers:
             st.markdown("**Add Image Layer**")
@@ -493,66 +605,7 @@ with st.container(key="workspace-split"):
             st.markdown("**Mask Layers**")
             st.caption("Build several named selections and combine them into one mask (union). The target adjustments below apply only where the combined mask is active.")
 
-            if "mask_layers" not in st.session_state:
-                st.session_state.mask_layers = []
-
-            def _build_mask_image(kind: str, params: dict):
-                if kind == "Luminance":
-                    return luminance_mask(source, params["low"], params["high"])
-                if kind == "Color":
-                    return color_mask(source, params["color"], params["tolerance"])
-                if kind == "Radial":
-                    return radial_mask(source.size)
-                return gradient_mask(source.size, "horizontal" if "Horizontal" in kind else "vertical")
-
-            # --- Add a new mask layer ---
-            with st.expander("➕ Add a mask layer", expanded=not st.session_state.mask_layers):
-                new_kind = st.selectbox(
-                    "Selection Type", ["Luminance", "Color", "Horizontal gradient", "Vertical gradient", "Radial"], key="m-new-kind",
-                )
-                new_params: dict = {}
-                if new_kind == "Luminance":
-                    new_params["low"] = st.slider("Min Luma", 0, 255, 0, key="m-new-lmin")
-                    new_params["high"] = st.slider("Max Luma", 0, 255, 255, key="m-new-lmax")
-                elif new_kind == "Color":
-                    new_color_hex = st.color_picker("Target Color", "#806450", key="m-new-color")
-                    new_params["color"] = tuple(int(new_color_hex.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
-                    new_params["tolerance"] = st.slider("Color Tolerance", 0, 255, 50, key="m-new-ctol")
-                new_soften = st.slider("Soften edges (px)", 0, 40, 0, key="m-new-soften")
-                new_invert = st.checkbox("Invert selection", key="m-new-invert")
-                new_name = st.text_input("Layer name", value=f"{new_kind} {len(st.session_state.mask_layers) + 1}", key="m-new-name")
-                if st.button("Add mask layer", key="m-add-btn"):
-                    st.session_state.mask_layers.append(
-                        {
-                            "name": new_name.strip() or new_kind,
-                            "kind": new_kind,
-                            "params": new_params,
-                            "soften": new_soften,
-                            "invert": new_invert,
-                            "opacity": 1.0,
-                            "enabled": True,
-                        }
-                    )
-                    st.rerun()
-
-            # --- Existing mask layers: edit, toggle, or remove ---
-            mask_stack = MaskStack(source.size)
-            for idx, layer in enumerate(st.session_state.mask_layers):
-                status_icon = "✅" if layer["enabled"] else "⬜"
-                with st.expander(f"{status_icon} {layer['name']} — {layer['kind']}", expanded=False):
-                    layer["name"] = st.text_input("Name", layer["name"], key=f"m-name-{idx}")
-                    layer["enabled"] = st.checkbox("Enabled", layer["enabled"], key=f"m-en-{idx}")
-                    layer["invert"] = st.checkbox("Invert", layer["invert"], key=f"m-inv-{idx}")
-                    layer["opacity"] = st.slider("Opacity", 0.0, 1.0, layer["opacity"], 0.05, key=f"m-op-{idx}")
-                    layer["soften"] = st.slider("Soften edges (px)", 0, 40, layer.get("soften", 0), key=f"m-sf-{idx}")
-                    if st.button("🗑️ Remove layer", key=f"m-rm-{idx}"):
-                        st.session_state.mask_layers.pop(idx)
-                        st.rerun()
-                base_mask = _build_mask_image(layer["kind"], layer["params"])
-                if layer["soften"]:
-                    base_mask = soften_mask(base_mask, layer["soften"])
-                mask_stack.add(MaskLayer(layer["name"], base_mask, layer["enabled"], layer["invert"], layer["opacity"]))
-
+            mask_stack = _render_selection_stack("mask_layers", "m", source)
             # Union of every enabled layer (or an all-zero, no-op mask when there are none).
             combined_mask = mask_stack.combined()
 
@@ -601,6 +654,33 @@ with st.container(key="workspace-split"):
                     st.toast(f"Preset '{p_new_name.strip()}' saved", icon="💾")
                 else:
                     st.toast("Type a name before saving a preset", icon="⚠️")
+
+            st.markdown("---")
+            st.markdown("**Export / Import Presets**")
+            if p_store.names():
+                st.download_button(
+                    "⬇️ Export all presets",
+                    export_presets(p_store),
+                    file_name="photo-studio-presets.json",
+                    mime="application/json",
+                    key="preset-export-btn",
+                )
+            else:
+                st.caption("No saved presets to export yet.")
+            preset_import_file = st.file_uploader("Import presets (.json)", type=["json"], key="preset-import-upload")
+            if preset_import_file and st.button("Import", key="preset-import-btn"):
+                try:
+                    imported = import_presets(p_store, preset_import_file.getvalue())
+                except ValueError as error:
+                    st.toast(f"Could not import presets: {error}", icon="⚠️")
+                else:
+                    if imported:
+                        st.toast(f"Imported {len(imported)} preset(s)", icon="📥")
+                        st.rerun()
+                    else:
+                        # Existing names win (import_presets(overwrite=False)) -- every name in the
+                        # file already exists locally, so nothing changed and nothing needs a rerun.
+                        st.toast("No new presets to import — names already exist", icon="ℹ️")
 
             st.markdown("---")
             if "edit_history" not in st.session_state:
@@ -664,8 +744,9 @@ with st.container(key="workspace-split"):
 
         # Every tab above runs on every Streamlit rerun regardless of which tab is visible, and none of
         # them mutate `processor` anymore -- they only capture control values. The actual pixel pipeline
-        # (Tone -> Color -> Detail -> Layers -> Masks -> Portrait -> Crop, matching the tab order above)
-        # runs once, here, on app/backend.py -- see that module's process_image() for the mirrored order.
+        # (Tone -> Color -> Detail -> Repair -> Layers -> Masks -> Portrait -> Crop, matching the tab
+        # order above) runs once, here, on app/backend.py -- see that module's process_image() for the
+        # mirrored order.
         options = {
             "exposure": exp_val,
             "contrast": cont_val,
@@ -680,6 +761,7 @@ with st.container(key="workspace-split"):
             "clarity": clar_val,
             "denoise": denoise_val,
             "sharpen": sharp_en,
+            "removal_radius": removal_radius,
             "layer_opacity": l_opacity,
             "layer_blend": l_blend,
             "mask_exposure": m_exp,
@@ -696,8 +778,14 @@ with st.container(key="workspace-split"):
             combined_mask.save(mask_buffer, format="PNG")
             local_mask_bytes = mask_buffer.getvalue()
 
+        removal_mask_bytes = None
+        if removal_active:
+            removal_buffer = io.BytesIO()
+            removal_combined_mask.save(removal_buffer, format="PNG")
+            removal_mask_bytes = removal_buffer.getvalue()
+
         try:
-            edited_image = _cached_process_via_backend(upload_bytes, upload_name, options, local_mask_bytes, layer_bytes)
+            edited_image = _cached_process_via_backend(upload_bytes, upload_name, options, local_mask_bytes, layer_bytes, removal_mask_bytes)
         except RuntimeError as error:
             st.error(f"⚠️ {error}")
             st.stop()
@@ -719,7 +807,7 @@ with st.container(key="workspace-split"):
             # Resets exactly the same "recipe" fields Undo/Redo operate on (see _build_recipe), so it
             # deliberately leaves an uploaded layer/RAW source alone -- only the adjustment values reset.
             if st.button("↺", key="hist-reset-btn", help="Reset all adjustments to defaults", use_container_width=True):
-                st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": []}
+                st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": []}
                 st.rerun()
         with top_c2:
             zoom_level = st.selectbox("Zoom View", [1.0, 0.5, 1.5, 2.0, 4.0], format_func=lambda z: f"🔍 {int(z*100)}%" if z>=1 else f"🔍 {int(z*100)}% (Fit)", key="cv-zoom", label_visibility="collapsed")
