@@ -1,0 +1,1525 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run major feature tests",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_major_features.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run full test suite",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate integrated workbench",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/integrated_workbench_next.py",
+				"app/major_features.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify all project tests",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate unified frontend",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_unified_v2.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch unified frontend diagnostic",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_unified_v2.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8505"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Validate integrated app entry",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_integrated.py",
+				"app/desktop_integrated.py",
+				"app/frontend_unified_v2.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch integrated app check",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_integrated.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8506"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Install all project dependencies",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pip",
+				"install",
+				"-r",
+				"requirements.txt",
+				"-r",
+				"requirements-raw.txt",
+				"-r",
+				"requirements-desktop.txt"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Verify installed environment",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate compact frontend",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_compact.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run compact frontend tests",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate bottom-controls frontend",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_bottom.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run bottom-controls tests",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate all-controls-below UI",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_all_below.py",
+				"app/frontend_bottom.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate center layout",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_center.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run all regression tests",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate Pro frontend",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_pro.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch Pro frontend",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_pro.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8507"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Verify Pro release",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate complete frontend",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_complete.py",
+				"app/professional_tools.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run complete regression suite",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch complete frontend",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_complete.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8508"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Validate photo library",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/library.py",
+				"app/frontend_library.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run next feature tests",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test non-destructive edit stack",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_edit_stack.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify full edit stack release",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate edit stack frontend",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_stack.py",
+				"app/edit_stack.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run Batch 1 tests",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch Batch 1 frontend",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_stack.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8509"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Test advanced masking batch",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_advanced_masks.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify Batch 2 release",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch Batch 2 masking",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_masking.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8510"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Test professional color batch",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_professional_color.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test fixed color export",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_professional_color_fixed.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate color batch fallback",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_professional_color_final.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test batch release features",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_batch_release.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run full suite after next batch",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify global Python environment",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test performance batch",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_performance.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify performance compatibility patch",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_performance.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run full global test suite",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test reliability security batch",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_reliability.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify reliability batch globally",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test project persistence batch",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_project_bundle.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify project persistence",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_project_bundle.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify full project persistence batch",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test portrait retouching batch",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_portrait_tools.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify portrait batch globally",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch portrait frontend",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_portrait.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8512"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Verify library editor batch",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_library_editor.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run library editor tests",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch library editor",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_library_editor.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8513"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Validate batch frontend",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_batch.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify batch frontend globally",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch batch frontend",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_batch.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8514"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Validate unified application",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_unified_app.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run unified application tests",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch unified application",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_unified_app.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8515"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Build unified PhotoStudio EXE",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--distpath",
+				"dist-unified",
+				"--workpath",
+				"build-unified",
+				"PhotoStudio.spec"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Inspect unified EXE artifact",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-c",
+				"from pathlib import Path; p=Path('dist-unified/PhotoStudio.exe'); print('exists=',p.exists()); print('path=',p.resolve()); print('size=',p.stat().st_size if p.exists() else 'missing')"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Confirm unified EXE",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$p='dist-unified\\PhotoStudio.exe'; Write-Output ('exists=' + (Test-Path $p)); if (Test-Path $p) { Get-Item $p | Select-Object FullName,Length,LastWriteTime }"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Verify rebuilt unified release",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test backend hardening batch",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_backend_hardening.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify hardened unified release",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test observability batch",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_observability.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify observability globally",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test backend observability integration",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_backend_observability.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify backend observability globally",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate project session UI",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_project.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify project session globally",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch project session UI",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_project.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8516"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Verify latest desktop release",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Build latest PhotoStudio EXE",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--distpath",
+				"dist-latest",
+				"--workpath",
+				"build-latest",
+				"PhotoStudio.spec"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Inspect latest executable",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$p=Join-Path (Get-Location) 'dist-latest\\PhotoStudio.exe'; Write-Output ('exists=' + (Test-Path $p)); if (Test-Path $p) { Get-Item $p | Select-Object FullName,Length,LastWriteTime }"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Verify global release changes",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test diagnostics batch",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_diagnostics.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify diagnostics globally",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test preview cache integration",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_cached_processing.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify preview cache globally",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate cached frontend",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_cached.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify cached frontend globally",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch cached editor",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_cached.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8517"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Validate custom presets",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/custom_presets.py",
+				"app/frontend_presets.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify custom presets globally",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate preset exchange",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_preset_exchange.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify preset exchange globally",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Compile all app modules",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"compileall",
+				"-q",
+				"app"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Execute Batches 1 to 12 tests",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch Batch 1 to 12 unified app",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_unified_app.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8518"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Execute Batch 1 edit stack tests",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_edit_stack.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Compile Batch 1 frontend",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_stack.py",
+				"app/edit_stack.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch Batch 1 edit stack UI",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_stack.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8519"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Execute Batch 2 mask tests",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/test_advanced_masks.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Compile Batch 2 masking UI",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/advanced_masks.py",
+				"app/frontend_masking.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch Batch 2 masking UI",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_masking.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8520"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Verify all-features desktop source",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Build all-features desktop app",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--distpath",
+				"dist-all-features",
+				"--workpath",
+				"build-all-features",
+				"PhotoStudio.spec"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Validate color-coded unified UI",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_unified_app.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run UI regression suite",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch color-coded unified UI",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_unified_app.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8521"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Compile current UI",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"app/frontend_unified_app.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Launch current UI check",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"streamlit",
+				"run",
+				"app/frontend_unified_app.py",
+				"--server.headless",
+				"true",
+				"--server.port",
+				"8522"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Preflight all-features executable",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Compile all current application modules",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"compileall",
+				"-q",
+				"app"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Build all improvements executable",
+			"type": "shell",
+			"command": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--distpath",
+				"dist-final",
+				"--workpath",
+				"build-final",
+				"PhotoStudio.spec"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

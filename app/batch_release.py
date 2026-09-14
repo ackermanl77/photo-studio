@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import csv
+import io
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+
+from app.image_processor import PhotoProcessor
+from app.professional_tools import EXPORT_PROFILES, export_profile
+
+
+@dataclass
+class BatchResult:
+    source: Path
+    output_name: str | None
+    status: str
+    error: str | None = None
+
+
+def render_name(source: Path, template: str = "{stem}-edited{suffix}", suffix: str = ".jpg") -> str:
+    return template.format(stem=source.stem, name=source.name, suffix=suffix)
+
+
+def process_files(paths: list[str | Path], preset: str | None = None, profile: str = "Web", name_template: str = "{stem}-edited{suffix}", progress=None, should_cancel=None) -> tuple[list[tuple[str, bytes]], list[BatchResult]]:
+    if profile not in EXPORT_PROFILES:
+        raise ValueError(f"Unknown export profile: {profile}")
+    outputs: list[tuple[str, bytes]] = []
+    report: list[BatchResult] = []
+    used_names: set[str] = set()
+    total = len(paths)
+    for index, raw_path in enumerate(paths, 1):
+        if should_cancel and should_cancel():
+            report.extend(BatchResult(Path(item), None, "cancelled", "Cancelled before processing") for item in paths[index - 1 :])
+            break
+        source = Path(raw_path)
+        try:
+            processor = PhotoProcessor(source)
+            if preset and preset != "None":
+                from app.presets import apply_preset
+
+                apply_preset(processor, preset)
+            content, suffix, _ = export_profile(processor.image, profile)
+            output_name = render_name(source, name_template, suffix)
+            original_name = output_name
+            counter = 2
+            while output_name in used_names:
+                output_name = f"{Path(original_name).stem}-{counter}{Path(original_name).suffix}"
+                counter += 1
+            used_names.add(output_name)
+            outputs.append((output_name, content))
+            report.append(BatchResult(source, output_name, "ok"))
+        except (OSError, ValueError, RuntimeError) as error:
+            report.append(BatchResult(source, None, "error", str(error)))
+        finally:
+            if progress:
+                progress(index, total, report[-1] if report else None)
+    return outputs, report
+
+
+def report_csv(report: list[BatchResult]) -> bytes:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["source", "output", "status", "error"])
+    for item in report:
+        writer.writerow([item.source.name, item.output_name or "", item.status, item.error or ""])
+    return output.getvalue().encode("utf-8")
+
+
+def make_zip(outputs: list[tuple[str, bytes]]) -> bytes:
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        for name, content in outputs:
+            bundle.writestr(name, content)
+    return archive.getvalue()
