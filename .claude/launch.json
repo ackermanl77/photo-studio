@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "photo-studio-streamlit",
+      "runtimeExecutable": "C:\\Users\\MELEJ\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+      "runtimeArgs": ["-m", "streamlit", "run", "app/frontend_unified_app.py", "--server.headless", "true"],
+      "port": 8501
+    }
+  ]
+}

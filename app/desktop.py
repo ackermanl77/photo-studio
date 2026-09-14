@@ -61,6 +61,48 @@ def _wait_for_frontend(process: subprocess.Popen) -> None:
     raise RuntimeError("The embedded Streamlit frontend did not start")
 
 
+def _start_backend() -> subprocess.Popen:
+    command = [sys.executable, "--backend-child"] if getattr(sys, "frozen", False) else [sys.executable, "-m", "app.backend"]
+    log_path = Path(sys.executable).resolve().parent / "backend-child.log"
+    log_file = log_path.open("w", encoding="utf-8")
+    process = subprocess.Popen(
+        command,
+        cwd=str(_project_root()),
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    process._photo_log_file = log_file
+    return process
+
+
+def _wait_for_backend(process: subprocess.Popen) -> None:
+    from app.config import BACKEND_HOST, BACKEND_PORT
+
+    backend_health_url = f"http://{BACKEND_HOST}:{BACKEND_PORT}/health"
+    for _ in range(60):
+        if process.poll() is not None:
+            raise RuntimeError("The local processing backend stopped before it was ready")
+        try:
+            if requests.get(backend_health_url, timeout=0.5).ok:
+                return
+        except requests.RequestException:
+            time.sleep(0.25)
+    raise RuntimeError("The local processing backend did not start")
+
+
+def _terminate(process: subprocess.Popen) -> None:
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+    log_file = getattr(process, "_photo_log_file", None)
+    if log_file:
+        log_file.close()
+
+
 def _start_frontend() -> subprocess.Popen:
     command = [sys.executable, "--streamlit-child"] if getattr(sys, "frozen", False) else [sys.executable, "-m", "streamlit"]
     if not getattr(sys, "frozen", False):
@@ -100,21 +142,21 @@ def main() -> None:
         _run_backend_child()
         return
 
-    frontend = _start_frontend()
+    # The backend starts first and is awaited before the frontend: by the time the Streamlit
+    # child's frontend_unified_app.py runs, its own ensure_backend_running() health check finds
+    # the backend already up and does nothing further (see app/backend_client.py).
+    backend = _start_backend()
+    frontend = None
     try:
+        _wait_for_backend(backend)
+        frontend = _start_frontend()
         _wait_for_frontend(frontend)
         webview.create_window("Photo Studio", FRONTEND_URL, width=1440, height=960, min_size=(1024, 700))
         webview.start(gui="edgechromium")
     finally:
-        if frontend.poll() is None:
-            frontend.terminate()
-            try:
-                frontend.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                frontend.kill()
-        log_file = getattr(frontend, "_photo_log_file", None)
-        if log_file:
-            log_file.close()
+        if frontend is not None:
+            _terminate(frontend)
+        _terminate(backend)
 
 
 if __name__ == "__main__":
