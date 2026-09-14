@@ -23,6 +23,9 @@ from streamlit.testing.v1 import AppTest
 
 from app import backend_client
 from app.backend import process_image
+from app.layer_workspace import LayerWorkspace, WorkspaceLayer
+from app.project import PhotoProject
+from app.project_bundle import ProjectBundle
 
 APP_PATH = Path(__file__).resolve().parent.parent / "app" / "frontend_unified_app.py"
 
@@ -166,3 +169,70 @@ def test_undo_restores_previous_control_value():
 
     assert not at.exception
     assert at.slider(key="t-exp").value == 1.0
+
+
+def test_save_project_button_builds_a_bundle_with_the_layer_without_erroring():
+    """Regression guard for the Save Project button's ProjectBundle wiring (layer_bytes/opacity/
+    blend -> LayerWorkspace -> ProjectBundle) -- a mismatch with LayerWorkspace's API would raise
+    here rather than only being caught by decoding the downloaded bytes, which AppTest can't do."""
+    at = run_with_uploaded_image()
+    at.get_by_key("l-file").set_value(("overlay.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
+    at.run(timeout=30)
+
+    at.button(key="proj-save-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any(db.label == "⬇️ Download .photoproject" for db in at.download_button)
+
+
+def test_load_project_restores_recipe_and_layer_from_a_project_bundle():
+    """Regression test for the migration off PhotoProject to ProjectBundle: the overlay layer now
+    lives in ProjectBundle's structured `layer_workspace` field instead of being base64-embedded in
+    the recipe, so the Load handler has to translate it back into the recipe["layer"] shape
+    _restore_recipe_to_state() expects."""
+    source = Image.new("RGB", (40, 30), (80, 80, 80))
+    overlay = Image.new("RGBA", (40, 30), (255, 0, 0, 255))
+    workspace = LayerWorkspace(source).add(WorkspaceLayer("Overlay", overlay, 0.7, "multiply"))
+    source_buffer = io.BytesIO()
+    source.save(source_buffer, format="PNG")
+
+    bundle_buffer = io.BytesIO()
+    ProjectBundle("saved.png", source_buffer.getvalue(), {"exposure": 1.3}, workspace.to_json()).save(bundle_buffer)
+
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.get_by_key("proj-upload").set_value(("saved.photoproject", bundle_buffer.getvalue(), "application/zip"))
+    at.run(timeout=30)
+    at.button(key="proj-load-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["restored_source_name"] == "saved.png"
+    assert at.slider(key="t-exp").value == 1.3
+    assert at.slider(key="l-opac").value == 0.7
+    assert at.selectbox(key="l-blend").value == "multiply"
+    restored_overlay = Image.open(io.BytesIO(at.session_state["restored_layer_bytes"]))
+    assert restored_overlay.size == (40, 30)
+
+
+def test_load_project_still_reads_the_legacy_photoproject_format():
+    """ProjectBundle.load() must stay able to open files saved by the older, simpler PhotoProject
+    format -- users may still have .photoproject files from before this migration."""
+    source = Image.new("RGB", (20, 16), (30, 60, 90))
+    source_buffer = io.BytesIO()
+    source.save(source_buffer, format="PNG")
+
+    legacy_buffer = io.BytesIO()
+    PhotoProject("legacy.png", source_buffer.getvalue(), {"exposure": 1.4}).save(legacy_buffer)
+
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.get_by_key("proj-upload").set_value(("legacy.photoproject", legacy_buffer.getvalue(), "application/zip"))
+    at.run(timeout=30)
+    at.button(key="proj-load-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["restored_source_name"] == "legacy.png"
+    assert at.slider(key="t-exp").value == 1.4

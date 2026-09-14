@@ -5,6 +5,7 @@ import io
 from pathlib import Path
 
 import streamlit as st
+from PIL import Image
 
 from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, radial_mask, soften_mask
 from app.backend_client import ensure_backend_running, process_via_backend
@@ -12,12 +13,13 @@ from app.batch_release import make_zip, process_files
 from app.custom_presets import PresetStore
 from app.edit_history import EditHistory
 from app.image_processor import PhotoProcessor
+from app.layer_workspace import LayerWorkspace, WorkspaceLayer
 from app.library import index_folder
 from app.major_features import PhotoCatalog
 from app.presets import PRESETS
 from app.portrait_tools import detect_faces
 from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, export_profile, preview_image, zoom_preview
-from app.project import PhotoProject
+from app.project_bundle import ProjectBundle
 
 # Aspect ratios offered on the Crop tab (width, height).
 ASPECT_RATIOS = {
@@ -30,7 +32,7 @@ ASPECT_RATIOS = {
 }
 
 # Maps a JSON-serializable recipe key to the session_state key of the widget that reads/writes it.
-# Shared by Undo/Redo (EditHistory snapshots) and Save/Load Project (PhotoProject.recipe) so both
+# Shared by Undo/Redo (EditHistory snapshots) and Save/Load Project (ProjectBundle.recipe) so both
 # features capture and restore exactly the same set of controls.
 RECIPE_WIDGET_KEYS = {
     "exposure": "t-exp", "contrast": "t-cont", "highlights": "t-high", "shadows": "t-shad", "preset": "tone-preset",
@@ -233,10 +235,25 @@ with upload_col2:
 with st.expander("📁 Open a saved project (.photoproject)"):
     project_upload = st.file_uploader("Project file", type=["photoproject", "zip"], key="proj-upload")
     if project_upload and st.button("Load Project", key="proj-load-btn"):
-        loaded_project = PhotoProject.load(project_upload.getvalue())
+        loaded_project = ProjectBundle.load(project_upload.getvalue())
         st.session_state["restored_source_bytes"] = loaded_project.source_bytes
         st.session_state["restored_source_name"] = loaded_project.source_name
-        st.session_state["_pending_restore"] = loaded_project.recipe
+        # ProjectBundle stores the overlay layer in its own structured `layer_workspace` field
+        # (a serialized LayerWorkspace), not base64-embedded in the recipe like the old
+        # PhotoProject format -- translate it into the same recipe["layer"] shape
+        # _restore_recipe_to_state() already knows how to apply, so that function needs no changes.
+        pending_recipe = dict(loaded_project.recipe)
+        workspace = loaded_project.layer_workspace_object()
+        if workspace and len(workspace.layers) > 1:
+            overlay_layer = workspace.layers[1]
+            overlay_buffer = io.BytesIO()
+            overlay_layer.image.save(overlay_buffer, format="PNG")
+            pending_recipe["layer"] = {
+                "image_b64": base64.b64encode(overlay_buffer.getvalue()).decode("ascii"),
+                "opacity": overlay_layer.opacity,
+                "blend": overlay_layer.blend_mode,
+            }
+        st.session_state["_pending_restore"] = pending_recipe
         st.rerun()
 
 if not uploaded and "restored_source_bytes" not in st.session_state:
@@ -475,13 +492,12 @@ with tools_col:
         st.caption("Save every adjustment (plus the source image and any layer) into one file you can reopen later.")
         if st.button("💾 Save Project", key="proj-save-btn"):
             project_recipe = _build_recipe()
+            layer_workspace_json = None
             if layer_bytes:
-                project_recipe["layer"] = {
-                    "image_b64": base64.b64encode(layer_bytes).decode("ascii"),
-                    "opacity": l_opacity,
-                    "blend": l_blend,
-                }
-            project = PhotoProject(source_name=upload_name, source_bytes=upload_bytes, recipe=project_recipe)
+                overlay = Image.open(io.BytesIO(layer_bytes)).convert("RGBA")
+                workspace = LayerWorkspace(source).add(WorkspaceLayer("Overlay", overlay, l_opacity, l_blend))
+                layer_workspace_json = workspace.to_json()
+            project = ProjectBundle(source_name=upload_name, source_bytes=upload_bytes, recipe=project_recipe, layer_workspace=layer_workspace_json)
             proj_buf = io.BytesIO()
             project.save(proj_buf)
             st.download_button(
