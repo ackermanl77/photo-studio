@@ -45,7 +45,7 @@ Rebuild:
 
 The release script prefers global Python, supports one-file and one-folder PyInstaller output, optional signing, 7-Zip compression, and SHA-256 checksums. Microsoft Edge WebView2 Runtime is required for the native window.
 
-`app/desktop.py` starts only the Streamlit frontend (`frontend_unified_app.py`). The Flask processing API in `app/backend.py` is a separate, optional component — it is **not** started automatically and is **not** called by the desktop app or by the unified frontend, which talks to `PhotoProcessor` directly in-process. See "Architecture" in `docs/PROJECT_STATUS.md` before relying on it.
+`app/desktop.py` starts both the Streamlit frontend (`frontend_unified_app.py`) and the Flask processing backend (`app/backend.py`, `127.0.0.1:8502`) — the frontend sends its edit pipeline to the backend over HTTP rather than processing in-process. Running the frontend standalone (`streamlit run app/frontend_unified_app.py`, below) also works without `desktop.py`: the frontend starts the backend on demand the first time it's needed. See "Architecture" in `docs/PROJECT_STATUS.md` for the request flow and the latency trade-off that comes with it.
 
 There is currently no dedicated preflight UI. See [docs/workflows/secure-distribution/preflight.md](docs/workflows/secure-distribution/preflight.md) for how to run the preflight checks that exist today before building a release.
 

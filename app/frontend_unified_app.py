@@ -5,18 +5,17 @@ import io
 from pathlib import Path
 
 import streamlit as st
-from PIL import Image
 
 from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, radial_mask, soften_mask
+from app.backend_client import ensure_backend_running, process_via_backend
 from app.batch_release import make_zip, process_files
 from app.custom_presets import PresetStore
 from app.edit_history import EditHistory
 from app.image_processor import PhotoProcessor
-from app.layer_workspace import LayerWorkspace, WorkspaceLayer
 from app.library import index_folder
 from app.major_features import PhotoCatalog
-from app.presets import PRESETS, apply_preset
-from app.portrait_tools import detect_faces, smooth_skin
+from app.presets import PRESETS
+from app.portrait_tools import detect_faces
 from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, export_profile, preview_image, zoom_preview
 from app.project import PhotoProject
 
@@ -86,6 +85,13 @@ def _restore_recipe_to_state(recipe: dict) -> None:
         st.session_state["restored_layer_bytes"] = base64.b64decode(layer_payload["image_b64"])
         st.session_state["l-opac"] = layer_payload.get("opacity", 1.0)
         st.session_state["l-blend"] = layer_payload.get("blend", "normal")
+
+
+@st.cache_data(show_spinner=False)
+def _cached_process_via_backend(image_bytes: bytes, filename: str, options: dict, local_mask_bytes: bytes | None, layer_bytes: bytes | None):
+    """Cached so that reruns triggered by controls that don't affect the pipeline (zoom, Show
+    Original, etc.) don't repeat a full HTTP round trip with the whole image."""
+    return process_via_backend(image_bytes, filename, options, local_mask_bytes, layer_bytes)
 
 
 st.set_page_config(page_title="Photo Studio Pro", page_icon="🎨", layout="wide", initial_sidebar_state="collapsed")
@@ -253,6 +259,14 @@ except RuntimeError as error:
     st.stop()
 source = processor.image
 
+# The actual edit pipeline runs on app/backend.py, not in this process (see docs/PROJECT_STATUS.md);
+# `processor`/`source` above are only used locally for decoding, mask geometry, and previews.
+try:
+    ensure_backend_running()
+except RuntimeError as error:
+    st.error(f"⚠️ {error}")
+    st.stop()
+
 # Main Two Columns: Level & Parallel Layout
 tools_col, canvas_col = st.columns([1.1, 1.4], gap="large")
 
@@ -272,6 +286,7 @@ with tools_col:
     layer_bytes = None
     l_opacity = 1.0
     l_blend = "normal"
+    aspect_code = "Original"
 
     # TAB 1: TONE & EXPOSURE
     with tab_tone:
@@ -280,12 +295,6 @@ with tools_col:
         cont_val = st.slider("Contrast", 0.5, 1.5, 1.0, 0.01, key="t-cont")
         high_val = st.slider("Highlights", -100, 100, 0, key="t-high")
         shad_val = st.slider("Shadows", -100, 100, 0, key="t-shad")
-        
-        processor.apply_exposure(exp_val).apply_contrast(cont_val)
-        processor.apply_highlights_shadows(high_val, shad_val)
-        if preset_choice != "None":
-            apply_preset(processor, preset_choice)
-        edited_image = processor.image
 
     # TAB 2: COLOR & CURVES
     with tab_color:
@@ -300,11 +309,6 @@ with tools_col:
             c_mid = st.slider("Midtones", 64, 192, 128, key="c-p2")
             c_high = st.slider("Highlights", 128, 255, 192, key="c-p3")
             c_white = st.slider("Whites", 192, 255, 255, key="c-p4")
-            if use_curve:
-                processor.apply_curves([(0, c_black), (64, c_low), (128, c_mid), (192, c_high), (255, c_white)])
-
-        processor.apply_temperature_tint(temp_val, tint_val).apply_saturation(sat_val)
-        edited_image = processor.image
 
     # TAB 3: DETAIL & SHARPNESS
     with tab_detail:
@@ -312,13 +316,6 @@ with tools_col:
         clar_val = st.slider("Clarity", -100, 100, 0, key="d-clar")
         denoise_val = st.slider("Denoise", 0, 9, 0, step=2, key="d-den")
         sharp_en = st.checkbox("Sharpen (Unsharp Mask)", value=False, key="d-sharp")
-        
-        processor.apply_texture_clarity(text_val, clar_val)
-        if denoise_val:
-            processor.apply_denoise(denoise_val)
-        if sharp_en:
-            processor.apply_sharpen()
-        edited_image = processor.image
 
     # TAB 4: LAYERS & COMPOSITING
     with tab_layers:
@@ -331,13 +328,9 @@ with tools_col:
         elif "restored_layer_bytes" in st.session_state:
             layer_bytes = st.session_state["restored_layer_bytes"]
         if layer_bytes:
-            overlay = Image.open(io.BytesIO(layer_bytes)).convert("RGBA")
             l_opacity = st.slider("Opacity", 0.0, 1.0, 1.0, 0.01, key="l-opac")
             l_blend = st.selectbox("Blend Mode", ["normal", "multiply", "screen"], key="l-blend")
-            # Write the composite back into processor.image (not just a local variable) so that
-            # later tabs (Masks, Portrait) and the final export see the layered result instead of
-            # silently discarding it.
-            processor.image = LayerWorkspace(processor.image).add(WorkspaceLayer("Overlay", overlay, l_opacity, l_blend)).composite().convert("RGB")
+            st.caption("This layer is composited on the processing backend when the image renders.")
 
     # TAB 5: MASKS & LOCAL ADJUSTMENTS
     with tab_masks:
@@ -413,12 +406,13 @@ with tools_col:
             st.caption("All mask layers are disabled — the sliders below have no effect.")
 
         if st.checkbox("👁️ Preview combined mask overlay", key="m-preview-overlay") and st.session_state.mask_layers:
-            st.image(apply_mask_overlay(processor.image, combined_mask), caption="Red = selected by the combined mask", use_container_width=True)
+            # Overlaid on the untouched source -- the backend-processed preview isn't available
+            # locally, so this debug view shows the selection rather than the live edited result.
+            st.image(apply_mask_overlay(source, combined_mask), caption="Red = selected by the combined mask", use_container_width=True)
 
         m_exp = st.slider("Target Exposure", 0.5, 1.5, 1.0, 0.01, key="m-texp")
         m_cont = st.slider("Target Contrast", 0.5, 1.5, 1.0, 0.01, key="m-tcont")
         m_sat = st.slider("Target Saturation", 0.0, 2.0, 1.0, 0.01, key="m-tsat")
-        processor.apply_masked_adjustments(combined_mask, m_exp, m_cont, m_sat)
 
     # TAB 6: PORTRAIT RETOUCHING
     with tab_portrait:
@@ -431,8 +425,6 @@ with tools_col:
         )
         detected_faces = detect_faces(source)
         st.caption(f"👤 Detected faces: {len(detected_faces)}")
-        if p_smooth > 0:
-            processor.image = smooth_skin(processor.image, p_smooth)
 
     # TAB: CROP & ASPECT RATIO
     with tab_crop:
@@ -441,7 +433,7 @@ with tools_col:
         if crop_choice != "Original":
             crop_w_ratio, crop_h_ratio = ASPECT_RATIOS[crop_choice]
             st.caption(f"Center-cropping to {crop_choice} ({crop_w_ratio}:{crop_h_ratio}).")
-            processor.fit_aspect_ratio(crop_w_ratio, crop_h_ratio)
+            aspect_code = f"{crop_w_ratio}:{crop_h_ratio}"
         else:
             st.caption("No crop applied — showing the full frame.")
 
@@ -531,12 +523,44 @@ with tools_col:
             from app.diagnostics import check_environment
             st.dataframe([{"check": c.name, "status": c.status, "message": c.message} for c in check_environment()], use_container_width=True)
 
-    # Every tab above runs on every Streamlit rerun regardless of which tab is visible, and each
-    # one applies its edits onto `processor` in place (Tone -> Color -> Detail -> Layers -> Masks
-    # -> Portrait -> Crop). Reading `processor.image` here, once, after all tabs have executed, is
-    # what makes the canvas preview and the exported file reflect every tab's edits together instead
-    # of whichever tab happened to run last.
-    edited_image = processor.image
+    # Every tab above runs on every Streamlit rerun regardless of which tab is visible, and none of
+    # them mutate `processor` anymore -- they only capture control values. The actual pixel pipeline
+    # (Tone -> Color -> Detail -> Layers -> Masks -> Portrait -> Crop, matching the tab order above)
+    # runs once, here, on app/backend.py -- see that module's process_image() for the mirrored order.
+    options = {
+        "exposure": exp_val,
+        "contrast": cont_val,
+        "highlights": high_val,
+        "shadows": shad_val,
+        "preset": preset_choice,
+        "temperature": temp_val,
+        "tint": tint_val,
+        "saturation": sat_val,
+        "curve": [(0, c_black), (64, c_low), (128, c_mid), (192, c_high), (255, c_white)] if use_curve else None,
+        "texture": text_val,
+        "clarity": clar_val,
+        "denoise": denoise_val,
+        "sharpen": sharp_en,
+        "layer_opacity": l_opacity,
+        "layer_blend": l_blend,
+        "mask_exposure": m_exp,
+        "mask_contrast": m_cont,
+        "mask_saturation": m_sat,
+        "portrait_smoothing": p_smooth,
+        "aspect": aspect_code,
+    }
+
+    local_mask_bytes = None
+    if st.session_state.mask_layers:
+        mask_buffer = io.BytesIO()
+        combined_mask.save(mask_buffer, format="PNG")
+        local_mask_bytes = mask_buffer.getvalue()
+
+    try:
+        edited_image = _cached_process_via_backend(upload_bytes, upload_name, options, local_mask_bytes, layer_bytes)
+    except RuntimeError as error:
+        st.error(f"⚠️ {error}")
+        st.stop()
 
 with canvas_col:
     # Canvas Header Bar
