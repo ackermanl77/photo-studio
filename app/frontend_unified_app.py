@@ -258,15 +258,28 @@ def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, in
 def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, int]]) -> str:
     """A draggable RGB tone curve: an inline SVG with five points, each vertically draggable
     within its own [min, max] (matching the five sliders below it -- Blacks/Shadows/Midtones/
-    Highlights/Whites). Dragging only updates the curve's own SVG locally; only on release does
-    it write the new value into the real slider (an `<input type="range">` inside the
-    `st.container(key="curve-points")` wrapper below) via the same native-value-setter trick used
-    elsewhere, then dispatches `input`/`change` so Streamlit picks it up and reruns. Committing
-    only on release (not on every pointermove) matters because a Streamlit rerun replaces this
-    whole iframe -- doing it mid-drag would tear down the drag gesture. Also clicks the "Enable
-    RGB Curve" checkbox on first drag if it isn't already checked, matching how a curve panel in
-    a professional editor implicitly turns itself on when touched. No component library
-    dependency, same approach as `_before_after_html` above.
+    Highlights/Whites). Dragging only updates the curve's own SVG locally; only on release does it
+    commit.
+
+    Earlier version of this function wrote the dragged value directly into the real
+    `<input type="range">` via a native-value-setter trick, then dispatched `input`/`change`.
+    Confirmed live (by comparing the actual rendered image before/after, not just the visible
+    slider label) that this does NOT reliably reach Streamlit's backend for range sliders in this
+    Streamlit version -- the slider's own displayed number updates as a client-side echo, but the
+    value the script actually sees on its next run can still be the old one, so a dragged curve
+    could silently fail to affect the photo. Real OS-level key/mouse input (a genuine, trusted
+    event) does commit reliably; a script-dispatched one does not, for this specific widget type
+    (button clicks and a text_area's Ctrl+Enter were confirmed to work synthetically, just not a
+    slider's input/change).
+
+    So instead of touching the sliders at all, commit writes the whole 5-point curve as JSON into
+    a hidden `st.text_area` (`st.container(key="curve-hidden")`, same Ctrl+Enter trick used by
+    `_paint_editor_html`, confirmed reliable) using the RECIPE_WIDGET_KEYS names
+    (curve_black/curve_shadows/curve_mid/curve_highlights/curve_white/curve_enabled). Python reads
+    it and stores it in `st.session_state["_pending_restore"]` -- the exact same "write before any
+    widget instantiates, then rerun" mechanism Undo/Redo/Reset already use to update a slider's
+    value from outside the widget itself, which sidesteps the whole reliability question since it
+    never depends on a script-dispatched DOM event reaching a slider at all.
     """
     margin_left, margin_top, plot_size = 34, 12, 210
     svg_w, svg_h = margin_left + plot_size + 12, margin_top + plot_size + 12
@@ -315,19 +328,23 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
             c.setAttribute('cx', px); c.setAttribute('cy', py);
           }});
         }}
-        function commit(idx, value) {{
+        function commit() {{
           try {{
-            const container = window.parent.document.querySelector('.st-key-curve-points');
+            const payload = JSON.stringify({{
+              curve_black: points[0][1], curve_shadows: points[1][1], curve_mid: points[2][1],
+              curve_highlights: points[3][1], curve_white: points[4][1], curve_enabled: true,
+            }});
+            const container = window.parent.document.querySelector('.st-key-curve-hidden');
             if (!container) return;
-            const inputs = container.querySelectorAll('input[type="range"]');
-            const target = inputs[idx];
-            if (!target) return;
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            setter.call(target, String(value));
-            target.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            target.dispatchEvent(new Event('change', {{ bubbles: true }}));
-            const checkbox = container.querySelector('input[type="checkbox"]');
-            if (checkbox && !checkbox.checked) {{ checkbox.click(); }}
+            const textarea = container.querySelector('textarea');
+            if (!textarea) return;
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            textarea.focus();
+            setter.call(textarea, payload);
+            textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            textarea.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
+            textarea.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
+            textarea.blur();
           }} catch (e) {{}}
         }}
         let dragIdx = null;
@@ -351,9 +368,8 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
         }});
         function endDrag() {{
           if (dragIdx === null) return;
-          const idx = dragIdx, value = points[idx][1];
           dragIdx = null;
-          commit(idx, value);
+          commit();
         }}
         svg.addEventListener('pointerup', endDrag);
         svg.addEventListener('pointerleave', endDrag);
@@ -733,9 +749,11 @@ footer { visibility: hidden; }
 }
 
 /* Holds the real <textarea> the on-canvas paint editor's "Add to selections" button writes a
-   base64 mask PNG into (see _paint_editor_html / _render_selection_stack's "Painted" branch) --
-   a plumbing detail, not something the user should ever see or type into directly. */
-.st-key-m-paint-hidden, .st-key-rm-paint-hidden {
+   base64 mask PNG into (see _paint_editor_html / _render_selection_stack's "Painted" branch), and
+   the one the tone curve editor's drag-commit writes curve-point JSON into (see
+   _curve_editor_html / the RGB Tone Curve expander) -- plumbing details, not something the user
+   should ever see or type into directly. */
+.st-key-m-paint-hidden, .st-key-rm-paint-hidden, .st-key-curve-hidden {
     display: none !important;
 }
 </style>
@@ -929,6 +947,21 @@ with st.container(key="workspace-split"):
                     (255, st.session_state.get("c-p4", 255)),
                 ]
                 components.html(_curve_editor_html(preview_points, curve_bounds), height=246)
+                with st.container(key="curve-hidden"):
+                    curve_commit = st.text_area("Curve commit data", key="curve-commit-data", label_visibility="collapsed")
+                # See _curve_editor_html's docstring: a script-dispatched event on a range slider
+                # doesn't reliably commit in this Streamlit version, so the drag handler writes
+                # here instead and this reuses the same "set _pending_restore, then rerun" path
+                # Undo/Redo/Reset already use to update a slider from outside the widget itself.
+                if curve_commit and curve_commit != st.session_state.get("curve-committed"):
+                    try:
+                        parsed = json.loads(curve_commit)
+                    except (ValueError, TypeError):
+                        parsed = None
+                    if isinstance(parsed, dict):
+                        st.session_state["curve-committed"] = curve_commit
+                        st.session_state["_pending_restore"] = parsed
+                        st.rerun()
                 with st.container(key="curve-points"):
                     use_curve = st.checkbox("Enable RGB Curve", value=False, key="c-curve-en")
                     c_black = st.slider("Blacks", 0, 64, 0, key="c-p0")
