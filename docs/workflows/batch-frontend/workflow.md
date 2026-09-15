@@ -1,5 +1,7 @@
 # Frontend Batch Workflow
 
+> **Histórico:** los pasos de abajo no coinciden con la UI actual. No hay `st.sidebar` en la app (`frontend_unified_app.py` fija `initial_sidebar_state="collapsed"` y nunca lo usa) — Batch Processor es una opción dentro de la pestaña "☰ Batch & Library", con un botón "Run Batch" y luego "Download ZIP" (no "Download edited batch"), y no tiene control de dimensiones máximas. Ver `docs/PROJECT_STATUS.md` para el flujo vigente.
+
 ## Goal
 
 Apply the selected preset to multiple photos and download one ZIP archive from the visual frontend.

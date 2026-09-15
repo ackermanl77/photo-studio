@@ -1,5 +1,7 @@
 # Advanced Masking Workflow
 
+> **Histórico:** este archivo describe un pincel de pintar/borrar (brush size, brush opacity, feather) que ya no existe. Las pestañas ◉ Masks y 🩹 Repair actuales (`app/frontend_unified_app.py::_render_selection_stack()`) usan selecciones paramétricas con nombre (Luminance, Color, gradiente horizontal/vertical, Radial), no un lienzo de pintura — cada selección tiene invertir, suavizado de borde y (solo en Masks) opacidad, en vez de un pincel. Ver `docs/PROJECT_STATUS.md` para el comportamiento vigente.
+
 ## Goal
 
 Create usable masks directly in the frontend for local adjustments or object removal.

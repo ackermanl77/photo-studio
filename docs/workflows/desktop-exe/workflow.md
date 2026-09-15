@@ -32,7 +32,7 @@ The release script disables UPX, creates a compressed archive (`PhotoStudio-<ver
 
 ## Run
 
-Double-click `PhotoStudio.exe` inside the `PhotoStudio-<version>-Windows` folder produced above. It opens a native Photo Studio window and starts the embedded Streamlit frontend (`app/frontend_unified_app.py`) on a loopback port. It does **not** start the Flask backend (`app/backend.py`) — the unified frontend processes images in-process by calling `PhotoProcessor` directly, and never calls the Flask API. See "Architecture" in `docs/PROJECT_STATUS.md`.
+Double-click `PhotoStudio.exe` inside the `PhotoStudio-<version>-Windows` folder produced above. It opens a native Photo Studio window and starts both the Flask processing backend (`app/backend.py`) and the embedded Streamlit frontend (`app/frontend_unified_app.py`) as child processes, waiting for the backend's `/health` check before starting the frontend — the unified frontend now sends its whole edit pipeline to the backend over HTTP rather than calling `PhotoProcessor` in-process. (This is a change from an earlier version of this doc, which had it backwards.) See "Architecture" in `docs/PROJECT_STATUS.md`.
 
 The loopback frontend service is an implementation detail and is not shown as a browser tab to the user.
 

@@ -1,5 +1,7 @@
 # Edit History and Recipes Workflow
 
+> **Histórico:** no existen botones "Save edit recipe" / "Load edit recipe" como descarga/carga independiente de JSON. `Undo`/`Redo` sí existen (siempre visibles en la barra sobre el canvas). Persistir el recipe hoy se hace con "💾 Save Project", que empaqueta el recipe junto con la imagen fuente y la capa/layer en un archivo `.photoproject` (`app.project_bundle.ProjectBundle`) — no un JSON de recipe suelto. Ver `docs/PROJECT_STATUS.md` para el flujo vigente.
+
 ## Goal
 
 Keep edits reversible and reusable without changing the original upload.
