@@ -510,9 +510,10 @@ def test_rgb_curve_defaults_to_identity_and_is_off():
 
 
 def test_rgb_curve_changes_the_final_image_once_enabled():
-    """The draggable curve editor (a components.html() canvas) drives these same sliders via a
-    JS DOM trick that AppTest can't exercise -- this instead verifies the Python-side wiring the
-    drag ultimately depends on: enabling the curve and moving a point reaches the final image."""
+    """The draggable curve editor (a components.html() canvas) doesn't touch these sliders
+    directly -- it writes into a hidden text_area instead (see the next test) -- but this still
+    verifies the Python-side wiring the recipe ultimately depends on: enabling the curve and
+    moving a point reaches the final image, regardless of how that value got set."""
     at = run_with_uploaded_image()
     before = canvas_hash(at)
 
@@ -521,6 +522,31 @@ def test_rgb_curve_changes_the_final_image_once_enabled():
     at.run(timeout=30)
 
     assert not at.exception
+    assert canvas_hash(at) != before
+
+
+def test_rgb_curve_drag_commit_via_hidden_field_changes_the_final_image():
+    """Regression test for a real bug: the curve editor originally wrote a dragged point straight
+    into the real <input type="range"> via a native-value-setter + dispatch('input'/'change')
+    trick. Confirmed live (comparing the actual rendered image, not just the slider's displayed
+    number) that this does NOT reliably reach Streamlit's backend for range sliders in this
+    Streamlit version -- the number visibly updates as a client-side echo while the value the
+    script actually sees next run can still be the old one. Fixed by writing the whole curve as
+    JSON into a hidden st.text_area instead and routing it through the same
+    st.session_state["_pending_restore"] + st.rerun() mechanism Undo/Redo/Reset already use --
+    this test drives exactly that hidden field, the same thing the editor's JS does on drag
+    release, and confirms it reaches the final image."""
+    at = run_with_uploaded_image()
+    before = canvas_hash(at)
+
+    at.text_area(key="curve-commit-data").set_value(
+        json.dumps({"curve_black": 0, "curve_shadows": 64, "curve_mid": 180, "curve_highlights": 192, "curve_white": 255, "curve_enabled": True})
+    )
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.checkbox(key="c-curve-en").value is True
+    assert at.slider(key="c-p2").value == 180
     assert canvas_hash(at) != before
 
 
