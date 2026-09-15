@@ -7,7 +7,7 @@ from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
-from PIL import Image, ImageDraw
+from PIL import Image, ImageCms, ImageDraw
 
 from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, radial_mask, soften_mask
 from app.backend_client import ensure_backend_running, process_via_backend
@@ -21,7 +21,7 @@ from app.major_features import PhotoCatalog
 from app.presets import PRESETS, apply_preset
 from app.preset_exchange import export_presets, import_presets
 from app.portrait_tools import detect_faces
-from app.professional_color import HSL_BAND_ORDER
+from app.professional_color import HSL_BAND_ORDER, gamut_warning_overlay
 from app.lens_corrections import LENS_PROFILES
 from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
@@ -1091,6 +1091,27 @@ with st.container(key="workspace-split"):
                     c_high = st.slider("Highlights", 128, 255, 192, key="c-p3")
                     c_white = st.slider("Whites", 192, 255, 255, key="c-p4")
                 st.caption("Drag a point on the curve, or use the sliders below for exact values.")
+
+            with st.expander("🎯 Soft Proof: Gamut Warning", expanded=False):
+                source_icc_bytes = source.info.get("icc_profile")
+                if not source_icc_bytes:
+                    st.caption("This photo has no embedded color profile to check against, so there's nothing to proof.")
+                else:
+                    st.caption(
+                        "Highlights, in magenta, pixels that get clipped when this app's own sRGB pipeline converts "
+                        "the photo's embedded color profile. Not a simulation of a specific printer/press profile -- "
+                        "there's no profile database bundled -- just where this app's own color management can't "
+                        "fully represent the source."
+                    )
+                    if st.checkbox("Show out-of-gamut pixels", key="gamut-warning-toggle"):
+                        try:
+                            st.image(
+                                gamut_warning_overlay(source, source_icc_bytes),
+                                caption="Magenta = clipped when converted to this app's sRGB working space",
+                                use_container_width=True,
+                            )
+                        except (OSError, ValueError, ImageCms.PyCMSError):
+                            st.caption("Could not read this photo's embedded color profile.")
 
         # TAB 3: DETAIL & SHARPNESS
         with tab_detail:
