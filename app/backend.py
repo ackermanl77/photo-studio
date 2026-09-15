@@ -101,6 +101,8 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
         vignette_amount=_number(options, "lens_vignette_amount", 0.0),
         vignette_midpoint=_number(options, "lens_vignette_midpoint", 50.0),
         chromatic_aberration=_number(options, "lens_chromatic_aberration", 0.0),
+        perspective_vertical=_number(options, "lens_perspective_v", 0.0),
+        perspective_horizontal=_number(options, "lens_perspective_h", 0.0),
     )
 
     # Tone
@@ -116,6 +118,7 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     # Color
     processor.apply_temperature_tint(_number(options, "temperature", 0), _number(options, "tint", 0))
     processor.apply_saturation(_number(options, "saturation", 1.0))
+    processor.apply_vibrance(_number(options, "vibrance", 0.0))
     hsl_bands = options.get("hsl_bands")
     if hsl_bands:
         processor.apply_hsl_mixer(hsl_bands)

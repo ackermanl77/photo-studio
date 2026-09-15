@@ -1,7 +1,7 @@
 import numpy as np
 from PIL import Image, ImageDraw
 
-from app.lens_corrections import LENS_PROFILES, apply_lens_corrections, correct_chromatic_aberration, correct_distortion, correct_vignette
+from app.lens_corrections import LENS_PROFILES, apply_lens_corrections, correct_chromatic_aberration, correct_distortion, correct_perspective, correct_vignette
 
 
 def _grid_image(size=(80, 80)) -> Image.Image:
@@ -88,3 +88,67 @@ def test_lens_profiles_have_the_expected_four_fields_each():
     for name, values in LENS_PROFILES.items():
         assert set(values) == {"distortion", "vignette_amount", "vignette_midpoint", "chromatic_aberration"}
     assert LENS_PROFILES["None"] == {"distortion": 0, "vignette_amount": 0, "vignette_midpoint": 50, "chromatic_aberration": 0}
+
+
+def test_correct_perspective_is_a_no_op_at_zero():
+    image = _grid_image()
+    assert correct_perspective(image, 0, 0) is image
+
+
+def test_correct_perspective_positive_vertical_narrows_the_top_more_than_the_bottom():
+    """Empirically, a homography that only moves 2 of a quadrilateral's 4 corners (as
+    correct_perspective's vertical>0 case does, keeping the bottom two fixed) still nudges the
+    "fixed" edge a little too -- projective transforms don't leave a line pointwise-fixed just
+    because both its endpoints are fixed. So this checks the intended *asymmetry* (top changes
+    more than bottom) rather than asserting the bottom is untouched."""
+    image = _grid_image((100, 100))
+    result = correct_perspective(image, vertical=60, horizontal=0)
+    before = np.asarray(image, dtype=np.float32)
+    after = np.asarray(result, dtype=np.float32)
+    top_change = np.abs(after[0:3, :] - before[0:3, :]).mean()
+    bottom_change = np.abs(after[-3:, :] - before[-3:, :]).mean()
+    assert top_change > bottom_change
+
+
+def test_correct_perspective_negative_vertical_narrows_the_bottom_more_than_the_top():
+    image = _grid_image((100, 100))
+    result = correct_perspective(image, vertical=-60, horizontal=0)
+    before = np.asarray(image, dtype=np.float32)
+    after = np.asarray(result, dtype=np.float32)
+    top_change = np.abs(after[0:3, :] - before[0:3, :]).mean()
+    bottom_change = np.abs(after[-3:, :] - before[-3:, :]).mean()
+    assert bottom_change > top_change
+
+
+def test_correct_perspective_positive_horizontal_narrows_the_left_more_than_the_right():
+    image = _grid_image((100, 100))
+    result = correct_perspective(image, vertical=0, horizontal=60)
+    before = np.asarray(image, dtype=np.float32)
+    after = np.asarray(result, dtype=np.float32)
+    left_change = np.abs(after[:, 0:3] - before[:, 0:3]).mean()
+    right_change = np.abs(after[:, -3:] - before[:, -3:]).mean()
+    assert left_change > right_change
+
+
+def test_correct_perspective_negative_horizontal_narrows_the_right_more_than_the_left():
+    image = _grid_image((100, 100))
+    result = correct_perspective(image, vertical=0, horizontal=-60)
+    before = np.asarray(image, dtype=np.float32)
+    after = np.asarray(result, dtype=np.float32)
+    left_change = np.abs(after[:, 0:3] - before[:, 0:3]).mean()
+    right_change = np.abs(after[:, -3:] - before[:, -3:]).mean()
+    assert right_change > left_change
+
+
+def test_correct_perspective_combines_vertical_and_horizontal():
+    image = _grid_image((100, 100))
+    combined = correct_perspective(image, vertical=50, horizontal=50)
+    only_vertical = correct_perspective(image, vertical=50, horizontal=0)
+    assert not np.array_equal(np.asarray(combined), np.asarray(only_vertical))
+
+
+def test_apply_lens_corrections_includes_perspective():
+    image = _grid_image((60, 60))
+    result = apply_lens_corrections(image, perspective_vertical=50)
+    only_perspective = correct_perspective(image, 50, 0)
+    assert np.array_equal(np.asarray(result), np.asarray(only_perspective))
