@@ -297,6 +297,88 @@ def test_mask_target_sliders_disabled_until_an_enabled_mask_layer_exists():
     assert not at.slider(key="m-tsat").disabled
 
 
+def test_removing_a_mask_layer_does_not_corrupt_the_remaining_layers():
+    """Regression test for a real bug found in review: with three layers A/B/C, each layer's
+    widgets used to be keyed by its list *index* (e.g. "m-sf-1"). Removing the middle layer (B)
+    shifts C from index 2 to index 1 on the next run -- so C's widgets got created under B's old
+    key, which still held B's stale session_state value, silently overwriting C's own soften
+    value with B's. Fixed by keying each layer's widgets by a stable per-layer id instead of its
+    position in the list."""
+    at = run_with_uploaded_image(color=(80, 80, 80))
+
+    for _ in range(3):
+        at.selectbox(key="m-new-kind").set_value("Radial")
+        at.run(timeout=30)
+        at.button(key="m-add-btn").click()
+        at.run(timeout=30)
+
+    layer_a, layer_b, layer_c = at.session_state["mask_layers"]
+    at.slider(key=f"m-sf-{layer_a['id']}").set_value(5)
+    at.run(timeout=30)
+    at.slider(key=f"m-sf-{layer_b['id']}").set_value(15)
+    at.run(timeout=30)
+    at.slider(key=f"m-sf-{layer_c['id']}").set_value(25)
+    at.run(timeout=30)
+
+    at.button(key=f"m-rm-{layer_b['id']}").click()
+    at.run(timeout=30)
+    at.run(timeout=30)  # let the deferred rerun settle
+
+    assert not at.exception
+    remaining_ids = {layer["id"] for layer in at.session_state["mask_layers"]}
+    assert remaining_ids == {layer_a["id"], layer_c["id"]}
+    assert at.slider(key=f"m-sf-{layer_a['id']}").value == 5
+    assert at.slider(key=f"m-sf-{layer_c['id']}").value == 25
+    softens = {layer["id"]: layer["soften"] for layer in at.session_state["mask_layers"]}
+    assert softens[layer_a["id"]] == 5
+    assert softens[layer_c["id"]] == 25
+
+
+def test_adding_a_mask_selection_does_not_reset_canvas_view_settings():
+    """Regression test for a real bug found in review: the deferred-rerun consume check for
+    _request_rerun() used to sit before canvas_col rendered, so any _request_rerun() call from a
+    tab body (like adding a mask selection here) triggered st.rerun() before canvas_col's own
+    widgets -- zoom, split view, pan, export format/quality -- were instantiated that pass,
+    causing Streamlit to garbage-collect and reset them. Fixed by moving the consume check to the
+    very end of the script, after canvas_col."""
+    at = run_with_uploaded_image()
+    at.selectbox(key="cv-zoom").set_value(2.0)
+    at.checkbox(key="cv-split").set_value(True)
+    at.run(timeout=30)
+    assert at.selectbox(key="cv-zoom").value == 2.0
+    assert at.checkbox(key="cv-split").value is True
+
+    at.selectbox(key="m-new-kind").set_value("Radial")
+    at.run(timeout=30)
+    at.button(key="m-add-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["mask_layers"], "expected the mask layer to be added"
+    assert at.selectbox(key="cv-zoom").value == 2.0
+    assert at.checkbox(key="cv-split").value is True
+
+
+def test_undo_button_does_not_reset_canvas_view_settings():
+    """Same bug class as test_adding_a_mask_selection_does_not_reset_canvas_view_settings, but for
+    canvas_col's own Undo button, which used to call st.rerun() directly -- aborting the script
+    before the zoom/split-view/pan/export widgets defined right after it in canvas_col were
+    instantiated that pass."""
+    at = run_with_uploaded_image()
+    at.slider(key="t-exp").set_value(1.2)
+    at.run(timeout=30)
+    at.selectbox(key="cv-zoom").set_value(2.0)
+    at.run(timeout=30)
+    assert at.slider(key="t-exp").value == 1.2
+
+    at.button(key="hist-undo-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="t-exp").value == 1.0
+    assert at.selectbox(key="cv-zoom").value == 2.0
+
+
 def test_preset_thumbnails_render_for_every_preset_option():
     at = run_with_uploaded_image()
 
@@ -671,6 +753,53 @@ def test_lens_corrections_are_included_in_reset():
     assert at.slider(key="lens-distortion").value == 0
 
 
+def test_crop_preview_reflects_lens_distortion_correction():
+    """Regression test for a real bug found in review: the free-form Crop preview used to draw
+    the crop box on the raw, uncorrected `source` image, but app/backend.py applies Lens
+    corrections (a real geometric warp) before Crop -- so a crop box framed against the
+    uncorrected preview could land on the wrong region once the backend actually corrects the
+    geometry first. Fixed by basing the preview on `_lens_corrected_source()` instead. A
+    zero-value baseline is compared against a large distortion value on the same crop box; if the
+    preview weren't actually re-warped, the two would render identical pixels."""
+
+    def crop_preview_bytes(at):
+        matches = [img for img in at.image if img.captions and img.captions[0].startswith("Crop preview:")]
+        assert matches, "expected the crop preview image to be rendered"
+        return matches[0].value[0]
+
+    at = run_with_uploaded_image(size=(40, 30))
+    at.selectbox(key="crop-aspect").set_value("Free-form")
+    at.run(timeout=30)
+    baseline = crop_preview_bytes(at)
+
+    at.slider(key="lens-distortion").set_value(80)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert crop_preview_bytes(at) != baseline
+
+
+def test_mask_overlay_preview_reflects_lens_distortion_correction():
+    """Same bug class as test_crop_preview_reflects_lens_distortion_correction, but for the
+    Masks tab's "Preview combined mask overlay" debug view, which used to build the overlay
+    from the raw `source` regardless of the Lens tab's sliders."""
+    at = run_with_uploaded_image(color=(80, 80, 80))
+    at.selectbox(key="m-new-kind").set_value("Radial")
+    at.run(timeout=30)
+    at.button(key="m-add-btn").click()
+    at.run(timeout=30)
+    at.checkbox(key="m-preview-overlay").set_value(True)
+    at.run(timeout=30)
+    baseline = [img.value[0] for img in at.image if img.captions and img.captions[0] == "Red = selected by the combined mask"][0]
+
+    at.slider(key="lens-distortion").set_value(80)
+    at.run(timeout=30)
+
+    assert not at.exception
+    overlay_after = [img.value[0] for img in at.image if img.captions and img.captions[0] == "Red = selected by the combined mask"][0]
+    assert overlay_after != baseline
+
+
 def test_rgb_curve_defaults_to_identity_and_is_off():
     at = run_with_uploaded_image()
 
@@ -787,3 +916,29 @@ def test_library_next_and_prev_cycle_through_records(monkeypatch, tmp_path):
     at.button(key="lib-prev-btn").click()
     at.run(timeout=30)
     assert any("1 / 2" in c.value for c in at.caption)
+
+
+def test_library_next_button_does_not_reset_canvas_view_settings(monkeypatch, tmp_path):
+    """Regression test for a real bug found in review: Library Catalog's Prev/Next/rating/Clear/
+    Reject buttons used to call st.rerun() directly instead of _request_rerun() -- since this tab
+    renders before canvas_col, that aborted the script before canvas_col's zoom/split-view/pan/
+    export widgets were instantiated that pass, resetting them."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    at = run_with_uploaded_image()
+    at.selectbox(key="cv-zoom").set_value(2.0)
+    at.run(timeout=30)
+    assert at.selectbox(key="cv-zoom").value == 2.0
+
+    at.radio[0].set_value("Library Catalog")
+    at.session_state["records"] = [
+        {"path": "a.jpg", "name": "a.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1},
+        {"path": "b.jpg", "name": "b.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1},
+    ]
+    at.run(timeout=30)
+
+    at.button(key="lib-next-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("2 / 2" in c.value for c in at.caption)
+    assert at.selectbox(key="cv-zoom").value == 2.0
