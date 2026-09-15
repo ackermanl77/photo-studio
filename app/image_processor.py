@@ -8,7 +8,7 @@ from PIL import Image, ImageEnhance, ImageFilter
 
 from app.dehaze import apply_dehaze
 from app.lens_corrections import apply_lens_corrections
-from app.professional_color import apply_color_grading, apply_hsl_mixer
+from app.professional_color import apply_color_grading, apply_hsl_mixer, apply_vibrance
 from app.raw_import import open_image
 
 
@@ -62,6 +62,10 @@ class PhotoProcessor:
         self.image = apply_hsl_mixer(self.image, adjustments)
         return self
 
+    def apply_vibrance(self, amount: float = 0.0) -> "PhotoProcessor":
+        self.image = apply_vibrance(self.image, amount)
+        return self
+
     def apply_color_grading(
         self,
         shadows_hue: float = 0.0, shadows_intensity: float = 0.0,
@@ -85,8 +89,13 @@ class PhotoProcessor:
         vignette_amount: float = 0.0,
         vignette_midpoint: float = 50.0,
         chromatic_aberration: float = 0.0,
+        perspective_vertical: float = 0.0,
+        perspective_horizontal: float = 0.0,
     ) -> "PhotoProcessor":
-        self.image = apply_lens_corrections(self.image, distortion, vignette_amount, vignette_midpoint, chromatic_aberration)
+        self.image = apply_lens_corrections(
+            self.image, distortion, vignette_amount, vignette_midpoint, chromatic_aberration,
+            perspective_vertical, perspective_horizontal,
+        )
         return self
 
     def apply_curves(self, points: list[tuple[int, int]]) -> "PhotoProcessor":

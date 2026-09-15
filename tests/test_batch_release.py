@@ -29,6 +29,34 @@ def test_batch_zip_contains_rendered_files(tmp_path):
     assert archive.namelist() == ["one-edited.jpg"]
 
 
+def test_process_files_applies_a_saved_recipe_across_every_photo(tmp_path):
+    """The `recipe` parameter (a saved custom preset applied to a batch -- "sync settings" across
+    a shoot) takes priority over the simpler named `preset`, and actually changes the output --
+    routed through app.backend.process_image() rather than the plain apply_preset() path."""
+    first = tmp_path / "one.jpg"
+    second = tmp_path / "two.jpg"
+    Image.new("RGB", (20, 20), (100, 100, 100)).save(first)
+    Image.new("RGB", (20, 20), (100, 100, 100)).save(second)
+    recipe = {"exposure": 1.4, "vibrance": 60}
+
+    baseline, _ = process_files([first], profile="Web")
+    with_recipe, report = process_files([first, second], profile="Web", recipe=recipe)
+
+    assert len(with_recipe) == 2
+    assert all(item.status == "ok" for item in report)
+    assert baseline[0][1] != with_recipe[0][1]
+
+
+def test_process_files_recipe_takes_priority_over_named_preset(tmp_path):
+    source = tmp_path / "one.jpg"
+    Image.new("RGB", (20, 20), (100, 100, 100)).save(source)
+
+    with_recipe, report = process_files([source], preset="travel-clean", profile="Web", recipe={"exposure": 1.3})
+
+    assert report[0].status == "ok"
+    assert len(with_recipe) == 1
+
+
 def test_a_bad_name_template_fails_only_that_file_not_the_whole_batch(tmp_path):
     """Regression test: render_name()'s str.format() raises KeyError for an unknown field (or
     IndexError for a stray positional placeholder) in a caller-supplied name_template. Before this

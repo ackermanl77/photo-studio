@@ -84,19 +84,78 @@ def correct_chromatic_aberration(image: Image.Image, amount: float) -> Image.Ima
     return Image.fromarray(corrected, mode="RGB")
 
 
+def _perspective_warp(array: np.ndarray, src: np.ndarray, dst: np.ndarray) -> np.ndarray:
+    height, width = array.shape[:2]
+    matrix = cv2.getPerspectiveTransform(src, dst)
+    return cv2.warpPerspective(array, matrix, (width, height), borderMode=cv2.BORDER_REPLICATE)
+
+
+def correct_perspective(image: Image.Image, vertical: float = 0.0, horizontal: float = 0.0) -> Image.Image:
+    """Perspective/keystone correction for converging lines -- darktable's rotate-and-perspective
+    module ("corrects converging lines by warping the image so lines in question become parallel
+    to the image frame"), RawTherapee's/Lightroom's Vertical/Horizontal Perspective sliders. Unlike
+    the radial corrections above, this needs no lens/camera data at all -- it's purely a function of
+    the shooting angle, so there's no companion LENS_PROFILES entry for it (a keystone-corrected
+    profile default wouldn't mean anything; every photo needs its own amount).
+
+    `vertical` -100..100 corrects converging vertical lines (e.g. a building shot from below, where
+    verticals lean inward toward the top): positive narrows the top edge toward the bottom edge's
+    width, negative narrows the bottom edge instead. `horizontal` -100..100 does the same for
+    converging horizontal lines (a wall or shelf shot at an angle): positive narrows the left edge's
+    height toward the right edge's, negative narrows the right edge instead. Applied as two
+    independent single-axis perspective warps (cv2.getPerspectiveTransform/warpPerspective) one
+    after the other rather than solving one combined quad -- easier to reason about and test each
+    axis in isolation, and the two are visually independent enough in practice that composing them
+    sequentially is indistinguishable from a single combined solve. 0/0 is a no-op. The maximum
+    shift at +-100 is capped at 30% of the corrected edge's own length so even the extreme end of
+    the slider stays a recognizable keystone correction rather than degenerating toward a sliver.
+    """
+    vertical = max(-100.0, min(100.0, float(vertical)))
+    horizontal = max(-100.0, min(100.0, float(horizontal)))
+    if not vertical and not horizontal:
+        return image
+    array = np.array(image.convert("RGB"))
+    height, width = array.shape[:2]
+    src = np.float32([[0, 0], [width, 0], [width, height], [0, height]])
+
+    if vertical:
+        shift = abs(vertical) / 100.0 * (width * 0.3)
+        if vertical > 0:
+            dst = np.float32([[shift, 0], [width - shift, 0], [width, height], [0, height]])
+        else:
+            dst = np.float32([[0, 0], [width, 0], [width - shift, height], [shift, height]])
+        array = _perspective_warp(array, src, dst)
+
+    if horizontal:
+        shift = abs(horizontal) / 100.0 * (height * 0.3)
+        if horizontal > 0:
+            dst = np.float32([[0, shift], [width, 0], [width, height], [0, height - shift]])
+        else:
+            dst = np.float32([[0, 0], [width, shift], [width, height - shift], [0, height]])
+        array = _perspective_warp(array, src, dst)
+
+    return Image.fromarray(array, mode="RGB")
+
+
 def apply_lens_corrections(
     image: Image.Image,
     distortion: float = 0.0,
     vignette_amount: float = 0.0,
     vignette_midpoint: float = 50.0,
     chromatic_aberration: float = 0.0,
+    perspective_vertical: float = 0.0,
+    perspective_horizontal: float = 0.0,
 ) -> Image.Image:
-    """Applies whichever of the three corrections are non-zero, in the order a real lens-correction
-    workflow would: geometric distortion first (so chromatic aberration's radial reference matches
-    the now-corrected geometry), then chromatic aberration, then vignette (pure brightness, order-
-    independent relative to the other two)."""
+    """Applies whichever corrections are non-zero, in the order a real lens-correction workflow
+    would: geometric distortion first, then perspective/keystone (another geometric warp -- doing
+    it right after distortion means it operates on already-straightened lines, matching how a real
+    workflow corrects barrel/pincushion before worrying about converging verticals), then chromatic
+    aberration (radial, assumes the now-corrected geometry), then vignette (pure brightness, order-
+    independent relative to the others)."""
     if distortion:
         image = correct_distortion(image, distortion)
+    if perspective_vertical or perspective_horizontal:
+        image = correct_perspective(image, perspective_vertical, perspective_horizontal)
     if chromatic_aberration:
         image = correct_chromatic_aberration(image, chromatic_aberration)
     if vignette_amount:

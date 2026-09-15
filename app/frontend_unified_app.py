@@ -22,27 +22,18 @@ from app.major_features import PhotoCatalog
 from app.presets import PRESETS, apply_preset
 from app.preset_exchange import export_presets, import_presets
 from app.portrait_tools import detect_faces
-from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS, clipping_warning_overlay, gamut_warning_overlay
+from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS, clipping_warning_overlay, estimate_white_balance, gamut_warning_overlay
 from app.lens_corrections import LENS_PROFILES, apply_lens_corrections
 from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
-
-# Aspect ratios offered on the Crop tab (width, height).
-ASPECT_RATIOS = {
-    "1:1 Square": (1, 1),
-    "4:5 Portrait": (4, 5),
-    "5:4 Landscape": (5, 4),
-    "3:2 Landscape": (3, 2),
-    "16:9 Widescreen": (16, 9),
-    "9:16 Story": (9, 16),
-}
+from app.recipe_options import ASPECT_RATIOS
 
 # Maps a JSON-serializable recipe key to the session_state key of the widget that reads/writes it.
 # Shared by Undo/Redo (EditHistory snapshots) and Save/Load Project (ProjectBundle.recipe) so both
 # features capture and restore exactly the same set of controls.
 RECIPE_WIDGET_KEYS = {
     "exposure": "t-exp", "contrast": "t-cont", "highlights": "t-high", "shadows": "t-shad", "preset": "tone-preset",
-    "temperature": "c-temp", "tint": "c-tint", "saturation": "c-sat",
+    "temperature": "c-temp", "tint": "c-tint", "saturation": "c-sat", "vibrance": "c-vib",
     "curve_enabled": "c-curve-en", "curve_black": "c-p0", "curve_shadows": "c-p1", "curve_mid": "c-p2",
     "curve_highlights": "c-p3", "curve_white": "c-p4",
     "texture": "d-text", "clarity": "d-clar", "denoise": "d-den", "sharpen": "d-sharp", "dehaze": "d-haze",
@@ -52,6 +43,7 @@ RECIPE_WIDGET_KEYS = {
     "lens_profile": "lens-profile", "lens_distortion": "lens-distortion",
     "lens_vignette_amount": "lens-vignette-amt", "lens_vignette_midpoint": "lens-vignette-mid",
     "lens_chromatic_aberration": "lens-ca",
+    "lens_perspective_v": "lens-persp-v", "lens_perspective_h": "lens-persp-h",
     "cg_shadows_hue": "cg-sh-hue", "cg_shadows_intensity": "cg-sh-int",
     "cg_midtones_hue": "cg-mid-hue", "cg_midtones_intensity": "cg-mid-int",
     "cg_highlights_hue": "cg-hi-hue", "cg_highlights_intensity": "cg-hi-int",
@@ -59,7 +51,7 @@ RECIPE_WIDGET_KEYS = {
 }
 RECIPE_DEFAULTS = {
     "exposure": 1.0, "contrast": 1.0, "highlights": 0, "shadows": 0, "preset": "None",
-    "temperature": 0, "tint": 0, "saturation": 1.0,
+    "temperature": 0, "tint": 0, "saturation": 1.0, "vibrance": 0,
     "curve_enabled": False, "curve_black": 0, "curve_shadows": 64, "curve_mid": 128, "curve_highlights": 192, "curve_white": 255,
     "texture": 0, "clarity": 0, "denoise": 0, "sharpen": False, "dehaze": 0,
     "portrait_smoothing": 0.0,
@@ -67,6 +59,7 @@ RECIPE_DEFAULTS = {
     "crop_aspect": "Original", "removal_radius": 3,
     "lens_profile": "None", "lens_distortion": 0, "lens_vignette_amount": 0, "lens_vignette_midpoint": 50,
     "lens_chromatic_aberration": 0,
+    "lens_perspective_v": 0, "lens_perspective_h": 0,
     "cg_shadows_hue": 0, "cg_shadows_intensity": 0,
     "cg_midtones_hue": 0, "cg_midtones_intensity": 0,
     "cg_highlights_hue": 0, "cg_highlights_intensity": 0,
@@ -765,18 +758,19 @@ def _cached_process_via_backend(image_bytes: bytes, filename: str, options: dict
 
 
 @st.cache_data(show_spinner=False)
-def _lens_corrected_source(image_bytes: bytes, filename: str, distortion: float, vignette_amount: float, vignette_midpoint: float, chromatic_aberration: float) -> Image.Image:
+def _lens_corrected_source(image_bytes: bytes, filename: str, distortion: float, vignette_amount: float, vignette_midpoint: float, chromatic_aberration: float, perspective_vertical: float = 0.0, perspective_horizontal: float = 0.0) -> Image.Image:
     """The base image the Crop preview and the Masks/Repair on-canvas selection tools paint
     against. app/backend.py::process_image() applies Lens corrections (a real cv2.undistort/remap
-    geometric warp for distortion/chromatic aberration) before Crop or any mask, so a crop box or
-    mask painted against the raw, uncorrected source would land on the wrong pixels once the
-    backend actually warps the image -- worst near edges/corners, where distortion moves content
-    the most. Cached (and a no-op fast path when every lens value is still at its default) since
-    this recomputes on every Streamlit rerun otherwise, not just when a Lens slider changes."""
+    geometric warp for distortion/chromatic aberration/perspective) before Crop or any mask, so a
+    crop box or mask painted against the raw, uncorrected source would land on the wrong pixels
+    once the backend actually warps the image -- worst near edges/corners, where distortion and
+    perspective move content the most. Cached (and a no-op fast path when every lens value is
+    still at its default) since this recomputes on every Streamlit rerun otherwise, not just when
+    a Lens slider changes."""
     image = PhotoProcessor.from_bytes(image_bytes, filename).image
-    if not (distortion or vignette_amount or chromatic_aberration):
+    if not (distortion or vignette_amount or chromatic_aberration or perspective_vertical or perspective_horizontal):
         return image
-    return apply_lens_corrections(image, distortion, vignette_amount, vignette_midpoint, chromatic_aberration)
+    return apply_lens_corrections(image, distortion, vignette_amount, vignette_midpoint, chromatic_aberration, perspective_vertical, perspective_horizontal)
 
 
 @st.cache_data(show_spinner=False)
@@ -1150,13 +1144,24 @@ with st.container(key="workspace-split"):
                 "Chromatic Aberration", -100, 100, 0, key="lens-ca",
                 help="Corrects red/cyan and blue/yellow fringing near high-contrast edges.",
             )
+            st.markdown("**Perspective (Keystone)**")
+            st.caption("Not part of a lens profile -- this depends on the shooting angle, not the lens, so it isn't filled in by 'Apply Profile Defaults' above.")
+            lens_perspective_v = st.slider(
+                "Vertical Keystone", -100, 100, 0, key="lens-persp-v",
+                help="Corrects converging vertical lines (e.g. a building shot from below) -- positive narrows the top edge, negative narrows the bottom.",
+            )
+            lens_perspective_h = st.slider(
+                "Horizontal Keystone", -100, 100, 0, key="lens-persp-h",
+                help="Corrects converging horizontal lines (e.g. a wall shot at an angle) -- positive narrows the left edge, negative narrows the right.",
+            )
 
         # The Crop preview and the Masks/Repair selection tools below all paint against this,
         # not the raw `source` -- see _lens_corrected_source()'s docstring for why: the backend
         # applies Lens corrections before Crop/Masks/Repair, so those tools need to agree with it
         # on which pixel is where.
         mask_source = _lens_corrected_source(
-            upload_bytes, upload_name, lens_distortion, lens_vignette_amount, lens_vignette_midpoint, lens_chromatic_aberration
+            upload_bytes, upload_name, lens_distortion, lens_vignette_amount, lens_vignette_midpoint, lens_chromatic_aberration,
+            lens_perspective_v, lens_perspective_h,
         )
 
         # TAB: CROP & ASPECT RATIO -- placed right after Tone for workflow convenience (frame the
@@ -1196,6 +1201,29 @@ with st.container(key="workspace-split"):
             temp_val = st.slider("Temperature (Cool/Warm)", -100, 100, 0, key="c-temp")
             tint_val = st.slider("Tint (Green/Magenta)", -100, 100, 0, key="c-tint")
             sat_val = st.slider("Saturation", 0.0, 2.0, 1.0, 0.01, key="c-sat")
+            vib_val = st.slider(
+                "Vibrance", -100, 100, 0, key="c-vib",
+                help="A smarter saturation boost -- protects skin tones and already-saturated colors, pushing washed-out ones harder instead.",
+            )
+
+            with st.expander("🎯 Pick White Balance", expanded=False):
+                st.caption("Click a spot in the photo that should be neutral gray or white -- Temperature and Tint above are set to whatever would neutralize it. A starting point to fine-tune from, not a guaranteed perfect result.")
+                wb_html, wb_height = _wand_picker_html(preview_image(mask_source, (480, 480)), "wb")
+                components.html(wb_html, height=wb_height)
+                with st.container(key="wb-wand-hidden"):
+                    wb_click_raw = st.text_area("White balance click", key="wb-wand-data", label_visibility="collapsed")
+                wb_committed_key = "wb-wand-committed"
+                if wb_click_raw and wb_click_raw != st.session_state.get(wb_committed_key):
+                    try:
+                        wb_click = json.loads(wb_click_raw)
+                        wb_x, wb_y = float(wb_click["x"]), float(wb_click["y"])
+                    except (json.JSONDecodeError, TypeError, KeyError, ValueError):
+                        wb_x = wb_y = None
+                    if wb_x is not None:
+                        new_temp, new_tint = estimate_white_balance(mask_source, wb_x, wb_y)
+                        st.session_state[wb_committed_key] = wb_click_raw
+                        st.session_state["_pending_restore"] = {"temperature": new_temp, "tint": new_tint}
+                        _request_rerun()
 
             st.markdown("**Color Mixer (HSL)**")
             st.caption("Adjust Hue, Saturation, and Luminance independently for each color band, like a professional editor's Color Mixer.")
@@ -1556,6 +1584,18 @@ with st.container(key="workspace-split"):
             elif more_mode == "Batch Processor":
                 b_uploaded = st.file_uploader("Batch Files", type=["jpg", "jpeg", "png"], accept_multiple_files=True, key="b-up")
                 b_prof = st.selectbox("Profile", list(EXPORT_PROFILES), key="b-p-sel")
+                # "None" + built-in named looks (app.presets.PRESETS, a handful of fixed fields) +
+                # every saved custom preset (app.custom_presets.PresetStore, a full recipe --
+                # everything the Presets tab above can save, minus mask_layers/removal_mask_layers/
+                # layer, which are photo-specific and don't transfer across different photos in a
+                # batch -- see app.recipe_options.recipe_to_options()'s docstring). The " (custom)"
+                # suffix is just this dropdown's own label, stripped back off below before the
+                # lookup -- p_store.names() themselves are never touched.
+                b_preset_options = ["None", *sorted(PRESETS), *[f"{name} (custom)" for name in p_names]]
+                b_preset_choice = st.selectbox(
+                    "Preset", b_preset_options, key="b-preset-sel",
+                    help="A saved custom preset applies its full recipe (tone/color/detail/lens) to every photo in the batch -- the same thing Lightroom calls syncing develop settings across a shoot.",
+                )
                 if b_uploaded and st.button("Run Batch", key="b-run-btn"):
                     b_root = Path.home() / ".photo-studio" / "batch-input"
                     b_root.mkdir(parents=True, exist_ok=True)
@@ -1564,7 +1604,11 @@ with st.container(key="workspace-split"):
                         t = b_root / f.name
                         t.write_bytes(f.getvalue())
                         b_paths.append(t)
-                    outs, rep = process_files(b_paths, None, b_prof)
+                    if b_preset_choice.endswith(" (custom)"):
+                        b_preset, b_recipe = None, p_store.get(b_preset_choice[: -len(" (custom)")])
+                    else:
+                        b_preset, b_recipe = (b_preset_choice if b_preset_choice != "None" else None), None
+                    outs, rep = process_files(b_paths, b_preset, b_prof, recipe=b_recipe)
                     st.dataframe([{"source": x.source.name, "status": x.status, "error": x.error or ""} for x in rep], use_container_width=True)
                     st.download_button("Download ZIP", make_zip(outs), "batch.zip", "application/zip", key="b-dl")
             else:
@@ -1589,6 +1633,8 @@ with st.container(key="workspace-split"):
             "lens_vignette_amount": lens_vignette_amount,
             "lens_vignette_midpoint": lens_vignette_midpoint,
             "lens_chromatic_aberration": lens_chromatic_aberration,
+            "lens_perspective_v": lens_perspective_v,
+            "lens_perspective_h": lens_perspective_h,
             "exposure": exp_val,
             "contrast": cont_val,
             "highlights": high_val,
@@ -1597,6 +1643,7 @@ with st.container(key="workspace-split"):
             "temperature": temp_val,
             "tint": tint_val,
             "saturation": sat_val,
+            "vibrance": vib_val,
             "hsl_bands": hsl_bands,
             "cg_shadows_hue": cg_shadows_hue, "cg_shadows_intensity": cg_shadows_intensity,
             "cg_midtones_hue": cg_midtones_hue, "cg_midtones_intensity": cg_midtones_intensity,
