@@ -6,8 +6,9 @@ import numpy as np
 import cv2
 from PIL import Image, ImageEnhance, ImageFilter
 
+from app.dehaze import apply_dehaze
 from app.lens_corrections import apply_lens_corrections
-from app.professional_color import apply_hsl_mixer
+from app.professional_color import apply_color_grading, apply_hsl_mixer
 from app.raw_import import open_image
 
 
@@ -59,6 +60,23 @@ class PhotoProcessor:
 
     def apply_hsl_mixer(self, adjustments: dict[str, dict[str, float]]) -> "PhotoProcessor":
         self.image = apply_hsl_mixer(self.image, adjustments)
+        return self
+
+    def apply_color_grading(
+        self,
+        shadows_hue: float = 0.0, shadows_intensity: float = 0.0,
+        midtones_hue: float = 0.0, midtones_intensity: float = 0.0,
+        highlights_hue: float = 0.0, highlights_intensity: float = 0.0,
+        balance: float = 0.0,
+    ) -> "PhotoProcessor":
+        self.image = apply_color_grading(
+            self.image, shadows_hue, shadows_intensity, midtones_hue, midtones_intensity,
+            highlights_hue, highlights_intensity, balance,
+        )
+        return self
+
+    def apply_dehaze(self, strength: float = 0.0) -> "PhotoProcessor":
+        self.image = apply_dehaze(self.image, strength)
         return self
 
     def apply_lens_corrections(

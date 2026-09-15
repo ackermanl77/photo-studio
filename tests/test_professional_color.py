@@ -10,8 +10,10 @@ from app.professional_color import (
     ICC_TRANSFORM_ERRORS,
     WORKING_SPACES,
     _highlight_mismatches,
+    apply_color_grading,
     apply_gamma_curve,
     apply_hsl_mixer,
+    clipping_warning_overlay,
     from_float_rgb,
     gamut_warning_overlay,
     hsl_to_rgb,
@@ -196,3 +198,87 @@ def test_hsl_band_hues_cover_all_eight_named_bands():
 
     assert set(HSL_BAND_HUES) == set(HSL_BAND_ORDER)
     assert len(HSL_BAND_ORDER) == 8
+
+
+def test_color_grading_is_a_no_op_at_zero_intensity():
+    image = Image.new("RGB", (10, 10), (120, 130, 140))
+    assert apply_color_grading(image) is image
+    result = apply_color_grading(image, shadows_hue=200, midtones_hue=10, highlights_hue=300)
+    assert np.array_equal(np.asarray(result), np.asarray(image))
+
+
+def test_color_grading_tints_shadows_without_moving_highlights():
+    """A near-black region and a near-white region on the same image -- cranking Shadows
+    intensity with a blue hue should visibly shift the dark region toward blue while leaving the
+    bright region close to untouched, exercising the per-pixel luminance-weighted blend."""
+    image = Image.new("RGB", (4, 20))
+    for y in range(20):
+        color = (10, 10, 10) if y < 10 else (245, 245, 245)
+        for x in range(4):
+            image.putpixel((x, y), color)
+
+    result = apply_color_grading(image, shadows_hue=220, shadows_intensity=100)
+    before = np.asarray(image, dtype=np.float32)
+    after = np.asarray(result, dtype=np.float32)
+
+    shadow_region_change = np.abs(after[:10] - before[:10]).mean()
+    highlight_region_change = np.abs(after[10:] - before[10:]).mean()
+    assert shadow_region_change > 10.0
+    assert highlight_region_change < 1.0
+    # Blue hue (~220 degrees): blue channel should have gained relative to red in the shadow region.
+    shadow_after = after[:10].reshape(-1, 3).mean(axis=0)
+    assert shadow_after[2] > shadow_after[0]
+
+
+def test_color_grading_tints_highlights_without_moving_shadows():
+    image = Image.new("RGB", (4, 20))
+    for y in range(20):
+        color = (10, 10, 10) if y < 10 else (245, 245, 245)
+        for x in range(4):
+            image.putpixel((x, y), color)
+
+    result = apply_color_grading(image, highlights_hue=30, highlights_intensity=100)
+    before = np.asarray(image, dtype=np.float32)
+    after = np.asarray(result, dtype=np.float32)
+
+    shadow_region_change = np.abs(after[:10] - before[:10]).mean()
+    highlight_region_change = np.abs(after[10:] - before[10:]).mean()
+    assert highlight_region_change > 10.0
+    assert shadow_region_change < 1.0
+
+
+def test_color_grading_balance_shifts_the_shadow_highlight_split():
+    """A mid-gray pixel: with balance pushed hard toward highlights (positive), it should fall
+    inside the shadows range instead of midtones/highlights -- so a strong shadow tint moves it,
+    while the same image at balance=0 is barely touched by that same shadow tint (mid-gray sits
+    close to the default 0.5 pivot, near-equally weighted toward midtones)."""
+    image = Image.new("RGB", (4, 4), (128, 128, 128))
+
+    neutral = apply_color_grading(image, shadows_hue=220, shadows_intensity=100, balance=0)
+    shifted = apply_color_grading(image, shadows_hue=220, shadows_intensity=100, balance=100)
+
+    before = np.asarray(image, dtype=np.float32).mean(axis=(0, 1))
+    neutral_change = np.abs(np.asarray(neutral, dtype=np.float32).mean(axis=(0, 1)) - before).sum()
+    shifted_change = np.abs(np.asarray(shifted, dtype=np.float32).mean(axis=(0, 1)) - before).sum()
+    assert shifted_change > neutral_change
+
+
+def test_clipping_warning_overlay_flags_pure_black_and_white_pixels():
+    image = Image.new("RGB", (3, 1), (128, 128, 128))
+    image.putpixel((0, 0), (0, 0, 0))
+    image.putpixel((2, 0), (255, 255, 255))
+
+    result = np.asarray(clipping_warning_overlay(image, shadow_color=(0, 80, 255), highlight_color=(255, 40, 40)))
+
+    assert list(result[0, 0]) == [0, 80, 255]
+    assert list(result[0, 1]) == [128, 128, 128]
+    assert list(result[0, 2]) == [255, 40, 40]
+
+
+def test_clipping_warning_overlay_flags_a_single_clipped_channel():
+    """A pixel with only its blue channel blown out still counts as a whole-pixel highlight
+    warning -- matching Lightroom's "any channel clips" convention rather than requiring all
+    three."""
+    image = Image.new("RGB", (1, 1), (100, 100, 255))
+    result = np.asarray(clipping_warning_overlay(image, highlight_color=(9, 9, 9)))
+    assert list(result[0, 0]) == [9, 9, 9]

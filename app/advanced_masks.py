@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 from PIL import Image, ImageChops, ImageFilter
 
@@ -89,3 +90,29 @@ def color_mask(image: Image.Image, target: tuple[int, int, int], tolerance: int 
 
 def soften_mask(mask: Image.Image, radius: int) -> Image.Image:
     return mask.convert("L").filter(ImageFilter.GaussianBlur(max(0, int(radius))))
+
+
+def magic_wand_mask(image: Image.Image, click_x: float, click_y: float, tolerance: int = 40, contiguous: bool = True) -> Image.Image:
+    """Click-to-select: samples the color at (`click_x`, `click_y`) -- fractions 0..1 of the
+    image, resolution-independent since the on-canvas picker shows a downscaled preview -- and
+    selects pixels within `tolerance` of it. Non-contiguous mode is exactly color_mask() with the
+    target color sampled from the image instead of chosen via a color picker swatch; contiguous
+    mode (the traditional "magic wand" behavior, and the default) restricts the result to the
+    single connected region reachable from the click point by flood fill, so clicking one red
+    apple doesn't also select an unconnected red object elsewhere in the frame.
+    """
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    px = min(width - 1, max(0, int(click_x * width)))
+    py = min(height - 1, max(0, int(click_y * height)))
+    if not contiguous:
+        return color_mask(rgb, rgb.getpixel((px, py)), tolerance)
+
+    bgr = cv2.cvtColor(np.array(rgb), cv2.COLOR_RGB2BGR)
+    flood_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
+    diff = (tolerance, tolerance, tolerance)
+    # FLOODFILL_MASK_ONLY: `bgr` itself is left untouched, only `flood_mask` is written; the fill
+    # value written into it (255, not the default 1) is packed into flags' upper byte.
+    cv2.floodFill(bgr, flood_mask, (px, py), (255, 255, 255), loDiff=diff, upDiff=diff, flags=4 | cv2.FLOODFILL_MASK_ONLY | (255 << 8))
+    region = flood_mask[1:-1, 1:-1]
+    return Image.fromarray(region, mode="L")

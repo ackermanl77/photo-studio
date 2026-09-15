@@ -20,8 +20,9 @@ import re
 from pathlib import Path
 
 import cv2
+import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 from streamlit.testing.v1 import AppTest
 
 from app import backend_client
@@ -818,6 +819,143 @@ def test_gamut_warning_checkbox_renders_the_overlay_for_a_profiled_image():
 
     assert not at.exception
     assert any(img.captions and img.captions[0] == "Magenta = clipped when converted to this app's sRGB working space" for img in at.image)
+
+
+def test_color_grading_defaults_to_no_adjustment():
+    at = run_with_uploaded_image()
+    assert at.slider(key="cg-sh-int").value == 0
+    assert at.slider(key="cg-mid-int").value == 0
+    assert at.slider(key="cg-hi-int").value == 0
+    assert at.slider(key="cg-balance").value == 0
+
+
+def test_color_grading_shadows_changes_the_final_image():
+    at = run_with_uploaded_image(color=(20, 20, 20))
+    baseline = canvas_hash(at)
+
+    at.slider(key="cg-sh-hue").set_value(220)
+    at.run(timeout=30)
+    at.slider(key="cg-sh-int").set_value(100)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_hash(at) != baseline
+
+
+def test_color_grading_is_included_in_reset():
+    at = run_with_uploaded_image()
+    at.slider(key="cg-hi-int").set_value(60)
+    at.run(timeout=30)
+    assert at.slider(key="cg-hi-int").value == 60
+
+    at.button(key="hist-reset-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="cg-hi-int").value == 0
+
+
+def test_dehaze_defaults_to_no_adjustment():
+    at = run_with_uploaded_image()
+    assert at.slider(key="d-haze").value == 0
+
+
+def test_dehaze_slider_changes_the_final_image():
+    """Dehaze recovers lost local contrast, so it's a near-identity transform on a perfectly flat
+    test image (nothing to recover) -- unlike most other sliders in this file, this needs an
+    upload with actual internal contrast, the same synthetic "patch buried in uniform haze" shape
+    used in tests/test_backend.py and tests/test_dehaze.py."""
+    hazy = np.full((40, 40, 3), 190, dtype=np.uint8)
+    hazy[10:30, 10:30] = 90
+    buf = io.BytesIO()
+    Image.fromarray(hazy, "RGB").save(buf, format="PNG")
+
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.file_uploader[0].set_value(("hazy.png", buf.getvalue(), "image/png"))
+    at.run(timeout=30)
+    baseline = canvas_hash(at)
+
+    at.slider(key="d-haze").set_value(80)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_hash(at) != baseline
+
+
+def test_dehaze_is_included_in_reset():
+    at = run_with_uploaded_image()
+    at.slider(key="d-haze").set_value(50)
+    at.run(timeout=30)
+    assert at.slider(key="d-haze").value == 50
+
+    at.button(key="hist-reset-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="d-haze").value == 0
+
+
+def test_clipping_warning_checkbox_renders_the_overlay():
+    at = run_with_uploaded_image()
+    at.checkbox(key="clip-warning-toggle").set_value(True)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any(img.captions and "clipped" in img.captions[0] for img in at.image)
+
+
+def test_magic_wand_selection_commits_via_the_hidden_click_field():
+    """The on-canvas click-to-sample picker is JS an AppTest harness can't drive (no real DOM) --
+    this instead verifies the Python-side wiring its commit ultimately depends on: setting the
+    hidden text field is exactly what the picker's click handler does, just without a real click
+    involved (the same pattern test_painted_mask_selection_changes_the_final_image_via_masks_tab
+    uses for the paint editor)."""
+    at = run_with_uploaded_image(color=(80, 80, 80))
+    baseline = canvas_hash(at)
+
+    at.selectbox(key="m-new-kind").set_value("Magic Wand")
+    at.run(timeout=30)
+    at.text_area(key="m-wand-data").set_value(json.dumps({"x": 0.5, "y": 0.5}))
+    at.run(timeout=30)
+    at.run(timeout=30)  # a second rerun with the same committed click must not add a duplicate layer
+
+    assert not at.exception
+    layers = at.session_state["mask_layers"]
+    assert len(layers) == 1
+    assert layers[0]["kind"] == "Magic Wand"
+    assert layers[0]["params"]["click_x"] == 0.5
+    assert layers[0]["params"]["click_y"] == 0.5
+
+    at.slider(key="m-texp").set_value(1.5)
+    at.run(timeout=30)
+    assert canvas_hash(at) != baseline
+
+
+def test_magic_wand_selection_removes_content_via_repair_tab():
+    """Unlike the flat-color fixture most tests here reuse, this needs an actual color patch to
+    click on: a click on a perfectly uniform image would select the *entire* frame (nothing is
+    outside the color tolerance), leaving cv2.inpaint no unselected pixels to repair from, which
+    is a legitimate degenerate case but not what this test means to exercise."""
+    base = Image.new("RGB", (40, 30), (80, 80, 80))
+    ImageDraw.Draw(base).rectangle((15, 10, 25, 20), fill=(220, 30, 30))
+    buf = io.BytesIO()
+    base.save(buf, format="PNG")
+
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.file_uploader[0].set_value(("patch.png", buf.getvalue(), "image/png"))
+    at.run(timeout=30)
+    baseline = canvas_hash(at)
+
+    at.selectbox(key="rm-new-kind").set_value("Magic Wand")
+    at.run(timeout=30)
+    at.text_area(key="rm-wand-data").set_value(json.dumps({"x": 0.5, "y": 0.5}))  # center of the patch
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["removal_mask_layers"][0]["kind"] == "Magic Wand"
+    assert canvas_hash(at) != baseline
 
 
 def test_lens_corrections_default_to_no_adjustment():
