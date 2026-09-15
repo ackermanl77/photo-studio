@@ -119,12 +119,20 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     hsl_bands = options.get("hsl_bands")
     if hsl_bands:
         processor.apply_hsl_mixer(hsl_bands)
+    processor.apply_color_grading(
+        shadows_hue=_number(options, "cg_shadows_hue", 0), shadows_intensity=_number(options, "cg_shadows_intensity", 0),
+        midtones_hue=_number(options, "cg_midtones_hue", 0), midtones_intensity=_number(options, "cg_midtones_intensity", 0),
+        highlights_hue=_number(options, "cg_highlights_hue", 0), highlights_intensity=_number(options, "cg_highlights_intensity", 0),
+        balance=_number(options, "cg_balance", 0),
+    )
     curve = options.get("curve")
     if curve:
         processor.apply_curves([(int(point[0]), int(point[1])) for point in curve])
 
     # Detail
     processor.apply_texture_clarity(_number(options, "texture", 0), _number(options, "clarity", 0))
+    if options.get("dehaze", 0):
+        processor.apply_dehaze(_number(options, "dehaze", 0))
     if options.get("denoise", 0):
         processor.apply_denoise(int(options["denoise"]))
     if options.get("sharpen", False):

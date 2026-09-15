@@ -64,6 +64,32 @@ def test_apply_hsl_mixer_delegates_to_professional_color(tmp_path):
     assert abs(int(desaturated[0, 0, 1]) - int(desaturated[0, 0, 2])) < 5  # closer to gray: G ~= B
 
 
+def test_apply_color_grading_delegates_to_professional_color(tmp_path):
+    source = tmp_path / "dark.png"
+    Image.new("RGB", (12, 12), color=(20, 20, 20)).save(source)
+    processor = PhotoProcessor(source)
+
+    result = processor.apply_color_grading(shadows_hue=220, shadows_intensity=100)
+
+    assert result is processor
+    pixel = np.array(processor.image, dtype=np.int32)[0, 0]
+    assert pixel[2] > pixel[0]  # tinted toward blue
+
+
+def test_apply_dehaze_delegates_to_dehaze_module(tmp_path):
+    source = tmp_path / "hazy.png"
+    hazy = np.full((30, 30, 3), 190, dtype=np.uint8)
+    hazy[8:22, 8:22] = 90
+    Image.fromarray(hazy, "RGB").save(source)
+    processor = PhotoProcessor(source)
+    before = processor.as_numpy().copy()
+
+    result = processor.apply_dehaze(90)
+
+    assert result is processor
+    assert not np.array_equal(before, processor.as_numpy())
+
+
 def test_apply_denoise_actually_reduces_noise():
     """apply_denoise() switched from a flat median filter to OpenCV's Non-Local Means -- this
     confirms the new algorithm still does its actual job (reduces pixel-to-pixel variance on a

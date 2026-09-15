@@ -10,7 +10,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, ImageDraw
 
-from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, radial_mask, soften_mask
+from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, magic_wand_mask, radial_mask, soften_mask
 from app.backend_client import ensure_backend_running, process_via_backend
 from app.batch_release import make_zip, process_files
 from app.custom_presets import PresetStore
@@ -22,7 +22,7 @@ from app.major_features import PhotoCatalog
 from app.presets import PRESETS, apply_preset
 from app.preset_exchange import export_presets, import_presets
 from app.portrait_tools import detect_faces
-from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS, gamut_warning_overlay
+from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS, clipping_warning_overlay, gamut_warning_overlay
 from app.lens_corrections import LENS_PROFILES, apply_lens_corrections
 from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
@@ -45,24 +45,32 @@ RECIPE_WIDGET_KEYS = {
     "temperature": "c-temp", "tint": "c-tint", "saturation": "c-sat",
     "curve_enabled": "c-curve-en", "curve_black": "c-p0", "curve_shadows": "c-p1", "curve_mid": "c-p2",
     "curve_highlights": "c-p3", "curve_white": "c-p4",
-    "texture": "d-text", "clarity": "d-clar", "denoise": "d-den", "sharpen": "d-sharp",
+    "texture": "d-text", "clarity": "d-clar", "denoise": "d-den", "sharpen": "d-sharp", "dehaze": "d-haze",
     "portrait_smoothing": "port-sm",
     "mask_target_exposure": "m-texp", "mask_target_contrast": "m-tcont", "mask_target_saturation": "m-tsat",
     "crop_aspect": "crop-aspect", "removal_radius": "rm-radius",
     "lens_profile": "lens-profile", "lens_distortion": "lens-distortion",
     "lens_vignette_amount": "lens-vignette-amt", "lens_vignette_midpoint": "lens-vignette-mid",
     "lens_chromatic_aberration": "lens-ca",
+    "cg_shadows_hue": "cg-sh-hue", "cg_shadows_intensity": "cg-sh-int",
+    "cg_midtones_hue": "cg-mid-hue", "cg_midtones_intensity": "cg-mid-int",
+    "cg_highlights_hue": "cg-hi-hue", "cg_highlights_intensity": "cg-hi-int",
+    "cg_balance": "cg-balance",
 }
 RECIPE_DEFAULTS = {
     "exposure": 1.0, "contrast": 1.0, "highlights": 0, "shadows": 0, "preset": "None",
     "temperature": 0, "tint": 0, "saturation": 1.0,
     "curve_enabled": False, "curve_black": 0, "curve_shadows": 64, "curve_mid": 128, "curve_highlights": 192, "curve_white": 255,
-    "texture": 0, "clarity": 0, "denoise": 0, "sharpen": False,
+    "texture": 0, "clarity": 0, "denoise": 0, "sharpen": False, "dehaze": 0,
     "portrait_smoothing": 0.0,
     "mask_target_exposure": 1.0, "mask_target_contrast": 1.0, "mask_target_saturation": 1.0,
     "crop_aspect": "Original", "removal_radius": 3,
     "lens_profile": "None", "lens_distortion": 0, "lens_vignette_amount": 0, "lens_vignette_midpoint": 50,
     "lens_chromatic_aberration": 0,
+    "cg_shadows_hue": 0, "cg_shadows_intensity": 0,
+    "cg_midtones_hue": 0, "cg_midtones_intensity": 0,
+    "cg_highlights_hue": 0, "cg_highlights_intensity": 0,
+    "cg_balance": 0,
 }
 
 
@@ -136,15 +144,17 @@ def _build_mask_image(source: Image.Image, kind: str, params: dict) -> Image.Ima
         return radial_mask(source.size)
     if kind == "Painted":
         return _decode_painted_mask(params["mask_b64"])
+    if kind == "Magic Wand":
+        return magic_wand_mask(source, params["click_x"], params["click_y"], params["tolerance"], params.get("contiguous", True))
     return gradient_mask(source.size, "horizontal" if "Horizontal" in kind else "vertical")
 
 
 def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image, include_opacity: bool = True) -> MaskStack:
-    """Shared "add a named selection (Luminance/Color/gradient/Radial), then list/edit/remove
-    existing ones" UI used by both the Masks tab (local tone/color adjustments) and the Repair
-    tab (object removal) -- same selection tools, a different session_state list and widget-key
-    prefix per caller so the two tabs' widgets don't collide. Returns the combined MaskStack; the
-    caller decides what to do with it (masked adjustments vs. inpainting).
+    """Shared "add a named selection (Luminance/Color/gradient/Radial/Painted/Magic Wand), then
+    list/edit/remove existing ones" UI used by both the Masks tab (local tone/color adjustments)
+    and the Repair tab (object removal) -- same selection tools, a different session_state list
+    and widget-key prefix per caller so the two tabs' widgets don't collide. Returns the combined
+    MaskStack; the caller decides what to do with it (masked adjustments vs. inpainting).
     """
     if state_key not in st.session_state:
         st.session_state[state_key] = []
@@ -161,10 +171,42 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
     with st.expander("➕ Add a selection", expanded=not layers):
         new_kind = st.selectbox(
             "Selection Type",
-            ["Luminance", "Color", "Horizontal gradient", "Vertical gradient", "Radial", "Painted"],
+            ["Luminance", "Color", "Horizontal gradient", "Vertical gradient", "Radial", "Painted", "Magic Wand"],
             key=f"{key_prefix}-new-kind",
         )
-        if new_kind == "Painted":
+        if new_kind == "Magic Wand":
+            new_tolerance = st.slider("Tolerance", 1, 150, 40, key=f"{key_prefix}-wand-tol")
+            new_contiguous = st.checkbox("Contiguous (connected region only)", value=True, key=f"{key_prefix}-wand-contig")
+            st.caption("Click a point on the photo below to select similar colors around it.")
+            wand_html, wand_height = _wand_picker_html(preview_image(source, (480, 480)), key_prefix)
+            components.html(wand_html, height=wand_height)
+            with st.container(key=f"{key_prefix}-wand-hidden"):
+                pending_wand = st.text_area("Magic wand click", key=f"{key_prefix}-wand-data", label_visibility="collapsed")
+            # Same "only a genuine new commit adds a layer" guard as the Painted branch below --
+            # clicking the exact same spot twice in a row is correctly a no-op, not a duplicate.
+            wand_committed_key = f"{key_prefix}-wand-committed"
+            if pending_wand and pending_wand != st.session_state.get(wand_committed_key):
+                try:
+                    click = json.loads(pending_wand)
+                    click_x, click_y = float(click["x"]), float(click["y"])
+                except (json.JSONDecodeError, TypeError, KeyError, ValueError):
+                    click_x = click_y = None
+                if click_x is not None:
+                    layers.append(
+                        {
+                            "id": uuid.uuid4().hex,
+                            "name": f"Magic Wand {len(layers) + 1}",
+                            "kind": "Magic Wand",
+                            "params": {"click_x": click_x, "click_y": click_y, "tolerance": new_tolerance, "contiguous": new_contiguous},
+                            "soften": 0,
+                            "invert": False,
+                            "opacity": 1.0,
+                            "enabled": True,
+                        }
+                    )
+                    st.session_state[wand_committed_key] = pending_wand
+                    _request_rerun()
+        elif new_kind == "Painted":
             st.caption('Paint directly on the photo below — brush, radial, or gradient, plus an eraser. Click "Add to selections" inside the canvas when done.')
             paint_html, paint_height = _paint_editor_html(preview_image(source, (480, 480)), key_prefix)
             components.html(paint_html, height=paint_height)
@@ -591,6 +633,65 @@ def _paint_editor_html(background: Image.Image, key_prefix: str) -> tuple[str, i
       }})();
     </script>
     """, display_h + 130
+
+
+def _wand_picker_html(background: Image.Image, key_prefix: str) -> tuple[str, int]:
+    """Magic Wand's on-canvas "click to sample a color" picker: a single click on the preview
+    reports its fractional (x, y) position back through the same hidden-`st.text_area` commit
+    pattern `_paint_editor_html`/`_curve_editor_html` use (see `_curve_editor_html`'s docstring for
+    why a script-dispatched event can't just touch a native widget directly). One click, no
+    drawing state to track, so this is its own small component rather than another branch bolted
+    onto `_paint_editor_html`.
+    """
+    width, height = background.size
+    display_w = min(480, width)
+    display_h = int(display_w * height / width) if width else 320
+
+    buffer = io.BytesIO()
+    background.convert("RGB").save(buffer, format="PNG")
+    bg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+    hidden_selector = f".st-key-{key_prefix}-wand-hidden"
+
+    return f"""
+    <div style="background:#0f172a;border-radius:8px;padding:8px;">
+      <div style="position:relative;width:100%;max-width:{display_w}px;line-height:0;">
+        <img id="wand-img" src="data:image/png;base64,{bg_b64}"
+             style="display:block;width:100%;height:auto;border-radius:4px;cursor:crosshair;">
+        <div id="wand-marker" style="position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;
+             border:2px solid #fbbf24;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.6);
+             display:none;pointer-events:none;"></div>
+      </div>
+      <div style="color:#94a3b8;font:12px system-ui;margin-top:6px;">Click anywhere on the photo to sample that color.</div>
+    </div>
+    <script>
+      (function() {{
+        const img = document.getElementById('wand-img');
+        const marker = document.getElementById('wand-marker');
+        img.addEventListener('click', function(e) {{
+          const rect = img.getBoundingClientRect();
+          const fx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+          const fy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+          marker.style.left = (fx * rect.width) + 'px';
+          marker.style.top = (fy * rect.height) + 'px';
+          marker.style.display = 'block';
+          try {{
+            const payload = JSON.stringify({{x: fx, y: fy}});
+            const container = window.parent.document.querySelector('{hidden_selector}');
+            if (!container) return;
+            const textarea = container.querySelector('textarea');
+            if (!textarea) return;
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            textarea.focus();
+            setter.call(textarea, payload);
+            textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            textarea.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
+            textarea.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
+            textarea.blur();
+          }} catch (err) {{}}
+        }});
+      }})();
+    </script>
+    """, display_h + 60
 
 
 @st.cache_data(show_spinner=False)
@@ -1117,6 +1218,26 @@ with st.container(key="workspace-split"):
                     lum = st.slider("Luminance", -100, 100, 0, key=l_key)
                 hsl_bands[band] = {"hue": hue, "sat": sat, "lum": lum}
 
+            with st.expander("Color Grading (Split Toning)", expanded=False):
+                st.caption("Tint shadows, midtones, and highlights toward independent colors — the same three-range color grading every professional editor offers, separate from the single global Temperature/Tint above.")
+                cg_s_col, cg_m_col, cg_h_col = st.columns(3)
+                with cg_s_col:
+                    st.markdown("**Shadows**")
+                    cg_shadows_hue = st.slider("Hue", 0, 360, 0, key="cg-sh-hue", label_visibility="visible")
+                    cg_shadows_intensity = st.slider("Intensity", 0, 100, 0, key="cg-sh-int")
+                with cg_m_col:
+                    st.markdown("**Midtones**")
+                    cg_midtones_hue = st.slider("Hue", 0, 360, 0, key="cg-mid-hue")
+                    cg_midtones_intensity = st.slider("Intensity", 0, 100, 0, key="cg-mid-int")
+                with cg_h_col:
+                    st.markdown("**Highlights**")
+                    cg_highlights_hue = st.slider("Hue", 0, 360, 0, key="cg-hi-hue")
+                    cg_highlights_intensity = st.slider("Intensity", 0, 100, 0, key="cg-hi-int")
+                cg_balance = st.slider(
+                    "Balance", -100, 100, 0, key="cg-balance",
+                    help="Shifts where shadows end and highlights begin -- negative gives shadows more of the tonal range, positive gives highlights more.",
+                )
+
             with st.expander("RGB Tone Curve", expanded=False):
                 curve_bounds = [(0, 64), (0, 128), (64, 192), (128, 255), (192, 255)]
                 preview_points = [
@@ -1176,6 +1297,10 @@ with st.container(key="workspace-split"):
         with tab_detail:
             text_val = st.slider("Texture", -100, 100, 0, key="d-text")
             clar_val = st.slider("Clarity", -100, 100, 0, key="d-clar")
+            haze_val = st.slider(
+                "Dehaze", 0, 100, 0, key="d-haze",
+                help="Reduces atmospheric haze (Dark Channel Prior, a classical algorithm -- not AI). Pushed too high, it can crush shadows or halo around strong edges.",
+            )
             denoise_val = st.slider("Denoise", 0, 9, 0, step=2, key="d-den")
             sharp_en = st.checkbox("Sharpen (Unsharp Mask)", value=False, key="d-sharp")
 
@@ -1473,9 +1598,14 @@ with st.container(key="workspace-split"):
             "tint": tint_val,
             "saturation": sat_val,
             "hsl_bands": hsl_bands,
+            "cg_shadows_hue": cg_shadows_hue, "cg_shadows_intensity": cg_shadows_intensity,
+            "cg_midtones_hue": cg_midtones_hue, "cg_midtones_intensity": cg_midtones_intensity,
+            "cg_highlights_hue": cg_highlights_hue, "cg_highlights_intensity": cg_highlights_intensity,
+            "cg_balance": cg_balance,
             "curve": [(0, c_black), (64, c_low), (128, c_mid), (192, c_high), (255, c_white)] if use_curve else None,
             "texture": text_val,
             "clarity": clar_val,
+            "dehaze": haze_val,
             "denoise": denoise_val,
             "sharpen": sharp_en,
             "removal_radius": removal_radius,
@@ -1569,6 +1699,17 @@ with st.container(key="workspace-split"):
         # give it an explicit "Pixel Value" column (each bin's center) to chart against instead.
         histogram["Pixel Value"] = [round(255 * (i + 0.5) / histogram_bins) for i in range(histogram_bins)]
         st.line_chart(histogram, x="Pixel Value", y=["Red", "Green", "Blue"], height=90, color=["#f87171", "#4ade80", "#60a5fa"])
+
+        # Clipping warning -- the same idea as Lightroom's blown-highlight/blocked-shadow
+        # triangles on the histogram, shown as a full preview overlay instead (matching this app's
+        # existing overlay-checkbox pattern -- the Masks/Repair preview checkboxes, and the Soft
+        # Proof gamut warning). Reflects edited_image, same as the histogram right above it.
+        if st.checkbox("⚠️ Show clipping", key="clip-warning-toggle", help="Highlights blocked shadows (blue) and blown highlights (red)."):
+            st.image(
+                clipping_warning_overlay(edited_image),
+                caption="Blue = shadows clipped to black, Red = highlights clipped to white",
+                use_container_width=True,
+            )
 
         # Export Footer Bar
         st.markdown('<div class="export-panel">', unsafe_allow_html=True)
