@@ -17,6 +17,20 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _webview2_runtime_folder() -> Path:
+    """A machine without the Microsoft Edge WebView2 Runtime installed can't open this app's
+    window at all (pywebview's edgechromium backend needs it) -- confirmed live on a second PC.
+    scripts/build_release.ps1 bundles a pinned "Fixed Version" WebView2 Runtime as a sibling
+    "WebView2Runtime" folder next to the packaged .exe specifically so the release doesn't depend
+    on the target machine having it. Setting webview.settings['WEBVIEW2_RUNTIME_PATH'] to that
+    folder (done in main(), below) makes pywebview use it; pywebview itself already falls back to
+    the system-installed runtime with just a debug-log warning if the path doesn't exist (see
+    webview/platforms/edgechromium.py), which is exactly what happens in dev mode, where this
+    folder is never bundled."""
+    base = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else _project_root()
+    return base / "WebView2Runtime"
+
+
 def _run_streamlit_child() -> None:
     from streamlit.web.cli import main
 
@@ -151,6 +165,7 @@ def main() -> None:
         _wait_for_backend(backend)
         frontend = _start_frontend()
         _wait_for_frontend(frontend)
+        webview.settings["WEBVIEW2_RUNTIME_PATH"] = str(_webview2_runtime_folder())
         webview.create_window("Photo Studio", FRONTEND_URL, width=1440, height=960, min_size=(1024, 700))
         webview.start(gui="edgechromium")
     finally:
