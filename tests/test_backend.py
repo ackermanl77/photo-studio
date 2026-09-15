@@ -70,6 +70,22 @@ def test_process_endpoint_applies_the_hsl_color_mixer():
     assert abs(int(result[0, 0, 1]) - int(result[0, 0, 2])) < 5
 
 
+def test_process_endpoint_applies_lens_corrections():
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes(color=(200, 200, 200), size=(40, 40))), "input.png"),
+            "options": json.dumps({"lens_vignette_amount": -80, "lens_vignette_midpoint": 30}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    result = np.array(Image.open(io.BytesIO(response.data)), dtype=np.int32)
+    assert result[:4, :4].mean() < result[18:22, 18:22].mean() - 10  # corners darkened
+
+
 def test_process_endpoint_preserves_icc_profile():
     image = Image.new("RGB", (12, 12), color=(100, 110, 120))
     source = io.BytesIO()

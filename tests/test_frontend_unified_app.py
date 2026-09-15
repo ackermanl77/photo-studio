@@ -124,7 +124,7 @@ def test_uploading_image_renders_every_tab_without_errors():
 
     assert not at.exception
     assert [t.label for t in at.tabs] == [
-        "☼ Tone", "⛶ Crop", "\U0001f3a8 Color", "\U0001f52c Detail", "🩹 Repair", "◈ Layers",
+        "☼ Tone", "◎ Lens", "⛶ Crop", "\U0001f3a8 Color", "\U0001f52c Detail", "🩹 Repair", "◈ Layers",
         "◉ Masks", "◌ Portrait", "✦ Presets", "☰ Batch & Library",
     ]
     assert canvas_dims(at) == (40, 30)
@@ -596,6 +596,55 @@ def test_hsl_color_mixer_is_included_in_reset():
 
     assert not at.exception
     assert at.slider(key="hsl-red-s").value == 0
+
+
+def test_lens_corrections_default_to_no_adjustment():
+    at = run_with_uploaded_image()
+
+    assert at.selectbox(key="lens-profile").value == "None"
+    assert at.slider(key="lens-distortion").value == 0
+    assert at.slider(key="lens-vignette-amt").value == 0
+    assert at.slider(key="lens-vignette-mid").value == 50
+    assert at.slider(key="lens-ca").value == 0
+
+
+def test_lens_correction_slider_changes_the_final_image():
+    at = run_with_uploaded_image(color=(200, 200, 200))
+    baseline = canvas_hash(at)
+
+    at.slider(key="lens-vignette-amt").set_value(-80)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_hash(at) != baseline
+
+
+def test_lens_profile_apply_button_fills_in_the_sliders():
+    at = run_with_uploaded_image()
+
+    at.selectbox(key="lens-profile").set_value("Fisheye")
+    at.run(timeout=30)
+    at.button(key="lens-apply-profile-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="lens-distortion").value == -60
+    assert at.slider(key="lens-vignette-amt").value == -35
+    assert at.slider(key="lens-vignette-mid").value == 40
+    assert at.slider(key="lens-ca").value == 20
+
+
+def test_lens_corrections_are_included_in_reset():
+    at = run_with_uploaded_image()
+    at.slider(key="lens-distortion").set_value(40)
+    at.run(timeout=30)
+    assert at.slider(key="lens-distortion").value == 40
+
+    at.button(key="hist-reset-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="lens-distortion").value == 0
 
 
 def test_rgb_curve_defaults_to_identity_and_is_off():

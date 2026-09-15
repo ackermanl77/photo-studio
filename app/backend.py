@@ -51,9 +51,9 @@ def _image_mask(file_storage, size: tuple[int, int]) -> Image.Image:
 
 
 def process_image(image_file, options: dict, removal_mask=None, local_mask=None, layer_file=None) -> Image.Image:
-    """Mirrors the exact step order of the unified UI's tabs (Tone -> Color -> Detail -> Layers ->
-    Masks -> Portrait -> Crop) so that routing the frontend's edits through this endpoint produces
-    the same image as applying them in-process. Keeping this order in sync with
+    """Mirrors the exact step order of the unified UI's tabs (Lens -> Tone -> Color -> Detail ->
+    Layers -> Masks -> Portrait -> Crop) so that routing the frontend's edits through this endpoint
+    produces the same image as applying them in-process. Keeping this order in sync with
     app/frontend_unified_app.py matters: a mismatched order is exactly the class of bug documented
     under "Recently Fixed" in docs/PROJECT_STATUS.md (layers/masks silently producing a different
     result than what the UI showed).
@@ -68,6 +68,18 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     processor = PhotoProcessor.from_bytes(source_bytes, filename)
     source_exif = processor.image.getexif().tobytes()
     source_icc = processor.image.info.get("icc_profile")
+
+    # Lens corrections -- geometric (distortion) and per-channel-radial (chromatic aberration)
+    # corrections need to run before anything else touches pixel positions or values, and before
+    # Crop (applied last, below) so the user frames their shot against the already-corrected
+    # geometry rather than having lens correction potentially introduce new edge artifacts inside
+    # a crop they already chose.
+    processor.apply_lens_corrections(
+        distortion=_number(options, "lens_distortion", 0.0),
+        vignette_amount=_number(options, "lens_vignette_amount", 0.0),
+        vignette_midpoint=_number(options, "lens_vignette_midpoint", 50.0),
+        chromatic_aberration=_number(options, "lens_chromatic_aberration", 0.0),
+    )
 
     # Tone
     processor.apply_brightness(_number(options, "brightness", 1.0))
