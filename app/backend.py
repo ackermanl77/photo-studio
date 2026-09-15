@@ -5,7 +5,7 @@ import time
 from io import BytesIO
 
 from flask import Flask, g, jsonify, request, send_file
-from PIL import Image
+from PIL import Image, ImageCms
 
 from app.config import MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES, BACKEND_HOST, BACKEND_PORT
 from app.image_processor import PhotoProcessor
@@ -13,6 +13,7 @@ from app.layer_workspace import LayerWorkspace, WorkspaceLayer
 from app.observability import ProcessingAudit, configure_json_logger, log_audit
 from app.portrait_tools import smooth_skin
 from app.presets import PRESETS, apply_preset
+from app.professional_color import normalize_to_srgb, srgb_icc_bytes
 from app.raw_import import is_raw_path
 from app.reliability import new_request_id, validate_image_bytes
 
@@ -68,6 +69,26 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     processor = PhotoProcessor.from_bytes(source_bytes, filename)
     source_exif = processor.image.getexif().tobytes()
     source_icc = processor.image.info.get("icc_profile")
+
+    # ICC color management -- real conversion (via littlecms) of the source's own embedded profile
+    # into the sRGB working space every step below assumes, instead of the old behavior of just
+    # preserving the original bytes unlooked-at. A no-op for the common case (already sRGB); for a
+    # wider-gamut source (Adobe RGB, ProPhoto RGB, a camera's own profile, ...) this is the
+    # difference between colors looking correct and looking oversaturated once the pixels are
+    # (mis)treated as sRGB by everything downstream. Runs before Lens corrections -- as early as
+    # possible, same reasoning as Lens itself running before Tone. Re-tags the *output* as sRGB
+    # afterward instead of re-attaching the original (now-stale, pre-conversion) profile bytes,
+    # which would make a viewer interpret the already-converted pixels a second time.
+    if source_icc:
+        try:
+            processor.image = normalize_to_srgb(processor.image, source_icc)
+            source_icc = srgb_icc_bytes()
+        except (OSError, ValueError, ImageCms.PyCMSError):
+            # Malformed/truncated/non-ICC bytes under the "icc_profile" key, or a profile
+            # littlecms can open but can't build a transform from (some files carry genuine
+            # garbage there) -- fall back to the old behavior (preserve whatever was embedded,
+            # unconverted) rather than fail the whole edit over an unparseable color tag.
+            pass
 
     # Lens corrections -- geometric (distortion) and per-channel-radial (chromatic aberration)
     # corrections need to run before anything else touches pixel positions or values, and before

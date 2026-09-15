@@ -598,6 +598,30 @@ def test_hsl_color_mixer_is_included_in_reset():
     assert at.slider(key="hsl-red-s").value == 0
 
 
+def test_gamut_warning_shows_a_no_profile_message_for_a_plain_test_image():
+    """The shared image_bytes() test helper doesn't embed an ICC profile (matching most synthetic
+    test fixtures), so the "nothing to proof" message is the expected default state."""
+    at = run_with_uploaded_image()
+    assert any("no embedded color profile" in c.value for c in at.caption)
+
+
+def test_gamut_warning_checkbox_renders_the_overlay_for_a_profiled_image():
+    from app.professional_color import srgb_icc_bytes
+
+    buf = io.BytesIO()
+    Image.new("RGB", (20, 20), (180, 90, 40)).save(buf, format="PNG", icc_profile=srgb_icc_bytes())
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.file_uploader[0].set_value(("profiled.png", buf.getvalue(), "image/png"))
+    at.run(timeout=30)
+
+    at.checkbox(key="gamut-warning-toggle").set_value(True)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any(img.captions and img.captions[0] == "Magenta = clipped when converted to this app's sRGB working space" for img in at.image)
+
+
 def test_lens_corrections_default_to_no_adjustment():
     at = run_with_uploaded_image()
 

@@ -54,7 +54,8 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 
 ## Core Features
 
-- Exposure, contrast, highlights, shadows, temperature, tint, texture, clarity, sharpening, denoise, and a one-click "✨ Auto Enhance" pass, all live in the unified UI. Free-form or named-aspect-ratio crop, positioned right after Tone.
+- Exposure, contrast, highlights, shadows, temperature, tint, texture, clarity, sharpening, and a one-click "✨ Auto Enhance" pass, all live in the unified UI. Free-form or named-aspect-ratio crop, positioned right after Tone.
+- Denoise via OpenCV's Non-Local Means — a real upgrade over a flat median filter (preserves edges/detail while smoothing noise), classical rather than a neural network (see `docs/PROJECT_STATUS.md` for why, given this app's CPU-first, no-GPU design).
 - A draggable RGB tone curve (drag points on the curve itself, or use the numeric sliders below it for exact values).
 - Per-channel HSL color grading ("Color Mixer") — independent Hue/Saturation/Luminance adjustment for each of 8 named color bands (Red/Orange/Yellow/Green/Aqua/Blue/Purple/Magenta).
 - Lens corrections (distortion, vignette, chromatic aberration) — not a calibrated per-lens-model profile database, just typical starting points by lens category (Wide-angle, Standard zoom, Telephoto, Fisheye) plus manual sliders to fine-tune.
@@ -65,7 +66,7 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 - Layers with opacity, blending (normal/multiply/screen), preserved through Save/Load Project.
 - Camera RAW import (`.cr2/.cr3/.nef/.arw/.dng`, optional via `requirements-raw.txt`) directly from the unified UI's uploader.
 - A draggable before/after comparison ("Split View"), plus a live per-channel histogram.
-- ICC profile preservation and tested 16-bit TIFF export support.
+- Real ICC color management (via littlecms/`PIL.ImageCms`): an embedded non-sRGB profile (Adobe RGB, ProPhoto RGB, a camera's own profile) is actually converted into the app's sRGB working space, not just tagged-and-preserved, plus a "Soft Proof: Gamut Warning" preview highlighting pixels that get clipped in that conversion. Not a simulation of an external printer/press profile — no profile database is bundled. Tested 16-bit TIFF export support.
 - Local photo library with scanning, thumbnails, search, and a Rate & Flag panel (star ratings, reject, tags) with keyboard shortcuts (1-5 rate, 0 clears, X rejects, arrows move Prev/Next).
 - Batch profiles, filename templates, error reports, and ZIP delivery.
 - Save/Load Project (`.photoproject`, `app/project_bundle.py`) persisting the source image, recipe, layer, and mask selections.
