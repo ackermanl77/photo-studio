@@ -42,6 +42,13 @@ def from_float_rgb(values: np.ndarray) -> Image.Image:
 
 
 def apply_gamma_curve(image: Image.Image, points: list[tuple[int, int]], gamma: float = 2.2) -> Image.Image:
+    """Like PhotoProcessor.apply_curves(), but interpolates the curve in LINEAR light instead of
+    raw 0-255 display values. `apply_curves()` (app/image_processor.py) treats brightness as if it
+    were perceptually linear, which isn't physically accurate for a curve meant to model real
+    light; this instead converts both the lookup domain and the control points' x-axis to linear
+    light (`value ** gamma`), interpolates there, then converts the result back to a display value
+    (`** (1 / gamma)`) -- the same round-trip a properly gamma-aware curve tool applies.
+    """
     if gamma <= 0:
         raise ValueError("Gamma must be positive")
     ordered = sorted((int(x), int(y)) for x, y in points)
@@ -50,7 +57,9 @@ def apply_gamma_curve(image: Image.Image, points: list[tuple[int, int]], gamma: 
     if len(points) < 2 or x_values[0] < 0 or x_values[-1] > 255 or np.any(np.diff(x_values) <= 0):
         raise ValueError("Curve inputs must be unique and within 0-255")
     linear_input = np.linspace(0, 1, 256) ** gamma
-    linear_output = np.interp(np.arange(256), x_values, y_values).clip(0, 255) / 255.0
+    linear_x = (x_values / 255.0) ** gamma
+    linear_y = (y_values / 255.0) ** gamma
+    linear_output = np.interp(linear_input, linear_x, linear_y).clip(0, 1)
     lookup = np.clip(linear_output ** (1.0 / gamma), 0, 1)
     values = to_float_rgb(image)
     indexes = np.clip((values * 255).round().astype(np.uint8), 0, 255)

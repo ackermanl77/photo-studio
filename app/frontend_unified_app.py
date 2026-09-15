@@ -177,7 +177,7 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
                     }
                 )
                 st.session_state[paint_committed_key] = pending_paint
-                st.rerun()
+                _request_rerun()
         else:
             new_params: dict = {}
             if new_kind == "Luminance":
@@ -202,7 +202,7 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
                         "enabled": True,
                     }
                 )
-                st.rerun()
+                _request_rerun()
 
     mask_stack = MaskStack(source.size)
     for idx, layer in enumerate(layers):
@@ -216,7 +216,13 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
             layer["soften"] = st.slider("Soften edges (px)", 0, 40, layer.get("soften", 0), key=f"{key_prefix}-sf-{idx}")
             if st.button("🗑️ Remove", key=f"{key_prefix}-rm-{idx}"):
                 layers.pop(idx)
-                st.rerun()
+                _request_rerun()
+                # Stop rendering this list for the rest of this pass rather than continuing
+                # enumerate() over a list we just mutated mid-iteration (deferring the rerun --
+                # see _request_rerun() -- means this loop no longer aborts here the way an
+                # immediate st.rerun() used to). The deferred rerun re-renders the remaining
+                # layers correctly on the very next pass.
+                break
         base_mask = _build_mask_image(source, layer["kind"], layer["params"])
         if layer["soften"]:
             base_mask = soften_mask(base_mask, layer["soften"])
@@ -636,6 +642,23 @@ def _cached_process_via_backend(image_bytes: bytes, filename: str, options: dict
     return process_via_backend(image_bytes, filename, options, local_mask_bytes, layer_bytes, removal_mask_bytes)
 
 
+def _request_rerun() -> None:
+    """Use instead of calling st.rerun() directly from inside a tab body (Repair/Layers/Masks/
+    Portrait/Presets/Batch & Library -- anything rendered in the loop over st.tabs()). Streamlit
+    only keeps a keyed widget's session_state value if that widget was actually instantiated
+    during the run immediately before it; every tab's code runs top-to-bottom in one script pass
+    regardless of which tab is visible, so an immediate st.rerun() from an early tab (e.g. Repair
+    or Color, which render before Layers/Masks/Portrait/Presets/Batch & Library) aborts the script
+    right there -- none of those later tabs' widgets get instantiated this pass, so Streamlit
+    garbage-collects their session_state and silently resets them to their `value=` defaults on
+    the very next run. (Same underlying mechanism as the HSL Color Mixer's dropdown-hidden-band
+    bug documented in docs/PROJECT_STATUS.md, just triggered by an early rerun instead of
+    conditional rendering.) Setting this flag and rerunning only after every tab has rendered (see
+    the check right before `options = {...}` below) means every widget in every tab has already
+    been instantiated by the time the rerun actually fires, so nothing gets GC'd."""
+    st.session_state["_rerun_pending"] = True
+
+
 st.set_page_config(page_title="Photo Studio Pro", page_icon="🎨", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -806,26 +829,37 @@ with upload_col2:
 with st.expander("📁 Open a saved project (.photoproject)"):
     project_upload = st.file_uploader("Project file", type=["photoproject", "zip"], key="proj-upload")
     if project_upload and st.button("Load Project", key="proj-load-btn"):
-        loaded_project = ProjectBundle.load(project_upload.getvalue())
-        st.session_state["restored_source_bytes"] = loaded_project.source_bytes
-        st.session_state["restored_source_name"] = loaded_project.source_name
-        # ProjectBundle stores the overlay layer in its own structured `layer_workspace` field
-        # (a serialized LayerWorkspace), not base64-embedded in the recipe like the old
-        # PhotoProject format -- translate it into the same recipe["layer"] shape
-        # _restore_recipe_to_state() already knows how to apply, so that function needs no changes.
-        pending_recipe = dict(loaded_project.recipe)
-        workspace = loaded_project.layer_workspace_object()
-        if workspace and len(workspace.layers) > 1:
-            overlay_layer = workspace.layers[1]
-            overlay_buffer = io.BytesIO()
-            overlay_layer.image.save(overlay_buffer, format="PNG")
-            pending_recipe["layer"] = {
-                "image_b64": base64.b64encode(overlay_buffer.getvalue()).decode("ascii"),
-                "opacity": overlay_layer.opacity,
-                "blend": overlay_layer.blend_mode,
-            }
-        st.session_state["_pending_restore"] = pending_recipe
-        st.rerun()
+        # A hand-edited or corrupted .photoproject (bad ZIP, malformed JSON manifest, a manifest
+        # pointing at a file that isn't actually in the archive, unreadable embedded PNGs, ...)
+        # must not crash the whole app with a raw traceback -- every other user-input path in
+        # this file (RAW load, backend calls, curve JSON) already degrades to a friendly error.
+        try:
+            loaded_project = ProjectBundle.load(project_upload.getvalue())
+            pending_recipe = dict(loaded_project.recipe)
+            workspace = loaded_project.layer_workspace_object()
+            overlay_image_b64 = None
+            if workspace and len(workspace.layers) > 1:
+                overlay_layer = workspace.layers[1]
+                overlay_buffer = io.BytesIO()
+                overlay_layer.image.save(overlay_buffer, format="PNG")
+                overlay_image_b64 = base64.b64encode(overlay_buffer.getvalue()).decode("ascii")
+        except (ValueError, KeyError, OSError) as error:
+            st.error(f"⚠️ Could not open this project file: {error}")
+        else:
+            st.session_state["restored_source_bytes"] = loaded_project.source_bytes
+            st.session_state["restored_source_name"] = loaded_project.source_name
+            # ProjectBundle stores the overlay layer in its own structured `layer_workspace` field
+            # (a serialized LayerWorkspace), not base64-embedded in the recipe like the old
+            # PhotoProject format -- translate it into the same recipe["layer"] shape
+            # _restore_recipe_to_state() already knows how to apply, so that function needs no changes.
+            if overlay_image_b64 is not None:
+                pending_recipe["layer"] = {
+                    "image_b64": overlay_image_b64,
+                    "opacity": overlay_layer.opacity,
+                    "blend": overlay_layer.blend_mode,
+                }
+            st.session_state["_pending_restore"] = pending_recipe
+            st.rerun()
 
 if not uploaded and "restored_source_bytes" not in st.session_state:
     st.info("👆 Upload an image above (or load a saved project) to open the editing workspace.")
@@ -900,7 +934,7 @@ with st.container(key="workspace-split"):
                 st.session_state["_pending_restore"] = {
                     "exposure": 1.12, "contrast": 1.15, "saturation": 1.08, "denoise": 3, "sharpen": True,
                 }
-                st.rerun()
+                _request_rerun()
             preset_names = ["None", *sorted(PRESETS)]
             preset_thumbs = _preset_thumbnails(upload_bytes, upload_name)
             thumb_cols = st.columns(len(preset_names))
@@ -997,7 +1031,7 @@ with st.container(key="workspace-split"):
                     if isinstance(parsed, dict):
                         st.session_state["curve-committed"] = curve_commit
                         st.session_state["_pending_restore"] = parsed
-                        st.rerun()
+                        _request_rerun()
                 with st.container(key="curve-points"):
                     use_curve = st.checkbox("Enable RGB Curve", value=False, key="c-curve-en")
                     c_black = st.slider("Blacks", 0, 64, 0, key="c-p0")
@@ -1128,7 +1162,7 @@ with st.container(key="workspace-split"):
                 else:
                     if imported:
                         st.toast(f"Imported {len(imported)} preset(s)", icon="📥")
-                        st.rerun()
+                        _request_rerun()
                     else:
                         # Existing names win (import_presets(overwrite=False)) -- every name in the
                         # file already exists locally, so nothing changed and nothing needs a rerun.
@@ -1252,6 +1286,15 @@ with st.container(key="workspace-split"):
         # (Tone -> Color -> Detail -> Repair -> Layers -> Masks -> Portrait -> Crop, matching the tab
         # order above) runs once, here, on app/backend.py -- see that module's process_image() for the
         # mirrored order.
+
+        # A tab body above may have called _request_rerun() instead of st.rerun() directly (adding/
+        # removing a mask selection, Auto Enhance, committing the curve editor, importing presets --
+        # see that function's docstring). Actually rerunning only here, now that every tab's widgets
+        # have been instantiated this pass, is what stops Streamlit from garbage-collecting a later
+        # tab's session_state and silently resetting it to defaults.
+        if st.session_state.pop("_rerun_pending", False):
+            st.rerun()
+
         options = {
             "exposure": exp_val,
             "contrast": cont_val,

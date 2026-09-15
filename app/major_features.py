@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -85,8 +86,24 @@ class PhotoCatalog:
         with self._connect() as connection:
             connection.execute("CREATE TABLE IF NOT EXISTS photos (path TEXT PRIMARY KEY, rating INTEGER DEFAULT 0, tags TEXT DEFAULT '')")
 
+    @contextmanager
     def _connect(self):
-        return sqlite3.connect(self.database)
+        # sqlite3.Connection's own context manager (what every call site's `with self._connect()
+        # as connection:` relies on) only commits or rolls back the current transaction on exit --
+        # it does NOT close the connection. Returning a bare Connection here meant every call
+        # opened a fresh one that was never closed: index_folder() (app/library.py) calls
+        # upsert() once per scanned photo, so indexing a large library leaked one open file handle
+        # per photo. Wrapping the same open/commit/rollback behavior in an explicit try/finally
+        # that closes the connection fixes that without changing any call site.
+        connection = sqlite3.connect(self.database)
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def upsert(self, path: str | Path, rating: int = 0, tags: list[str] | None = None) -> None:
         rating = max(0, min(5, int(rating)))

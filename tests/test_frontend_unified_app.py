@@ -220,6 +220,40 @@ def test_painted_mask_selection_removes_content_via_repair_tab():
     assert canvas_hash(at) != baseline
 
 
+def test_masks_tab_state_survives_adding_a_repair_selection():
+    """Regression test for a real bug found live: Repair renders before Masks in the tab order
+    (see the pipeline-order comment above `options = {...}`), and every tab's code runs on every
+    rerun regardless of which is visible. Before `_request_rerun()` existed, committing a Painted
+    removal selection in Repair called st.rerun() immediately -- aborting the script before the
+    Masks tab's own widgets (further down) were ever instantiated that pass. Streamlit garbage-
+    collects a keyed widget's session_state when the widget isn't instantiated during a run (the
+    same mechanism documented in PROJECT_STATUS.md for the HSL Color Mixer's dropdown-hidden-band
+    bug), so Target Saturation and the "Add a selection" dropdown silently reset to their defaults
+    on the very next run -- even though `st.session_state.mask_layers` itself (not a widget key)
+    was untouched and still showed the mask as enabled. Confirmed live: the masked Target
+    Saturation effect visibly disappeared from the rendered image after adding a Repair selection,
+    and reappeared only once an unrelated widget interaction forced another full rerun."""
+    at = run_with_uploaded_image(color=(80, 80, 80))
+
+    at.selectbox(key="m-new-kind").set_value("Painted")
+    at.run(timeout=30)
+    at.text_area(key="m-paint-data").set_value(painted_mask_base64())
+    at.run(timeout=30)
+    at.slider(key="m-tsat").set_value(1.72)
+    at.run(timeout=30)
+    baseline = canvas_hash(at)
+
+    at.selectbox(key="rm-new-kind").set_value("Painted")
+    at.run(timeout=30)
+    at.text_area(key="rm-paint-data").set_value(painted_mask_base64())
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="m-tsat").value == 1.72
+    assert at.selectbox(key="m-new-kind").value == "Painted"
+    assert canvas_hash(at) != baseline
+
+
 def test_repair_softness_slider_disabled_until_a_selection_exists():
     at = run_with_uploaded_image()
 
@@ -496,6 +530,22 @@ def test_load_project_still_reads_the_legacy_photoproject_format():
     assert not at.exception
     assert at.session_state["restored_source_name"] == "legacy.png"
     assert at.slider(key="t-exp").value == 1.4
+
+
+def test_load_project_with_a_corrupted_file_shows_an_error_instead_of_crashing():
+    """A hand-edited or corrupted .photoproject must not crash the app -- every other user-input
+    path in this file (RAW load, backend calls, curve JSON) already degrades to a friendly
+    st.error() instead of an unhandled traceback, and Load Project previously had no such guard."""
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.get_by_key("proj-upload").set_value(("broken.photoproject", b"not actually a zip file", "application/zip"))
+    at.run(timeout=30)
+    at.button(key="proj-load-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("Could not open this project file" in message.value for message in at.error)
+    assert "restored_source_name" not in at.session_state
 
 
 def test_hsl_color_mixer_defaults_to_no_adjustment():

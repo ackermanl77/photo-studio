@@ -50,7 +50,14 @@ def process_files(paths: list[str | Path], preset: str | None = None, profile: s
             used_names.add(output_name)
             outputs.append((output_name, content))
             report.append(BatchResult(source, output_name, "ok"))
-        except (OSError, ValueError, RuntimeError) as error:
+        except (OSError, ValueError, RuntimeError, KeyError, IndexError) as error:
+            # KeyError/IndexError: a caller-supplied name_template with an unknown field (e.g.
+            # "{bad}-edited{suffix}") or a stray positional placeholder (e.g. "{0}") raises one of
+            # these from render_name()'s str.format() call. Without catching them here alongside
+            # every other per-file failure mode, one bad template propagated out of process_files()
+            # entirely -- aborting the whole batch and discarding the report for every remaining
+            # file, instead of recording just this one file as an error the way every other
+            # exception already does.
             report.append(BatchResult(source, None, "error", str(error)))
         finally:
             if progress:
