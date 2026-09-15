@@ -6,6 +6,8 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.reliability import validate_project_archive
+
 
 @dataclass
 class PhotoProject:
@@ -44,12 +46,14 @@ class PhotoProject:
 
     @classmethod
     def load(cls, project_file: str | Path | bytes) -> "PhotoProject":
-        if isinstance(project_file, (str, Path)):
-            archive = zipfile.ZipFile(project_file)
-        else:
-            archive = zipfile.ZipFile(io.BytesIO(project_file))
-        with archive:
-            manifest = json.loads(archive.read("project.json"))
+        # validate_project_archive() (app/reliability.py) enforces the same entry-count/size/path/
+        # manifest-reference checks ProjectBundle.load() already relies on -- this used to open the
+        # ZIP directly with none of them, so a hand-crafted archive could decompress far beyond its
+        # declared size, or a corrupt/hand-edited manifest could raise a bare KeyError instead of a
+        # clear error.
+        archive_bytes = project_file if isinstance(project_file, bytes) else Path(project_file).read_bytes()
+        manifest = validate_project_archive(archive_bytes)
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
             files = manifest["files"]
             return cls(
                 source_name=manifest["source_name"],

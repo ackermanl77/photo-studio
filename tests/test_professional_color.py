@@ -38,6 +38,32 @@ def test_gamma_curve_and_16bit_tiff_export():
     assert exported.size == image.size
 
 
+def test_gamma_curve_leaves_an_identity_curve_unchanged_regardless_of_gamma():
+    """An identity curve (0,0)-(255,255) round-trips through the linear-light conversion (x**gamma
+    then **(1/gamma)) back to itself exactly, for any gamma -- a basic sanity property any
+    gamma-aware curve implementation must hold."""
+    image = Image.new("RGB", (6, 6), (40, 120, 200))
+    for gamma in (1.0, 1.8, 2.2, 3.0):
+        result = apply_gamma_curve(image, [(0, 0), (255, 255)], gamma=gamma)
+        assert np.array_equal(np.asarray(result), np.asarray(image))
+
+
+def test_gamma_curve_actually_uses_the_gamma_parameter():
+    """Regression test: apply_gamma_curve() used to compute a `linear_input = ... ** gamma` array
+    and never use it, silently interpolating the curve over raw 0-255 indices exactly like the
+    plain, non-gamma-aware PhotoProcessor.apply_curves() -- so changing `gamma` had no effect on
+    where the curve's midtones landed beyond the final, standalone **(1/gamma) step. Now that the
+    interpolation itself happens in linear light, a non-identity curve must produce different
+    output for different gamma values."""
+    image = Image.new("RGB", (10, 10), (60, 130, 200))
+    points = [(0, 0), (128, 180), (255, 255)]
+
+    result_linear = apply_gamma_curve(image, points, gamma=1.0)
+    result_gamma = apply_gamma_curve(image, points, gamma=2.2)
+
+    assert not np.array_equal(np.asarray(result_linear), np.asarray(result_gamma))
+
+
 def test_profile_export_supports_declared_profiles():
     image = Image.new("RGB", (5, 5), (10, 20, 30))
     for profile in WORKING_SPACES:

@@ -1,4 +1,7 @@
+import sqlite3
+
 import numpy as np
+import pytest
 from PIL import Image
 
 from app.major_features import Layer, LayerStack, PhotoCatalog, heal_patch, preview_image
@@ -51,3 +54,30 @@ def test_photo_catalog_get_returns_a_default_for_an_unseen_path(tmp_path):
 
     assert catalog.get("portraits/one.jpg") == {"path": "portraits/one.jpg", "rating": 4, "tags": ["favorite"]}
     assert catalog.get("never/scanned.jpg") == {"path": "never/scanned.jpg", "rating": 0, "tags": []}
+
+
+def test_photo_catalog_closes_every_connection_it_opens(tmp_path, monkeypatch):
+    """Regression test: PhotoCatalog._connect() used to return a bare sqlite3.Connection used via
+    `with self._connect() as connection:` -- a Connection's own context manager only commits or
+    rolls back on exit, it does NOT close the connection, so every upsert()/get()/search() call
+    leaked an open connection/file handle. Wraps sqlite3.connect() to track every connection
+    opened through it and asserts each one was actually closed by the time this returns."""
+    opened = []
+    real_connect = sqlite3.connect
+
+    def tracking_connect(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", tracking_connect)
+
+    catalog = PhotoCatalog(tmp_path / "photos.sqlite")
+    catalog.upsert("portraits/one.jpg", rating=5, tags=["favorite"])
+    catalog.get("portraits/one.jpg")
+    catalog.search("portrait")
+
+    assert len(opened) >= 4  # __init__'s CREATE TABLE + upsert + get + search, each its own connection
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")  # a closed connection raises on any further use
