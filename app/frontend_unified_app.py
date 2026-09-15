@@ -3,11 +3,12 @@ from __future__ import annotations
 import base64
 import io
 import json
+import uuid
 from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
-from PIL import Image, ImageCms, ImageDraw
+from PIL import Image, ImageDraw
 
 from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, radial_mask, soften_mask
 from app.backend_client import ensure_backend_running, process_via_backend
@@ -21,8 +22,8 @@ from app.major_features import PhotoCatalog
 from app.presets import PRESETS, apply_preset
 from app.preset_exchange import export_presets, import_presets
 from app.portrait_tools import detect_faces
-from app.professional_color import HSL_BAND_ORDER, gamut_warning_overlay
-from app.lens_corrections import LENS_PROFILES
+from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS, gamut_warning_overlay
+from app.lens_corrections import LENS_PROFILES, apply_lens_corrections
 from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
 
@@ -148,6 +149,14 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
     if state_key not in st.session_state:
         st.session_state[state_key] = []
     layers = st.session_state[state_key]
+    # Widget keys below are per-layer, keyed by this id rather than by list index -- a layer's
+    # position shifts whenever an earlier one is removed, and an index-based key would then point
+    # a later layer's checkbox/slider at the *previous occupant's* still-cached session_state
+    # value instead of its own (a real bug found in review: removing layer B silently corrupted
+    # layer C's enabled/soften values). setdefault() backfills an id for layers restored from a
+    # project/recipe saved before this field existed.
+    for layer in layers:
+        layer.setdefault("id", uuid.uuid4().hex)
 
     with st.expander("➕ Add a selection", expanded=not layers):
         new_kind = st.selectbox(
@@ -173,6 +182,7 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
             if pending_paint and pending_paint != st.session_state.get(paint_committed_key):
                 layers.append(
                     {
+                        "id": uuid.uuid4().hex,
                         "name": f"Painted {len(layers) + 1}",
                         "kind": "Painted",
                         "params": {"mask_b64": pending_paint},
@@ -199,6 +209,7 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
             if st.button("Add selection", key=f"{key_prefix}-add-btn"):
                 layers.append(
                     {
+                        "id": uuid.uuid4().hex,
                         "name": new_name.strip() or new_kind,
                         "kind": new_kind,
                         "params": new_params,
@@ -212,22 +223,26 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
 
     mask_stack = MaskStack(source.size)
     for idx, layer in enumerate(layers):
+        layer_id = layer["id"]
         status_icon = "✅" if layer["enabled"] else "⬜"
         with st.expander(f"{status_icon} {layer['name']} — {layer['kind']}", expanded=False):
-            layer["name"] = st.text_input("Name", layer["name"], key=f"{key_prefix}-name-{idx}")
-            layer["enabled"] = st.checkbox("Enabled", layer["enabled"], key=f"{key_prefix}-en-{idx}")
-            layer["invert"] = st.checkbox("Invert", layer["invert"], key=f"{key_prefix}-inv-{idx}")
+            layer["name"] = st.text_input("Name", layer["name"], key=f"{key_prefix}-name-{layer_id}")
+            layer["enabled"] = st.checkbox("Enabled", layer["enabled"], key=f"{key_prefix}-en-{layer_id}")
+            layer["invert"] = st.checkbox("Invert", layer["invert"], key=f"{key_prefix}-inv-{layer_id}")
             if include_opacity:
-                layer["opacity"] = st.slider("Opacity", 0.0, 1.0, layer["opacity"], 0.05, key=f"{key_prefix}-op-{idx}")
-            layer["soften"] = st.slider("Soften edges (px)", 0, 40, layer.get("soften", 0), key=f"{key_prefix}-sf-{idx}")
-            if st.button("🗑️ Remove", key=f"{key_prefix}-rm-{idx}"):
+                layer["opacity"] = st.slider("Opacity", 0.0, 1.0, layer["opacity"], 0.05, key=f"{key_prefix}-op-{layer_id}")
+            layer["soften"] = st.slider("Soften edges (px)", 0, 40, layer.get("soften", 0), key=f"{key_prefix}-sf-{layer_id}")
+            if st.button("🗑️ Remove", key=f"{key_prefix}-rm-{layer_id}"):
                 layers.pop(idx)
                 _request_rerun()
                 # Stop rendering this list for the rest of this pass rather than continuing
                 # enumerate() over a list we just mutated mid-iteration (deferring the rerun --
                 # see _request_rerun() -- means this loop no longer aborts here the way an
                 # immediate st.rerun() used to). The deferred rerun re-renders the remaining
-                # layers correctly on the very next pass.
+                # layers correctly on the very next pass -- true now that each layer's widget
+                # keys are id-based rather than index-based (see the setdefault() above): a
+                # later layer shifting into a removed layer's old index no longer inherits that
+                # index's cached session_state.
                 break
         base_mask = _build_mask_image(source, layer["kind"], layer["params"])
         if layer["soften"]:
@@ -648,20 +663,48 @@ def _cached_process_via_backend(image_bytes: bytes, filename: str, options: dict
     return process_via_backend(image_bytes, filename, options, local_mask_bytes, layer_bytes, removal_mask_bytes)
 
 
+@st.cache_data(show_spinner=False)
+def _lens_corrected_source(image_bytes: bytes, filename: str, distortion: float, vignette_amount: float, vignette_midpoint: float, chromatic_aberration: float) -> Image.Image:
+    """The base image the Crop preview and the Masks/Repair on-canvas selection tools paint
+    against. app/backend.py::process_image() applies Lens corrections (a real cv2.undistort/remap
+    geometric warp for distortion/chromatic aberration) before Crop or any mask, so a crop box or
+    mask painted against the raw, uncorrected source would land on the wrong pixels once the
+    backend actually warps the image -- worst near edges/corners, where distortion moves content
+    the most. Cached (and a no-op fast path when every lens value is still at its default) since
+    this recomputes on every Streamlit rerun otherwise, not just when a Lens slider changes."""
+    image = PhotoProcessor.from_bytes(image_bytes, filename).image
+    if not (distortion or vignette_amount or chromatic_aberration):
+        return image
+    return apply_lens_corrections(image, distortion, vignette_amount, vignette_midpoint, chromatic_aberration)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_gamut_warning_overlay(image_bytes: bytes, filename: str, icc_bytes: bytes):
+    """gamut_warning_overlay() runs two full-image littlecms conversions -- cached so it only
+    recomputes when the photo or its embedded profile actually changes, not on every Streamlit
+    rerun triggered by an unrelated control while the "Show out-of-gamut pixels" checkbox stays
+    on."""
+    image = PhotoProcessor.from_bytes(image_bytes, filename).image
+    return gamut_warning_overlay(image, icc_bytes)
+
+
 def _request_rerun() -> None:
-    """Use instead of calling st.rerun() directly from inside a tab body (Repair/Layers/Masks/
-    Portrait/Presets/Batch & Library -- anything rendered in the loop over st.tabs()). Streamlit
-    only keeps a keyed widget's session_state value if that widget was actually instantiated
-    during the run immediately before it; every tab's code runs top-to-bottom in one script pass
-    regardless of which tab is visible, so an immediate st.rerun() from an early tab (e.g. Repair
-    or Color, which render before Layers/Masks/Portrait/Presets/Batch & Library) aborts the script
-    right there -- none of those later tabs' widgets get instantiated this pass, so Streamlit
-    garbage-collects their session_state and silently resets them to their `value=` defaults on
-    the very next run. (Same underlying mechanism as the HSL Color Mixer's dropdown-hidden-band
-    bug documented in docs/PROJECT_STATUS.md, just triggered by an early rerun instead of
-    conditional rendering.) Setting this flag and rerunning only after every tab has rendered (see
-    the check right before `options = {...}` below) means every widget in every tab has already
-    been instantiated by the time the rerun actually fires, so nothing gets GC'd."""
+    """Use instead of calling st.rerun() directly from ANY widget callback below this point in the
+    script -- a tab body (Repair/Layers/Masks/Portrait/Presets/Batch & Library), or canvas_col
+    (Undo/Redo/Reset, zoom, split view, pan, export). Streamlit only keeps a keyed widget's
+    session_state value if that widget was actually instantiated during the run immediately before
+    it; the whole script (every tab, then canvas_col) runs top-to-bottom in one pass regardless of
+    which tab is visible, so an immediate st.rerun() from anywhere before the last widget in that
+    sequence aborts the script right there -- none of the not-yet-reached widgets get instantiated
+    this pass, so Streamlit garbage-collects their session_state and silently resets them to their
+    `value=` defaults on the very next run. (Same underlying mechanism as the HSL Color Mixer's
+    dropdown-hidden-band bug documented in docs/PROJECT_STATUS.md, just triggered by an early
+    rerun instead of conditional rendering -- a real instance of exactly this was found in review:
+    the consume-check below used to sit before canvas_col rendered, so any tab's _request_rerun()
+    call was already resetting canvas_col's zoom/pan/split-view/export settings, and Library
+    Catalog's and canvas_col's own Undo/Redo/Reset buttons called st.rerun() directly and had the
+    same effect.) Setting this flag and rerunning only after the very last widget in the script has
+    rendered (see the check at the bottom of this file) means nothing gets GC'd."""
     st.session_state["_rerun_pending"] = True
 
 
@@ -999,6 +1042,14 @@ with st.container(key="workspace-split"):
                 help="Corrects red/cyan and blue/yellow fringing near high-contrast edges.",
             )
 
+        # The Crop preview and the Masks/Repair selection tools below all paint against this,
+        # not the raw `source` -- see _lens_corrected_source()'s docstring for why: the backend
+        # applies Lens corrections before Crop/Masks/Repair, so those tools need to agree with it
+        # on which pixel is where.
+        mask_source = _lens_corrected_source(
+            upload_bytes, upload_name, lens_distortion, lens_vignette_amount, lens_vignette_midpoint, lens_chromatic_aberration
+        )
+
         # TAB: CROP & ASPECT RATIO -- placed right after Tone for workflow convenience (frame the
         # shot before fine-tuning tone/color); still applied last in the actual pipeline, see the
         # note above the tabs() call.
@@ -1021,7 +1072,7 @@ with st.container(key="workspace-split"):
                     st.warning("Select a non-empty region.")
                 else:
                     crop_box = (x_range[0], y_range[0], x_range[1], y_range[1])
-                    preview = source.copy()
+                    preview = mask_source.copy()
                     ImageDraw.Draw(preview).rectangle(crop_box, outline=(255, 60, 40), width=max(2, src_w // 200))
                     st.image(preview, caption=f"Crop preview: {crop_box[2] - crop_box[0]}×{crop_box[3] - crop_box[1]}px", use_container_width=True)
             elif crop_choice != "Original":
@@ -1106,11 +1157,11 @@ with st.container(key="workspace-split"):
                     if st.checkbox("Show out-of-gamut pixels", key="gamut-warning-toggle"):
                         try:
                             st.image(
-                                gamut_warning_overlay(source, source_icc_bytes),
+                                _cached_gamut_warning_overlay(upload_bytes, upload_name, source_icc_bytes),
                                 caption="Magenta = clipped when converted to this app's sRGB working space",
                                 use_container_width=True,
                             )
-                        except (OSError, ValueError, ImageCms.PyCMSError):
+                        except ICC_TRANSFORM_ERRORS:
                             st.caption("Could not read this photo's embedded color profile.")
 
         # TAB 3: DETAIL & SHARPNESS
@@ -1125,7 +1176,7 @@ with st.container(key="workspace-split"):
             st.markdown("**Remove Objects**")
             st.caption("Select the blemish or object to remove with the same selection tools as Masks (below). The selected area is painted over by blending in nearby texture.")
 
-            removal_stack = _render_selection_stack("removal_mask_layers", "rm", source, include_opacity=False)
+            removal_stack = _render_selection_stack("removal_mask_layers", "rm", mask_source, include_opacity=False)
             removal_combined_mask = removal_stack.combined()
             removal_active = any(layer["enabled"] for layer in st.session_state.removal_mask_layers)
 
@@ -1141,7 +1192,7 @@ with st.container(key="workspace-split"):
 
             if st.checkbox("👁️ Preview removal selection", key="rm-preview-overlay") and st.session_state.removal_mask_layers:
                 # Yellow (vs. Masks' red) so the two overlays are never confused with each other.
-                st.image(apply_mask_overlay(source, removal_combined_mask, color=(255, 200, 0)), caption="Yellow = will be removed", use_container_width=True)
+                st.image(apply_mask_overlay(mask_source, removal_combined_mask, color=(255, 200, 0)), caption="Yellow = will be removed", use_container_width=True)
 
         # TAB 4: LAYERS & COMPOSITING
         with tab_layers:
@@ -1163,7 +1214,7 @@ with st.container(key="workspace-split"):
             st.markdown("**Mask Layers**")
             st.caption("Build several named selections and combine them into one mask (union). The target adjustments below apply only where the combined mask is active.")
 
-            mask_stack = _render_selection_stack("mask_layers", "m", source)
+            mask_stack = _render_selection_stack("mask_layers", "m", mask_source)
             # Union of every enabled layer (or an all-zero, no-op mask when there are none).
             combined_mask = mask_stack.combined()
 
@@ -1173,9 +1224,10 @@ with st.container(key="workspace-split"):
                 st.caption("All mask layers are disabled — the sliders below have no effect.")
 
             if st.checkbox("👁️ Preview combined mask overlay", key="m-preview-overlay") and st.session_state.mask_layers:
-                # Overlaid on the untouched source -- the backend-processed preview isn't available
-                # locally, so this debug view shows the selection rather than the live edited result.
-                st.image(apply_mask_overlay(source, combined_mask), caption="Red = selected by the combined mask", use_container_width=True)
+                # Overlaid on mask_source (lens-corrected, but otherwise untouched) -- the
+                # backend-processed preview isn't available locally, so this debug view shows the
+                # selection rather than the live edited result.
+                st.image(apply_mask_overlay(mask_source, combined_mask), caption="Red = selected by the combined mask", use_container_width=True)
 
             mask_inert = not any(layer["enabled"] for layer in st.session_state.mask_layers)
             m_exp = st.slider("Target Exposure", 0.5, 1.5, 1.0, 0.01, key="m-texp", disabled=mask_inert)
@@ -1302,10 +1354,10 @@ with st.container(key="workspace-split"):
                         nav_prev, nav_next = st.columns(2)
                         if nav_prev.button("⬅ Prev", key="lib-prev-btn", use_container_width=True):
                             st.session_state["lib-cursor"] = (cursor - 1) % len(rec)
-                            st.rerun()
+                            _request_rerun()
                         if nav_next.button("Next ➡", key="lib-next-btn", use_container_width=True):
                             st.session_state["lib-cursor"] = (cursor + 1) % len(rec)
-                            st.rerun()
+                            _request_rerun()
 
                         st.caption("Rating (keys 1-5, 0 to clear, X to reject, ←/→ to move)")
                         star_cols = st.columns(5)
@@ -1313,17 +1365,17 @@ with st.container(key="workspace-split"):
                             label = "⭐" if i < existing["rating"] else "☆"
                             if star_cols[i].button(label, key=f"lib-star-{i + 1}", use_container_width=True):
                                 catalog.upsert(current_path, rating=i + 1, tags=existing["tags"])
-                                st.rerun()
+                                _request_rerun()
 
                         clear_col, reject_col = st.columns(2)
                         if clear_col.button("Clear rating", key="lib-clear-btn", use_container_width=True):
                             catalog.upsert(current_path, rating=0, tags=existing["tags"])
-                            st.rerun()
+                            _request_rerun()
                         reject_label = "🚫 Un-reject" if is_rejected else "🚫 Reject"
                         if reject_col.button(reject_label, key="lib-reject-btn", use_container_width=True):
                             new_tags = [t for t in existing["tags"] if t != "rejected"] if is_rejected else existing["tags"] + ["rejected"]
                             catalog.upsert(current_path, rating=existing["rating"], tags=new_tags)
-                            st.rerun()
+                            _request_rerun()
 
                         visible_tags = ", ".join(t for t in existing["tags"] if t != "rejected")
                         tags_text = st.text_input("Tags (comma-separated)", value=visible_tags, key=f"lib-tags-{cursor}")
@@ -1358,14 +1410,13 @@ with st.container(key="workspace-split"):
         # (Lens -> Tone -> Color -> Detail -> Repair -> Layers -> Masks -> Portrait -> Crop, matching
         # the tab order above) runs once, here, on app/backend.py -- see that module's process_image()
         # for the mirrored order.
-
-        # A tab body above may have called _request_rerun() instead of st.rerun() directly (adding/
-        # removing a mask selection, Auto Enhance, committing the curve editor, importing presets --
-        # see that function's docstring). Actually rerunning only here, now that every tab's widgets
-        # have been instantiated this pass, is what stops Streamlit from garbage-collecting a later
-        # tab's session_state and silently resetting it to defaults.
-        if st.session_state.pop("_rerun_pending", False):
-            st.rerun()
+        #
+        # Note: the deferred-rerun consume check for _request_rerun() (used by tab bodies above)
+        # deliberately does NOT live here -- canvas_col, below, still has its own widgets left to
+        # instantiate this pass (zoom, split view, pan, export, Undo/Redo/Reset), and rerunning
+        # before they render would garbage-collect them exactly like the bug _request_rerun() exists
+        # to prevent (a real instance of this was found in review). See the check at the very bottom
+        # of this file, after canvas_col.
 
         options = {
             "lens_distortion": lens_distortion,
@@ -1423,17 +1474,17 @@ with st.container(key="workspace-split"):
         with top_undo:
             if st.button("↶", key="hist-undo-btn", disabled=not history.can_undo, help="Undo", use_container_width=True):
                 st.session_state["_pending_restore"] = history.undo() or {}
-                st.rerun()
+                _request_rerun()
         with top_redo:
             if st.button("↷", key="hist-redo-btn", disabled=not history.can_redo, help="Redo", use_container_width=True):
                 st.session_state["_pending_restore"] = history.redo() or {}
-                st.rerun()
+                _request_rerun()
         with top_reset:
             # Resets exactly the same "recipe" fields Undo/Redo operate on (see _build_recipe), so it
             # deliberately leaves an uploaded layer/RAW source alone -- only the adjustment values reset.
             if st.button("↺", key="hist-reset-btn", help="Reset all adjustments to defaults", use_container_width=True):
                 st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": []}
-                st.rerun()
+                _request_rerun()
         with top_c2:
             zoom_level = st.selectbox("Zoom View", [1.0, 0.5, 1.5, 2.0, 4.0], format_func=lambda z: f"🔍 {int(z*100)}%" if z>=1 else f"🔍 {int(z*100)}% (Fit)", key="cv-zoom", label_visibility="collapsed")
         with top_c3:
@@ -1504,3 +1555,13 @@ with st.container(key="workspace-split"):
                 key="exp-download-btn",
             )
         st.markdown('</div>', unsafe_allow_html=True)
+
+# A tab body or canvas_col control above may have called _request_rerun() instead of st.rerun()
+# directly (adding/removing a mask selection, Auto Enhance, committing the curve editor, importing
+# presets, Undo/Redo/Reset, Library Catalog's Prev/Next/rating buttons -- see that function's
+# docstring). Actually rerunning only here, at the very end of the script, now that every widget in
+# every tab AND in canvas_col has been instantiated this pass, is what stops Streamlit from
+# garbage-collecting a not-yet-rendered widget's session_state and silently resetting it to its
+# `value=` default.
+if st.session_state.pop("_rerun_pending", False):
+    st.rerun()

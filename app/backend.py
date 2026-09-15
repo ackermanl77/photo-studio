@@ -4,8 +4,9 @@ import json
 import time
 from io import BytesIO
 
+import cv2
 from flask import Flask, g, jsonify, request, send_file
-from PIL import Image, ImageCms
+from PIL import Image
 
 from app.config import MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES, BACKEND_HOST, BACKEND_PORT
 from app.image_processor import PhotoProcessor
@@ -13,7 +14,7 @@ from app.layer_workspace import LayerWorkspace, WorkspaceLayer
 from app.observability import ProcessingAudit, configure_json_logger, log_audit
 from app.portrait_tools import smooth_skin
 from app.presets import PRESETS, apply_preset
-from app.professional_color import normalize_to_srgb, srgb_icc_bytes
+from app.professional_color import ICC_TRANSFORM_ERRORS, normalize_to_srgb, srgb_icc_bytes
 from app.raw_import import is_raw_path
 from app.reliability import new_request_id, validate_image_bytes
 
@@ -83,7 +84,7 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
         try:
             processor.image = normalize_to_srgb(processor.image, source_icc)
             source_icc = srgb_icc_bytes()
-        except (OSError, ValueError, ImageCms.PyCMSError):
+        except ICC_TRANSFORM_ERRORS:
             # Malformed/truncated/non-ICC bytes under the "icc_profile" key, or a profile
             # littlecms can open but can't build a transform from (some files carry genuine
             # garbage there) -- fall back to the old behavior (preserve whatever was embedded,
@@ -209,7 +210,11 @@ def process():
             result.save(buffer, **save_options)
         buffer.seek(0)
         return send_file(buffer, mimetype=mime, download_name="edited.jpg" if output_format == "JPEG" else "edited.png")
-    except (KeyError, ValueError, OSError, RuntimeError, json.JSONDecodeError) as error:
+    except (KeyError, ValueError, OSError, RuntimeError, json.JSONDecodeError, cv2.error) as error:
+        # cv2.error included alongside the usual set: apply_denoise()'s Non-Local Means step (a
+        # cv2 call, unlike the old flat median filter) can raise it for a degenerate input (e.g. an
+        # image smaller than its fixed 21px search window) -- without this it would fall through to
+        # Flask's generic HTML 500 instead of the same clean JSON error every other failure gets.
         return jsonify({"error": str(error)}), 400
     except Image.DecompressionBombError as error:
         return jsonify({"error": f"Image exceeds the configured pixel limit: {error}"}), 413

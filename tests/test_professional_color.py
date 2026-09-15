@@ -7,6 +7,7 @@ from PIL import Image
 from app.professional_color import (
     ColorSettings,
     HSL_BAND_HUES,
+    ICC_TRANSFORM_ERRORS,
     WORKING_SPACES,
     _highlight_mismatches,
     apply_gamma_curve,
@@ -102,6 +103,22 @@ def test_normalize_to_srgb_is_a_near_identity_for_an_already_srgb_source():
     before = np.asarray(image, dtype=np.int16)
     after = np.asarray(result, dtype=np.int16)
     assert np.abs(before - after).max() <= 2
+
+
+def test_icc_transform_errors_covers_every_failure_mode_normalize_to_srgb_can_raise():
+    """A shared constant, not duplicated per-callsite tuples -- app/backend.py and
+    app/frontend_unified_app.py both import this instead of each hand-writing their own copy of
+    "every exception a malformed ICC profile can raise" (a real reuse gap found in review: they'd
+    drifted out of sync risk if littlecms started raising something new and only one copy got
+    updated). ImageCms.open() raises OSError for unparseable bytes; profileToProfile() raises
+    ImageCms.PyCMSError when it can open a profile but can't build a transform from it."""
+    from PIL import ImageCms
+
+    assert OSError in ICC_TRANSFORM_ERRORS
+    assert ImageCms.PyCMSError in ICC_TRANSFORM_ERRORS
+
+    with pytest.raises(ICC_TRANSFORM_ERRORS):
+        normalize_to_srgb(Image.new("RGB", (4, 4), (1, 2, 3)), b"not a real icc profile")
 
 
 def test_gamut_warning_overlay_shows_no_warnings_for_an_already_srgb_source():
