@@ -60,7 +60,7 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 - Per-channel HSL color grading ("Color Mixer") — independent Hue/Saturation/Luminance adjustment for each of 8 named color bands (Red/Orange/Yellow/Green/Aqua/Blue/Purple/Magenta).
 - Lens corrections (distortion, vignette, chromatic aberration) — not a calibrated per-lens-model profile database, just typical starting points by lens category (Wide-angle, Standard zoom, Telephoto, Fisheye) plus manual sliders to fine-tune.
 - Object removal / repair: select a blemish or object with the same Luminance/Color/gradient/Radial/Painted selection tools as Masks, then it's inpainted away.
-- Built-in presets with live thumbnail previews, plus custom presets you can save, and export/import as a shareable `.json` file.
+- Built-in presets with live thumbnail previews, plus custom presets you can save, load back onto a photo, delete, and export/import as a shareable `.json` file. Saving captures the full set of adjustments (masks included), not just a handful of basic sliders.
 - Undo/Redo and a one-click Reset to defaults, always available in the bar above the canvas regardless of which tab is open.
 - Combinable named masks (`app/advanced_masks.py::MaskStack`) — any number of Luminance/Color/gradient/Radial/Painted selections, each with opacity/invert/soften, unioned into one target adjustment. "Painted" selections are made on-canvas — freehand brush (with an eraser), a drag-out radial, or a drag-out gradient — instead of typing in parameters.
 - Layers with opacity, blending (normal/multiply/screen), preserved through Save/Load Project.
