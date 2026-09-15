@@ -16,6 +16,8 @@ $env:PHOTO_MAX_IMAGE_PIXELS = "80000000"
 
 ## Export controls
 
+> **Histórico:** esta lista está desactualizada. La barra de exportación actual (`app/frontend_unified_app.py`, footer del canvas) ofrece JPEG, PNG, WEBP y TIFF (no solo JPEG/PNG), y no tiene ningún control de redimensionado máximo ni de eliminación de metadatos — exporta a las dimensiones del resultado editado tal cual. Ver `docs/PROJECT_STATUS.md` para el estado vigente.
+
 The frontend supports:
 
 - JPEG or PNG output
