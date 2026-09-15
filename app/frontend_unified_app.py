@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 from pathlib import Path
 
 import streamlit as st
@@ -210,6 +211,113 @@ def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, in
     return html, display_height
 
 
+def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, int]]) -> str:
+    """A draggable RGB tone curve: an inline SVG with five points, each vertically draggable
+    within its own [min, max] (matching the five sliders below it -- Blacks/Shadows/Midtones/
+    Highlights/Whites). Dragging only updates the curve's own SVG locally; only on release does
+    it write the new value into the real slider (an `<input type="range">` inside the
+    `st.container(key="curve-points")` wrapper below) via the same native-value-setter trick used
+    elsewhere, then dispatches `input`/`change` so Streamlit picks it up and reruns. Committing
+    only on release (not on every pointermove) matters because a Streamlit rerun replaces this
+    whole iframe -- doing it mid-drag would tear down the drag gesture. Also clicks the "Enable
+    RGB Curve" checkbox on first drag if it isn't already checked, matching how a curve panel in
+    a professional editor implicitly turns itself on when touched. No component library
+    dependency, same approach as `_before_after_html` above.
+    """
+    margin_left, margin_top, plot_size = 34, 12, 210
+    svg_w, svg_h = margin_left + plot_size + 12, margin_top + plot_size + 12
+
+    def _to_px(x: float, y: float) -> tuple[float, float]:
+        return (margin_left + (x / 255) * plot_size, margin_top + plot_size - (y / 255) * plot_size)
+
+    poly = " ".join(f"{px:.1f},{py:.1f}" for px, py in (_to_px(x, y) for x, y in points))
+    circles = "\n".join(
+        f'<circle class="pt" data-idx="{i}" cx="{px:.1f}" cy="{py:.1f}" r="7"></circle>'
+        for i, (px, py) in enumerate(_to_px(x, y) for x, y in points)
+    )
+    diag_x0, diag_y0 = _to_px(0, 0)
+    diag_x1, diag_y1 = _to_px(255, 255)
+    points_json = json.dumps(points)
+    bounds_json = json.dumps(bounds)
+    return f"""
+    <div style="background:#0f172a;border-radius:8px;padding:6px 8px;">
+    <svg id="curve-svg" width="100%" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}"
+         preserveAspectRatio="xMinYMin meet" style="touch-action:none;display:block;">
+      <rect x="{margin_left}" y="{margin_top}" width="{plot_size}" height="{plot_size}"
+            fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.15)"/>
+      <line x1="{diag_x0:.1f}" y1="{diag_y0:.1f}" x2="{diag_x1:.1f}" y2="{diag_y1:.1f}"
+            stroke="rgba(255,255,255,0.2)" stroke-dasharray="3,3"/>
+      <polyline id="curve-line" points="{poly}" fill="none" stroke="#fbbf24" stroke-width="2"/>
+      {circles}
+    </svg>
+    </div>
+    <style>
+      #curve-svg .pt {{ fill:#fbbf24; stroke:#1e293b; stroke-width:2; cursor:ns-resize; }}
+      #curve-svg .pt:hover {{ fill:#fde68a; }}
+    </style>
+    <script>
+      (function() {{
+        const marginLeft = {margin_left}, marginTop = {margin_top}, plotSize = {plot_size}, svgW = {svg_w};
+        const bounds = {bounds_json};
+        const points = {points_json};
+        const svg = document.getElementById('curve-svg');
+        const line = document.getElementById('curve-line');
+        function toPx(x, y) {{ return [marginLeft + (x / 255) * plotSize, marginTop + plotSize - (y / 255) * plotSize]; }}
+        function fromPy(py) {{ return Math.max(0, Math.min(255, ((marginTop + plotSize - py) / plotSize) * 255)); }}
+        function redraw() {{
+          line.setAttribute('points', points.map(p => toPx(p[0], p[1]).join(',')).join(' '));
+          svg.querySelectorAll('.pt').forEach((c, i) => {{
+            const [px, py] = toPx(points[i][0], points[i][1]);
+            c.setAttribute('cx', px); c.setAttribute('cy', py);
+          }});
+        }}
+        function commit(idx, value) {{
+          try {{
+            const container = window.parent.document.querySelector('.st-key-curve-points');
+            if (!container) return;
+            const inputs = container.querySelectorAll('input[type="range"]');
+            const target = inputs[idx];
+            if (!target) return;
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            setter.call(target, String(value));
+            target.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            target.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            const checkbox = container.querySelector('input[type="checkbox"]');
+            if (checkbox && !checkbox.checked) {{ checkbox.click(); }}
+          }} catch (e) {{}}
+        }}
+        let dragIdx = null;
+        svg.querySelectorAll('.pt').forEach((circle, i) => {{
+          circle.addEventListener('pointerdown', (e) => {{
+            dragIdx = i;
+            circle.setPointerCapture(e.pointerId);
+            e.preventDefault();
+          }});
+        }});
+        svg.addEventListener('pointermove', (e) => {{
+          if (dragIdx === null) return;
+          const rect = svg.getBoundingClientRect();
+          const scale = svgW / rect.width;
+          const py = (e.clientY - rect.top) * scale;
+          let value = Math.round(fromPy(py));
+          const [lo, hi] = bounds[dragIdx];
+          value = Math.max(lo, Math.min(hi, value));
+          points[dragIdx][1] = value;
+          redraw();
+        }});
+        function endDrag() {{
+          if (dragIdx === null) return;
+          const idx = dragIdx, value = points[idx][1];
+          dragIdx = null;
+          commit(idx, value);
+        }}
+        svg.addEventListener('pointerup', endDrag);
+        svg.addEventListener('pointerleave', endDrag);
+      }})();
+    </script>
+    """
+
+
 @st.cache_data(show_spinner=False)
 def _preset_thumbnails(image_bytes: bytes, filename: str) -> dict[str, bytes]:
     """Small local preview renders for the Preset Look dropdown, so a user can see what each
@@ -229,6 +337,46 @@ def _preset_thumbnails(image_bytes: bytes, filename: str) -> dict[str, bytes]:
         thumb.save(buffer, format="PNG")
         encoded[name] = buffer.getvalue()
     return encoded
+
+
+# Keyboard shortcuts for the Library Catalog's "Rate & Flag" panel: 1-5 rate, 0 clears, X toggles
+# reject, arrows move Prev/Next. Reaches into window.parent.document (the real Streamlit page --
+# this component's iframe is same-origin via `srcdoc`, confirmed live) to `.click()` the real
+# buttons inside `st.container(key="lib-rate-controls")`, by fixed position (see the Python code
+# that builds that container -- the two must stay in the same order). Skips the parent's normal
+# typing targets (inputs/textareas) so it doesn't hijack the Search or Tags fields, and only acts
+# when the panel is actually visible (`offsetParent !== null`) so it doesn't fire from a hidden
+# tab -- every tab's Python code runs on every rerun in this app, visible or not. A static string,
+# not a per-render function, since it has no values to interpolate.
+_LIBRARY_KEYBOARD_SHORTCUTS_HTML = """
+<script>
+  (function() {
+    const KEY_TO_BUTTON_INDEX = {
+      'ArrowLeft': 0, 'ArrowRight': 1,
+      '1': 2, '2': 3, '3': 4, '4': 5, '5': 6,
+      '0': 7, 'x': 8, 'X': 8,
+    };
+    function handler(e) {
+      const active = window.parent.document.activeElement;
+      const tag = active && active.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const idx = KEY_TO_BUTTON_INDEX[e.key];
+      if (idx === undefined) return;
+      const container = window.parent.document.querySelector('.st-key-lib-rate-controls');
+      if (!container || container.offsetParent === null) return;
+      const buttons = container.querySelectorAll('button');
+      const target = buttons[idx];
+      if (!target) return;
+      target.click();
+      e.preventDefault();
+    }
+    if (!window.parent._photoStudioLibraryShortcutsBound) {
+      window.parent.document.addEventListener('keydown', handler);
+      window.parent._photoStudioLibraryShortcutsBound = true;
+    }
+  })();
+</script>
+"""
 
 
 @st.cache_data(show_spinner="🎨 Applying edits…")
@@ -548,12 +696,23 @@ with st.container(key="workspace-split"):
             sat_val = st.slider("Saturation", 0.0, 2.0, 1.0, 0.01, key="c-sat")
             
             with st.expander("RGB Tone Curve", expanded=False):
-                use_curve = st.checkbox("Enable RGB Curve", value=False, key="c-curve-en")
-                c_black = st.slider("Blacks", 0, 64, 0, key="c-p0")
-                c_low = st.slider("Shadows", 0, 128, 64, key="c-p1")
-                c_mid = st.slider("Midtones", 64, 192, 128, key="c-p2")
-                c_high = st.slider("Highlights", 128, 255, 192, key="c-p3")
-                c_white = st.slider("Whites", 192, 255, 255, key="c-p4")
+                curve_bounds = [(0, 64), (0, 128), (64, 192), (128, 255), (192, 255)]
+                preview_points = [
+                    (0, st.session_state.get("c-p0", 0)),
+                    (64, st.session_state.get("c-p1", 64)),
+                    (128, st.session_state.get("c-p2", 128)),
+                    (192, st.session_state.get("c-p3", 192)),
+                    (255, st.session_state.get("c-p4", 255)),
+                ]
+                components.html(_curve_editor_html(preview_points, curve_bounds), height=246)
+                with st.container(key="curve-points"):
+                    use_curve = st.checkbox("Enable RGB Curve", value=False, key="c-curve-en")
+                    c_black = st.slider("Blacks", 0, 64, 0, key="c-p0")
+                    c_low = st.slider("Shadows", 0, 128, 64, key="c-p1")
+                    c_mid = st.slider("Midtones", 64, 192, 128, key="c-p2")
+                    c_high = st.slider("Highlights", 128, 255, 192, key="c-p3")
+                    c_white = st.slider("Whites", 192, 255, 255, key="c-p4")
+                st.caption("Drag a point on the curve, or use the sliders below for exact values.")
 
         # TAB 3: DETAIL & SHARPNESS
         with tab_detail:
@@ -719,11 +878,64 @@ with st.container(key="workspace-split"):
                 lib_db = Path.home() / ".photo-studio" / "catalog.sqlite"
                 if st.button("Scan Folder", key="lib-btn"):
                     st.session_state.records = index_folder(lib_folder, lib_db, True)
+                    st.session_state["lib-cursor"] = 0
                     st.toast(f"Indexed {len(st.session_state.records)} photo(s)", icon="✅")
                 rec = st.session_state.get("records", [])
                 q = st.text_input("Search", key="lib-q-in")
                 r_min = st.slider("Min Stars", 0, 5, 0, key="lib-r-in")
                 st.dataframe(PhotoCatalog(lib_db).search(q, r_min) if rec else [], use_container_width=True)
+
+                if rec:
+                    st.markdown("**Rate & Flag**")
+                    cursor = max(0, min(st.session_state.get("lib-cursor", 0), len(rec) - 1))
+                    current_path = rec[cursor]["path"]
+                    catalog = PhotoCatalog(lib_db)
+                    existing = catalog.get(current_path)
+                    is_rejected = "rejected" in existing["tags"]
+
+                    st.caption(f"{cursor + 1} / {len(rec)} — {Path(current_path).name}" + (" — 🚫 rejected" if is_rejected else ""))
+                    try:
+                        st.image(current_path, width=240)
+                    except Exception:
+                        st.caption("Preview unavailable.")
+
+                    with st.container(key="lib-rate-controls"):
+                        nav_prev, nav_next = st.columns(2)
+                        if nav_prev.button("⬅ Prev", key="lib-prev-btn", use_container_width=True):
+                            st.session_state["lib-cursor"] = (cursor - 1) % len(rec)
+                            st.rerun()
+                        if nav_next.button("Next ➡", key="lib-next-btn", use_container_width=True):
+                            st.session_state["lib-cursor"] = (cursor + 1) % len(rec)
+                            st.rerun()
+
+                        st.caption("Rating (keys 1-5, 0 to clear, X to reject, ←/→ to move)")
+                        star_cols = st.columns(5)
+                        for i in range(5):
+                            label = "⭐" if i < existing["rating"] else "☆"
+                            if star_cols[i].button(label, key=f"lib-star-{i + 1}", use_container_width=True):
+                                catalog.upsert(current_path, rating=i + 1, tags=existing["tags"])
+                                st.rerun()
+
+                        clear_col, reject_col = st.columns(2)
+                        if clear_col.button("Clear rating", key="lib-clear-btn", use_container_width=True):
+                            catalog.upsert(current_path, rating=0, tags=existing["tags"])
+                            st.rerun()
+                        reject_label = "🚫 Un-reject" if is_rejected else "🚫 Reject"
+                        if reject_col.button(reject_label, key="lib-reject-btn", use_container_width=True):
+                            new_tags = [t for t in existing["tags"] if t != "rejected"] if is_rejected else existing["tags"] + ["rejected"]
+                            catalog.upsert(current_path, rating=existing["rating"], tags=new_tags)
+                            st.rerun()
+
+                        visible_tags = ", ".join(t for t in existing["tags"] if t != "rejected")
+                        tags_text = st.text_input("Tags (comma-separated)", value=visible_tags, key=f"lib-tags-{cursor}")
+                        if st.button("Save tags", key="lib-tags-save-btn"):
+                            new_tags = [t.strip() for t in tags_text.split(",") if t.strip()]
+                            if is_rejected:
+                                new_tags.append("rejected")
+                            catalog.upsert(current_path, rating=existing["rating"], tags=new_tags)
+                            st.toast("Tags saved", icon="🏷️")
+
+                    components.html(_LIBRARY_KEYBOARD_SHORTCUTS_HTML, height=0)
             elif more_mode == "Batch Processor":
                 b_uploaded = st.file_uploader("Batch Files", type=["jpg", "jpeg", "png"], accept_multiple_files=True, key="b-up")
                 b_prof = st.selectbox("Profile", list(EXPORT_PROFILES), key="b-p-sel")
