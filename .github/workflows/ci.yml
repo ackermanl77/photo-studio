@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      # Core requirements only -- requirements-raw.txt (rawpy) and requirements-desktop.txt
+      # (pywebview/PyInstaller) exist for the local dev/build workflow, not the test suite: no
+      # test actually exercises real RAW decoding or the desktop window, and pywebview in
+      # particular can need system GTK/WebKit packages on Linux that a plain runner doesn't have
+      # -- installing it here would add real risk for zero test coverage benefit.
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile check
+        run: python -m compileall -q app
+
+      - name: Run tests
+        run: python -m pytest -q

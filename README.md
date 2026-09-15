@@ -1,5 +1,7 @@
 # Photo Professional Tool
 
+[![CI](https://github.com/ackermanl77/photo-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/ackermanl77/photo-studio/actions/workflows/ci.yml)
+
 A CPU-first Python photo editor with a Streamlit interface, Windows desktop packaging, RAW import, layers, masks, presets, catalog tools, batch export, project sessions, and diagnostics.
 
 ## Current Status
@@ -85,5 +87,7 @@ C:\Users\MELEJ\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pytest -q
 ```
 
 Run this yourself before trusting a pass count — different historical snapshots in `docs/workflows/` report different totals as the suite grew.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the same `compileall` + `pytest` on every push and pull request, installing only `requirements.txt` — `requirements-raw.txt` (rawpy) and `requirements-desktop.txt` (pywebview/PyInstaller) are for the local dev/build workflow, not the test suite, and installing pywebview on a plain Linux runner risks needing system GTK/WebKit packages the runner doesn't have, for zero test coverage benefit.
 
 See [docs/workflows/README.md](docs/workflows/README.md) and [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
