@@ -25,6 +25,7 @@ from streamlit.testing.v1 import AppTest
 from app import backend_client
 from app.backend import process_image
 from app.layer_workspace import LayerWorkspace, WorkspaceLayer
+from app.major_features import PhotoCatalog
 from app.presets import PRESETS
 from app.project import PhotoProject
 from app.project_bundle import ProjectBundle
@@ -443,3 +444,95 @@ def test_load_project_still_reads_the_legacy_photoproject_format():
     assert not at.exception
     assert at.session_state["restored_source_name"] == "legacy.png"
     assert at.slider(key="t-exp").value == 1.4
+
+
+def test_rgb_curve_defaults_to_identity_and_is_off():
+    at = run_with_uploaded_image()
+
+    assert at.checkbox(key="c-curve-en").value is False
+    assert at.slider(key="c-p0").value == 0
+    assert at.slider(key="c-p1").value == 64
+    assert at.slider(key="c-p2").value == 128
+    assert at.slider(key="c-p3").value == 192
+    assert at.slider(key="c-p4").value == 255
+
+
+def test_rgb_curve_changes_the_final_image_once_enabled():
+    """The draggable curve editor (a components.html() canvas) drives these same sliders via a
+    JS DOM trick that AppTest can't exercise -- this instead verifies the Python-side wiring the
+    drag ultimately depends on: enabling the curve and moving a point reaches the final image."""
+    at = run_with_uploaded_image()
+    before = canvas_hash(at)
+
+    at.checkbox(key="c-curve-en").set_value(True)
+    at.slider(key="c-p2").set_value(180)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_hash(at) != before
+
+
+def test_library_rating_buttons_write_to_the_catalog(monkeypatch, tmp_path):
+    """Seeds session_state.records directly (the same shape index_folder() produces) instead of
+    scanning a real folder, and redirects Path.home() so PhotoCatalog resolves to a throwaway
+    catalog.sqlite instead of the real ~/.photo-studio/ on whatever machine runs the suite."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    at = run_with_uploaded_image()
+    at.radio[0].set_value("Library Catalog")
+    at.session_state["records"] = [
+        {"path": "photo-a.jpg", "name": "photo-a.jpg", "width": 10, "height": 10, "format": "JPEG", "bytes": 100},
+        {"path": "photo-b.jpg", "name": "photo-b.jpg", "width": 10, "height": 10, "format": "JPEG", "bytes": 100},
+    ]
+    at.run(timeout=30)
+
+    at.button(key="lib-star-4").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    catalog = PhotoCatalog(tmp_path / ".photo-studio" / "catalog.sqlite")
+    assert catalog.get("photo-a.jpg")["rating"] == 4
+    # Rating the first (current) record must not touch the second.
+    assert catalog.get("photo-b.jpg")["rating"] == 0
+
+
+def test_library_reject_toggles_a_tag_without_changing_rating(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    at = run_with_uploaded_image()
+    at.radio[0].set_value("Library Catalog")
+    at.session_state["records"] = [{"path": "photo-a.jpg", "name": "photo-a.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1}]
+    at.run(timeout=30)
+
+    at.button(key="lib-star-3").click()
+    at.run(timeout=30)
+    at.button(key="lib-reject-btn").click()
+    at.run(timeout=30)
+
+    catalog = PhotoCatalog(tmp_path / ".photo-studio" / "catalog.sqlite")
+    record = catalog.get("photo-a.jpg")
+    assert "rejected" in record["tags"]
+    assert record["rating"] == 3
+
+    at.button(key="lib-reject-btn").click()
+    at.run(timeout=30)
+
+    assert "rejected" not in catalog.get("photo-a.jpg")["tags"]
+
+
+def test_library_next_and_prev_cycle_through_records(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    at = run_with_uploaded_image()
+    at.radio[0].set_value("Library Catalog")
+    at.session_state["records"] = [
+        {"path": "a.jpg", "name": "a.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1},
+        {"path": "b.jpg", "name": "b.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1},
+    ]
+    at.run(timeout=30)
+    assert any("1 / 2" in c.value for c in at.caption)
+
+    at.button(key="lib-next-btn").click()
+    at.run(timeout=30)
+    assert any("2 / 2" in c.value for c in at.caption)
+
+    at.button(key="lib-prev-btn").click()
+    at.run(timeout=30)
+    assert any("1 / 2" in c.value for c in at.caption)

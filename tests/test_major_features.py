@@ -43,3 +43,11 @@ def test_photo_catalog_supports_rating_tags_and_search(tmp_path):
     results = catalog.search("portrait", minimum_rating=4)
 
     assert results == [{"path": "portraits/one.jpg", "rating": 5, "tags": ["favorite", "portrait"]}]
+
+
+def test_photo_catalog_get_returns_a_default_for_an_unseen_path(tmp_path):
+    catalog = PhotoCatalog(tmp_path / "photos.sqlite")
+    catalog.upsert("portraits/one.jpg", rating=4, tags=["favorite"])
+
+    assert catalog.get("portraits/one.jpg") == {"path": "portraits/one.jpg", "rating": 4, "tags": ["favorite"]}
+    assert catalog.get("never/scanned.jpg") == {"path": "never/scanned.jpg", "rating": 0, "tags": []}
