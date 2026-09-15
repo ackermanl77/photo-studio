@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 from PIL import Image, ImageEnhance, ImageFilter
 
+from app.professional_color import apply_hsl_mixer
 from app.raw_import import open_image
 
 
@@ -53,6 +54,10 @@ class PhotoProcessor:
         arr[:, :, 0] *= 1.0 + tint * 0.1
         arr[:, :, 2] *= 1.0 + tint * 0.1
         self.image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), mode="RGB")
+        return self
+
+    def apply_hsl_mixer(self, adjustments: dict[str, dict[str, float]]) -> "PhotoProcessor":
+        self.image = apply_hsl_mixer(self.image, adjustments)
         return self
 
     def apply_curves(self, points: list[tuple[int, int]]) -> "PhotoProcessor":

@@ -52,6 +52,18 @@ def test_exposure_and_white_balance_controls(tmp_path):
     assert enhanced.dtype == np.uint8
 
 
+def test_apply_hsl_mixer_delegates_to_professional_color(tmp_path):
+    source = tmp_path / "red.png"
+    Image.new("RGB", (12, 12), color=(220, 40, 40)).save(source)
+    processor = PhotoProcessor(source)
+
+    result = processor.apply_hsl_mixer({"Red": {"hue": 0, "sat": -100, "lum": 0}})
+
+    assert result is processor
+    desaturated = np.array(processor.image, dtype=np.float32)
+    assert abs(int(desaturated[0, 0, 1]) - int(desaturated[0, 0, 2])) < 5  # closer to gray: G ~= B
+
+
 def test_auto_enhance_is_available(tmp_path):
     source = tmp_path / "sample.png"
     Image.new("RGB", (32, 32), color=(120, 110, 100)).save(source)

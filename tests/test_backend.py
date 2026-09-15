@@ -53,6 +53,23 @@ def test_process_endpoint_returns_requested_jpeg():
     assert Image.open(io.BytesIO(response.data)).format == "JPEG"
 
 
+def test_process_endpoint_applies_the_hsl_color_mixer():
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes(color=(220, 40, 40), size=(12, 12))), "input.png"),
+            "options": json.dumps({"hsl_bands": {"Red": {"hue": 0, "sat": -100, "lum": 0}}}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    result = np.array(Image.open(io.BytesIO(response.data)), dtype=np.int32)
+    # A full desaturation of the Red band on a solid red image should land close to gray (G ~= B).
+    assert abs(int(result[0, 0, 1]) - int(result[0, 0, 2])) < 5
+
+
 def test_process_endpoint_preserves_icc_profile():
     image = Image.new("RGB", (12, 12), color=(100, 110, 120))
     source = io.BytesIO()
