@@ -95,6 +95,16 @@ def _restore_recipe_to_state(recipe: dict) -> None:
         st.session_state["l-blend"] = layer_payload.get("blend", "normal")
 
 
+def _decode_painted_mask(mask_b64: str) -> Image.Image:
+    """The on-canvas paint editor (_paint_editor_html) always draws in solid white at varying
+    alpha -- alpha 0 = unpainted, alpha 255 = fully selected -- so the alpha channel of the PNG
+    it exports *is* the grayscale mask. Deliberately returned at whatever (smaller-than-source)
+    resolution the canvas was drawn at: MaskLayer.normalized() already resizes every mask kind to
+    the source's size before use, so upscaling here too would be redundant work."""
+    raw = base64.b64decode(mask_b64)
+    return Image.open(io.BytesIO(raw)).convert("RGBA").split()[3]
+
+
 def _build_mask_image(source: Image.Image, kind: str, params: dict) -> Image.Image:
     if kind == "Luminance":
         return luminance_mask(source, params["low"], params["high"])
@@ -102,6 +112,8 @@ def _build_mask_image(source: Image.Image, kind: str, params: dict) -> Image.Ima
         return color_mask(source, params["color"], params["tolerance"])
     if kind == "Radial":
         return radial_mask(source.size)
+    if kind == "Painted":
+        return _decode_painted_mask(params["mask_b64"])
     return gradient_mask(source.size, "horizontal" if "Horizontal" in kind else "vertical")
 
 
@@ -118,32 +130,64 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
 
     with st.expander("➕ Add a selection", expanded=not layers):
         new_kind = st.selectbox(
-            "Selection Type", ["Luminance", "Color", "Horizontal gradient", "Vertical gradient", "Radial"], key=f"{key_prefix}-new-kind",
+            "Selection Type",
+            ["Luminance", "Color", "Horizontal gradient", "Vertical gradient", "Radial", "Painted"],
+            key=f"{key_prefix}-new-kind",
         )
-        new_params: dict = {}
-        if new_kind == "Luminance":
-            new_params["low"] = st.slider("Min Luma", 0, 255, 0, key=f"{key_prefix}-new-lmin")
-            new_params["high"] = st.slider("Max Luma", 0, 255, 255, key=f"{key_prefix}-new-lmax")
-        elif new_kind == "Color":
-            new_color_hex = st.color_picker("Target Color", "#806450", key=f"{key_prefix}-new-color")
-            new_params["color"] = tuple(int(new_color_hex.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
-            new_params["tolerance"] = st.slider("Color Tolerance", 0, 255, 50, key=f"{key_prefix}-new-ctol")
-        new_soften = st.slider("Soften edges (px)", 0, 40, 0, key=f"{key_prefix}-new-soften")
-        new_invert = st.checkbox("Invert selection", key=f"{key_prefix}-new-invert")
-        new_name = st.text_input("Layer name", value=f"{new_kind} {len(layers) + 1}", key=f"{key_prefix}-new-name")
-        if st.button("Add selection", key=f"{key_prefix}-add-btn"):
-            layers.append(
-                {
-                    "name": new_name.strip() or new_kind,
-                    "kind": new_kind,
-                    "params": new_params,
-                    "soften": new_soften,
-                    "invert": new_invert,
-                    "opacity": 1.0,
-                    "enabled": True,
-                }
-            )
-            st.rerun()
+        if new_kind == "Painted":
+            st.caption('Paint directly on the photo below — brush, radial, or gradient, plus an eraser. Click "Add to selections" inside the canvas when done.')
+            paint_html, paint_height = _paint_editor_html(preview_image(source, (480, 480)), key_prefix)
+            components.html(paint_html, height=paint_height)
+            with st.container(key=f"{key_prefix}-paint-hidden"):
+                pending_paint = st.text_area("Painted mask data", key=f"{key_prefix}-paint-data", label_visibility="collapsed")
+            # Streamlit forbids writing to a widget's session_state key after it's already been
+            # instantiated this run (the same rule Undo/Redo/_pending_restore work around
+            # elsewhere), so this can't just clear the field after reading it. Instead, remember
+            # the last string actually turned into a layer and compare against that -- since a
+            # fresh components.html() iframe always starts with a blank canvas, only a genuine new
+            # commit (the user drew something and clicked "Add to selections" again) produces
+            # different base64 data; clicking it twice without drawing anything new is correctly
+            # a no-op rather than a duplicate layer.
+            paint_committed_key = f"{key_prefix}-paint-committed"
+            if pending_paint and pending_paint != st.session_state.get(paint_committed_key):
+                layers.append(
+                    {
+                        "name": f"Painted {len(layers) + 1}",
+                        "kind": "Painted",
+                        "params": {"mask_b64": pending_paint},
+                        "soften": 0,
+                        "invert": False,
+                        "opacity": 1.0,
+                        "enabled": True,
+                    }
+                )
+                st.session_state[paint_committed_key] = pending_paint
+                st.rerun()
+        else:
+            new_params: dict = {}
+            if new_kind == "Luminance":
+                new_params["low"] = st.slider("Min Luma", 0, 255, 0, key=f"{key_prefix}-new-lmin")
+                new_params["high"] = st.slider("Max Luma", 0, 255, 255, key=f"{key_prefix}-new-lmax")
+            elif new_kind == "Color":
+                new_color_hex = st.color_picker("Target Color", "#806450", key=f"{key_prefix}-new-color")
+                new_params["color"] = tuple(int(new_color_hex.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
+                new_params["tolerance"] = st.slider("Color Tolerance", 0, 255, 50, key=f"{key_prefix}-new-ctol")
+            new_soften = st.slider("Soften edges (px)", 0, 40, 0, key=f"{key_prefix}-new-soften")
+            new_invert = st.checkbox("Invert selection", key=f"{key_prefix}-new-invert")
+            new_name = st.text_input("Layer name", value=f"{new_kind} {len(layers) + 1}", key=f"{key_prefix}-new-name")
+            if st.button("Add selection", key=f"{key_prefix}-add-btn"):
+                layers.append(
+                    {
+                        "name": new_name.strip() or new_kind,
+                        "kind": new_kind,
+                        "params": new_params,
+                        "soften": new_soften,
+                        "invert": new_invert,
+                        "opacity": 1.0,
+                        "enabled": True,
+                    }
+                )
+                st.rerun()
 
     mask_stack = MaskStack(source.size)
     for idx, layer in enumerate(layers):
@@ -316,6 +360,179 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
       }})();
     </script>
     """
+
+
+def _paint_editor_html(background: Image.Image, key_prefix: str) -> tuple[str, int]:
+    """An on-canvas selection editor: brush (paint/erase freehand), radial (drag out a circle),
+    and gradient (drag out a direction), all painted onto one HTML canvas as solid white at
+    varying alpha -- alpha *is* the mask value, so "Add to selections" just base64-encodes the
+    canvas as a PNG and that becomes a new MaskLayer's `params["mask_b64"]` (decoded by
+    `_decode_painted_mask`). Committing writes into the hidden `st.text_area` inside
+    `st.container(key=f"{key_prefix}-paint-hidden")` (CSS-hidden -- see the app's <style> block)
+    via the same native-value-setter trick as `_curve_editor_html`, so Python notices it on the
+    next rerun and appends the layer itself (see the "Painted" branch in _render_selection_stack)
+    -- there's no separate native Streamlit "Add" button to click after drawing, the in-canvas
+    button *is* the commit. No component library dependency, same approach as the other editors
+    in this file; avoids a repeat of the streamlit-drawable-canvas dead-weight episode.
+    """
+    width, height = background.size
+    display_w = min(480, width)
+    display_h = int(display_w * height / width) if width else 320
+
+    buffer = io.BytesIO()
+    background.convert("RGB").save(buffer, format="PNG")
+    bg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+    hidden_selector = f".st-key-{key_prefix}-paint-hidden"
+
+    return f"""
+    <div style="background:#0f172a;border-radius:8px;padding:8px;">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+        <button type="button" class="tool-btn active" data-tool="brush">🖌 Brush</button>
+        <button type="button" class="tool-btn" data-tool="radial">⭕ Radial</button>
+        <button type="button" class="tool-btn" data-tool="gradient">📐 Gradient</button>
+        <button type="button" id="erase-btn" class="tool-btn">🧹 Erase</button>
+        <button type="button" id="clear-btn" class="tool-btn">✖ Clear</button>
+        <label style="display:flex;align-items:center;gap:4px;color:#cbd5e1;font:12px system-ui;margin-left:4px;">
+          Size <input id="brush-size" type="range" min="4" max="80" value="18" style="width:80px;">
+        </label>
+      </div>
+      <div style="position:relative;width:100%;max-width:{display_w}px;line-height:0;touch-action:none;">
+        <img src="data:image/png;base64,{bg_b64}" style="display:block;width:100%;height:auto;border-radius:4px;">
+        <canvas id="mask-canvas" width="{display_w}" height="{display_h}"
+                style="position:absolute;inset:0;width:100%;height:100%;opacity:0.6;cursor:crosshair;"></canvas>
+        <canvas id="preview-canvas" width="{display_w}" height="{display_h}"
+                style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;"></canvas>
+      </div>
+      <button type="button" id="commit-btn" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;
+              border:none;background:#fbbf24;color:#1e293b;font:600 13px system-ui;cursor:pointer;">
+        ➕ Add to selections
+      </button>
+    </div>
+    <style>
+      .tool-btn {{ background:rgba(255,255,255,0.08); color:#cbd5e1; border:1px solid rgba(255,255,255,0.15);
+                   border-radius:5px; padding:5px 9px; font:12px system-ui; cursor:pointer; }}
+      .tool-btn.active {{ background:#fbbf24; color:#1e293b; border-color:#fbbf24; }}
+      #erase-btn.active {{ background:#f87171; color:#1e293b; border-color:#f87171; }}
+    </style>
+    <script>
+      (function() {{
+        const maskCanvas = document.getElementById('mask-canvas');
+        const previewCanvas = document.getElementById('preview-canvas');
+        const ctx = maskCanvas.getContext('2d');
+        const pctx = previewCanvas.getContext('2d');
+        const W = maskCanvas.width, H = maskCanvas.height;
+        let tool = 'brush', erasing = false, brushSize = 18;
+        let drawing = false, lastX = 0, lastY = 0, startX = 0, startY = 0;
+
+        document.querySelectorAll('.tool-btn[data-tool]').forEach((btn) => {{
+          btn.addEventListener('click', () => {{
+            tool = btn.dataset.tool;
+            document.querySelectorAll('.tool-btn[data-tool]').forEach((b) => b.classList.toggle('active', b === btn));
+          }});
+        }});
+        document.getElementById('erase-btn').addEventListener('click', (e) => {{
+          erasing = !erasing;
+          e.currentTarget.classList.toggle('active', erasing);
+        }});
+        document.getElementById('clear-btn').addEventListener('click', () => ctx.clearRect(0, 0, W, H));
+        document.getElementById('brush-size').addEventListener('input', (e) => {{ brushSize = Number(e.target.value); }});
+
+        function toCanvasXY(e) {{
+          const rect = maskCanvas.getBoundingClientRect();
+          return [(e.clientX - rect.left) * (W / rect.width), (e.clientY - rect.top) * (H / rect.height)];
+        }}
+
+        function paintDab(x, y) {{
+          ctx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
+          ctx.strokeStyle = 'white'; ctx.fillStyle = 'white';
+          ctx.lineWidth = brushSize * 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(x, y); ctx.stroke();
+          ctx.beginPath(); ctx.arc(x, y, brushSize, 0, Math.PI * 2); ctx.fill();
+        }}
+
+        function paintRadial(cx, cy, radius) {{
+          ctx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
+          const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, radius));
+          grad.addColorStop(0, 'rgba(255,255,255,1)');
+          grad.addColorStop(0.7, 'rgba(255,255,255,1)');
+          grad.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath(); ctx.arc(cx, cy, Math.max(1, radius), 0, Math.PI * 2); ctx.fill();
+        }}
+
+        function paintGradient(x0, y0, x1, y1) {{
+          ctx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
+          const grad = ctx.createLinearGradient(x0, y0, x1, y1);
+          grad.addColorStop(0, 'rgba(255,255,255,1)');
+          grad.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, W, H);
+        }}
+
+        maskCanvas.addEventListener('pointerdown', (e) => {{
+          drawing = true;
+          maskCanvas.setPointerCapture(e.pointerId);
+          [startX, startY] = toCanvasXY(e);
+          lastX = startX; lastY = startY;
+          if (tool === 'brush') paintDab(startX, startY);
+          e.preventDefault();
+        }});
+        maskCanvas.addEventListener('pointermove', (e) => {{
+          if (!drawing) return;
+          const [x, y] = toCanvasXY(e);
+          if (tool === 'brush') {{
+            paintDab(x, y);
+            lastX = x; lastY = y;
+          }} else {{
+            pctx.clearRect(0, 0, W, H);
+            pctx.strokeStyle = 'rgba(255,255,255,0.9)'; pctx.lineWidth = 1.5; pctx.setLineDash([4, 3]);
+            if (tool === 'radial') {{
+              const radius = Math.hypot(x - startX, y - startY);
+              pctx.beginPath(); pctx.arc(startX, startY, radius, 0, Math.PI * 2); pctx.stroke();
+            }} else {{
+              pctx.beginPath(); pctx.moveTo(startX, startY); pctx.lineTo(x, y); pctx.stroke();
+            }}
+          }}
+        }});
+        function endStroke(e) {{
+          if (!drawing) return;
+          drawing = false;
+          pctx.clearRect(0, 0, W, H);
+          if (tool === 'radial') {{
+            const [x, y] = toCanvasXY(e);
+            paintRadial(startX, startY, Math.hypot(x - startX, y - startY));
+          }} else if (tool === 'gradient') {{
+            const [x, y] = toCanvasXY(e);
+            paintGradient(startX, startY, x, y);
+          }}
+        }}
+        maskCanvas.addEventListener('pointerup', endStroke);
+        maskCanvas.addEventListener('pointerleave', endStroke);
+
+        document.getElementById('commit-btn').addEventListener('click', () => {{
+          const base64 = maskCanvas.toDataURL('image/png').split(',')[1];
+          try {{
+            const container = window.parent.document.querySelector('{hidden_selector}');
+            if (!container) return;
+            const textarea = container.querySelector('textarea');
+            if (!textarea) return;
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            textarea.focus();
+            setter.call(textarea, base64);
+            textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            // Confirmed live: unlike a slider/checkbox (which commit on a plain 'change'),
+            // st.text_area only commits -- and reruns the script -- on Ctrl+Enter or on losing
+            // focus, and a synthetic .blur() alone wasn't reliably enough to trigger that in
+            // this Streamlit version. Ctrl+Enter is Streamlit's own documented text_area
+            // shortcut, so dispatch that directly rather than depend on blur semantics.
+            textarea.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
+            textarea.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
+            textarea.blur();
+          }} catch (e) {{}}
+        }});
+      }})();
+    </script>
+    """, display_h + 130
 
 
 @st.cache_data(show_spinner=False)
@@ -513,6 +730,13 @@ footer { visibility: hidden; }
     }
     .st-key-workspace-split [data-testid="stColumn"]:nth-of-type(1) { order: 2; }
     .st-key-workspace-split [data-testid="stColumn"]:nth-of-type(2) { order: 1; }
+}
+
+/* Holds the real <textarea> the on-canvas paint editor's "Add to selections" button writes a
+   base64 mask PNG into (see _paint_editor_html / _render_selection_stack's "Painted" branch) --
+   a plumbing detail, not something the user should ever see or type into directly. */
+.st-key-m-paint-hidden, .st-key-rm-paint-hidden {
+    display: none !important;
 }
 </style>
 """, unsafe_allow_html=True)
