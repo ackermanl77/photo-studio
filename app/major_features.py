@@ -94,6 +94,14 @@ class PhotoCatalog:
         with self._connect() as connection:
             connection.execute("INSERT INTO photos(path, rating, tags) VALUES (?, ?, ?) ON CONFLICT(path) DO UPDATE SET rating=excluded.rating, tags=excluded.tags", (str(path), rating, tag_text))
 
+    def get(self, path: str | Path) -> dict[str, object]:
+        with self._connect() as connection:
+            row = connection.execute("SELECT rating, tags FROM photos WHERE path = ?", (str(path),)).fetchone()
+        if row is None:
+            return {"path": str(path), "rating": 0, "tags": []}
+        rating, tags = row
+        return {"path": str(path), "rating": rating, "tags": tags.split(",") if tags else []}
+
     def search(self, text: str = "", minimum_rating: int = 0) -> list[dict[str, object]]:
         pattern = f"%{text}%"
         with self._connect() as connection:

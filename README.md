@@ -51,7 +51,8 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 
 ## Core Features
 
-- Exposure, contrast, highlights, shadows, temperature, tint, texture, clarity, curves, sharpening, denoise, and a one-click "✨ Auto Enhance" pass, all live in the unified UI. Free-form or named-aspect-ratio crop, positioned right after Tone.
+- Exposure, contrast, highlights, shadows, temperature, tint, texture, clarity, sharpening, denoise, and a one-click "✨ Auto Enhance" pass, all live in the unified UI. Free-form or named-aspect-ratio crop, positioned right after Tone.
+- A draggable RGB tone curve (drag points on the curve itself, or use the numeric sliders below it for exact values).
 - Object removal / repair: select a blemish or object with the same Luminance/Color/gradient/Radial selection tools as Masks, then it's inpainted away.
 - Built-in presets with live thumbnail previews, plus custom presets you can save, and export/import as a shareable `.json` file.
 - Undo/Redo and a one-click Reset to defaults, always available in the bar above the canvas regardless of which tab is open.
@@ -60,7 +61,7 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 - Camera RAW import (`.cr2/.cr3/.nef/.arw/.dng`, optional via `requirements-raw.txt`) directly from the unified UI's uploader.
 - A draggable before/after comparison ("Split View"), plus a live per-channel histogram.
 - ICC profile preservation and tested 16-bit TIFF export support.
-- Local photo library with scanning, thumbnails, ratings, tags, and search.
+- Local photo library with scanning, thumbnails, search, and a Rate & Flag panel (star ratings, reject, tags) with keyboard shortcuts (1-5 rate, 0 clears, X rejects, arrows move Prev/Next).
 - Batch profiles, filename templates, error reports, and ZIP delivery.
 - Save/Load Project (`.photoproject`, `app/project_bundle.py`) persisting the source image, recipe, layer, and mask selections.
 - Preview caching, diagnostics, request IDs, image validation, and structured audit logs.
