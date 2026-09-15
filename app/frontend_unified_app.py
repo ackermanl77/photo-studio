@@ -22,6 +22,7 @@ from app.presets import PRESETS, apply_preset
 from app.preset_exchange import export_presets, import_presets
 from app.portrait_tools import detect_faces
 from app.professional_color import HSL_BAND_ORDER
+from app.lens_corrections import LENS_PROFILES
 from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
 
@@ -47,6 +48,9 @@ RECIPE_WIDGET_KEYS = {
     "portrait_smoothing": "port-sm",
     "mask_target_exposure": "m-texp", "mask_target_contrast": "m-tcont", "mask_target_saturation": "m-tsat",
     "crop_aspect": "crop-aspect", "removal_radius": "rm-radius",
+    "lens_profile": "lens-profile", "lens_distortion": "lens-distortion",
+    "lens_vignette_amount": "lens-vignette-amt", "lens_vignette_midpoint": "lens-vignette-mid",
+    "lens_chromatic_aberration": "lens-ca",
 }
 RECIPE_DEFAULTS = {
     "exposure": 1.0, "contrast": 1.0, "highlights": 0, "shadows": 0, "preset": "None",
@@ -56,6 +60,8 @@ RECIPE_DEFAULTS = {
     "portrait_smoothing": 0.0,
     "mask_target_exposure": 1.0, "mask_target_contrast": 1.0, "mask_target_saturation": 1.0,
     "crop_aspect": "Original", "removal_radius": 3,
+    "lens_profile": "None", "lens_distortion": 0, "lens_vignette_amount": 0, "lens_vignette_midpoint": 50,
+    "lens_chromatic_aberration": 0,
 }
 
 
@@ -907,8 +913,13 @@ with st.container(key="workspace-split"):
         # removal_mask in the actual pipeline (right after Detail, before Layers) -- unlike Crop,
         # there's no workflow reason to decouple this one's visual position from its pipeline
         # position, so they're kept in sync.
-        tab_tone, tab_crop, tab_color, tab_detail, tab_repair, tab_layers, tab_masks, tab_portrait, tab_presets, tab_more = st.tabs([
-            "☼ Tone", "⛶ Crop", "🎨 Color", "🔬 Detail", "🩹 Repair", "◈ Layers", "◉ Masks", "◌ Portrait", "✦ Presets", "☰ Batch & Library"
+        # Lens sits right after Tone, before Crop -- fix distortion/vignette/chromatic aberration
+        # before framing the crop against the now-corrected geometry. app/backend.py::process_image()
+        # applies lens corrections first in the actual pipeline (before Tone even), same reasoning
+        # as Crop above: its visual tab position is a workflow convenience, decoupled from where it
+        # actually runs.
+        tab_tone, tab_lens, tab_crop, tab_color, tab_detail, tab_repair, tab_layers, tab_masks, tab_portrait, tab_presets, tab_more = st.tabs([
+            "☼ Tone", "◎ Lens", "⛶ Crop", "🎨 Color", "🔬 Detail", "🩹 Repair", "◈ Layers", "◉ Masks", "◌ Portrait", "✦ Presets", "☰ Batch & Library"
         ])
 
         show_original = False
@@ -947,6 +958,46 @@ with st.container(key="workspace-split"):
             cont_val = st.slider("Contrast", 0.5, 1.5, 1.0, 0.01, key="t-cont")
             high_val = st.slider("Highlights", -100, 100, 0, key="t-high")
             shad_val = st.slider("Shadows", -100, 100, 0, key="t-shad")
+
+        # TAB: LENS CORRECTIONS
+        with tab_lens:
+            st.markdown("**Lens Corrections**")
+            st.caption(
+                "Not calibrated to a specific camera/lens model -- there's no profile database here, "
+                "just typical starting points by lens category. Pick the closest one, then fine-tune "
+                "with the sliders below."
+            )
+            lens_profile_choice = st.selectbox("Lens Profile", list(LENS_PROFILES), key="lens-profile")
+            # No help= here: st.button(..., help=...) renders a second, separately-focusable
+            # tooltip-trigger <button> in this Streamlit version (see the Library rate/flag panel's
+            # star-button fix in docs/PROJECT_STATUS.md) -- harmless for a plain click target like
+            # this one, but a caption is simpler and avoids the duplicate DOM node regardless.
+            st.caption("Loads this profile's starting values -- you can still adjust the sliders afterward.")
+            if st.button("Apply Profile Defaults", key="lens-apply-profile-btn"):
+                profile_values = LENS_PROFILES[lens_profile_choice]
+                st.session_state["_pending_restore"] = {
+                    "lens_distortion": profile_values["distortion"],
+                    "lens_vignette_amount": profile_values["vignette_amount"],
+                    "lens_vignette_midpoint": profile_values["vignette_midpoint"],
+                    "lens_chromatic_aberration": profile_values["chromatic_aberration"],
+                }
+                _request_rerun()
+            lens_distortion = st.slider(
+                "Distortion", -100, 100, 0, key="lens-distortion",
+                help="Negative corrects barrel distortion (straight lines bowing outward); positive corrects pincushion (bowing inward).",
+            )
+            lens_vignette_amount = st.slider(
+                "Vignette Amount", -100, 100, 0, key="lens-vignette-amt",
+                help="Negative darkens the corners (adds a vignette); positive brightens them (removes one).",
+            )
+            lens_vignette_midpoint = st.slider(
+                "Vignette Midpoint", 0, 100, 50, key="lens-vignette-mid",
+                help="How far from center the vignette effect starts -- higher concentrates it closer to the corners.",
+            )
+            lens_chromatic_aberration = st.slider(
+                "Chromatic Aberration", -100, 100, 0, key="lens-ca",
+                help="Corrects red/cyan and blue/yellow fringing near high-contrast edges.",
+            )
 
         # TAB: CROP & ASPECT RATIO -- placed right after Tone for workflow convenience (frame the
         # shot before fine-tuning tone/color); still applied last in the actual pipeline, see the
@@ -1283,9 +1334,9 @@ with st.container(key="workspace-split"):
 
         # Every tab above runs on every Streamlit rerun regardless of which tab is visible, and none of
         # them mutate `processor` anymore -- they only capture control values. The actual pixel pipeline
-        # (Tone -> Color -> Detail -> Repair -> Layers -> Masks -> Portrait -> Crop, matching the tab
-        # order above) runs once, here, on app/backend.py -- see that module's process_image() for the
-        # mirrored order.
+        # (Lens -> Tone -> Color -> Detail -> Repair -> Layers -> Masks -> Portrait -> Crop, matching
+        # the tab order above) runs once, here, on app/backend.py -- see that module's process_image()
+        # for the mirrored order.
 
         # A tab body above may have called _request_rerun() instead of st.rerun() directly (adding/
         # removing a mask selection, Auto Enhance, committing the curve editor, importing presets --
@@ -1296,6 +1347,10 @@ with st.container(key="workspace-split"):
             st.rerun()
 
         options = {
+            "lens_distortion": lens_distortion,
+            "lens_vignette_amount": lens_vignette_amount,
+            "lens_vignette_midpoint": lens_vignette_midpoint,
+            "lens_chromatic_aberration": lens_chromatic_aberration,
             "exposure": exp_val,
             "contrast": cont_val,
             "highlights": high_val,

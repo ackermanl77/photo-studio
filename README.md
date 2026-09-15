@@ -35,6 +35,7 @@ Current packaged app:
 
 ```text
 PhotoStudio-0.1.0-Windows\PhotoStudio.exe
+PhotoStudio-0.1.0-Windows\WebView2Runtime\   <- bundled, see below
 ```
 
 Rebuild:
@@ -43,7 +44,9 @@ Rebuild:
 .\scripts\build_release.ps1 -Version "0.1.0"
 ```
 
-The release script prefers global Python, supports one-file and one-folder PyInstaller output, optional signing, 7-Zip compression, and SHA-256 checksums. Microsoft Edge WebView2 Runtime is required for the native window.
+The release script prefers global Python, supports one-file and one-folder PyInstaller output, optional signing, 7-Zip compression, and SHA-256 checksums.
+
+**The native window needs Microsoft Edge WebView2 Runtime, and it's bundled — nothing to install on the target machine.** Confirmed missing on a second PC when the app was first tested there, so `build_release.ps1` now downloads a pinned "Fixed Version" copy of the WebView2 Runtime (cached under `vendor/webview2-cache/`, gitignored — first build needs internet access for this one-time ~300MB download) and copies it into the release folder as `WebView2Runtime`, a sibling of `PhotoStudio.exe`. `app/desktop.py` points pywebview at it via `webview.settings["WEBVIEW2_RUNTIME_PATH"]`, so the packaged app never depends on WebView2 being installed system-wide. Copy the whole `PhotoStudio-<version>-Windows` folder (or its `.7z`) to another machine — extract and run, no installer, no Python. The one trade-off: a bundled Fixed Version copy doesn't auto-update with Chromium security patches the way a system install does, so `$WebView2Version` in `build_release.ps1` should be bumped deliberately every so often (see the comment above it for how to get a new version's download URL).
 
 `app/desktop.py` starts both the Streamlit frontend (`frontend_unified_app.py`) and the Flask processing backend (`app/backend.py`, `127.0.0.1:8502`) — the frontend sends its edit pipeline to the backend over HTTP rather than processing in-process. Running the frontend standalone (`streamlit run app/frontend_unified_app.py`, below) also works without `desktop.py`: the frontend starts the backend on demand the first time it's needed. See "Architecture" in `docs/PROJECT_STATUS.md` for the request flow and the latency trade-off that comes with it.
 
@@ -54,6 +57,7 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 - Exposure, contrast, highlights, shadows, temperature, tint, texture, clarity, sharpening, denoise, and a one-click "✨ Auto Enhance" pass, all live in the unified UI. Free-form or named-aspect-ratio crop, positioned right after Tone.
 - A draggable RGB tone curve (drag points on the curve itself, or use the numeric sliders below it for exact values).
 - Per-channel HSL color grading ("Color Mixer") — independent Hue/Saturation/Luminance adjustment for each of 8 named color bands (Red/Orange/Yellow/Green/Aqua/Blue/Purple/Magenta).
+- Lens corrections (distortion, vignette, chromatic aberration) — not a calibrated per-lens-model profile database, just typical starting points by lens category (Wide-angle, Standard zoom, Telephoto, Fisheye) plus manual sliders to fine-tune.
 - Object removal / repair: select a blemish or object with the same Luminance/Color/gradient/Radial/Painted selection tools as Masks, then it's inpainted away.
 - Built-in presets with live thumbnail previews, plus custom presets you can save, and export/import as a shareable `.json` file.
 - Undo/Redo and a one-click Reset to defaults, always available in the bar above the canvas regardless of which tab is open.

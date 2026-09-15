@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 from PIL import Image, ImageEnhance, ImageFilter
 
+from app.lens_corrections import apply_lens_corrections
 from app.professional_color import apply_hsl_mixer
 from app.raw_import import open_image
 
@@ -58,6 +59,16 @@ class PhotoProcessor:
 
     def apply_hsl_mixer(self, adjustments: dict[str, dict[str, float]]) -> "PhotoProcessor":
         self.image = apply_hsl_mixer(self.image, adjustments)
+        return self
+
+    def apply_lens_corrections(
+        self,
+        distortion: float = 0.0,
+        vignette_amount: float = 0.0,
+        vignette_midpoint: float = 50.0,
+        chromatic_aberration: float = 0.0,
+    ) -> "PhotoProcessor":
+        self.image = apply_lens_corrections(self.image, distortion, vignette_amount, vignette_midpoint, chromatic_aberration)
         return self
 
     def apply_curves(self, points: list[tuple[int, int]]) -> "PhotoProcessor":
