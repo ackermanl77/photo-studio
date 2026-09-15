@@ -66,6 +66,14 @@ def main() -> None:
     processor.apply_saturation(args.saturation)
     processor.apply_exposure(args.exposure)
     processor.apply_highlights_shadows(args.highlights, args.shadows)
+    # Matches app/backend.py::process_image()'s pipeline order: preset is applied right after this
+    # Tone group and before Color/Detail/Crop, not last. A preset (app/presets.py) applies its own
+    # exposure/contrast/saturation/curve/sharpen adjustments, which are order-sensitive relative to
+    # every step below -- applying it last (as this used to) meant --preset combined with any other
+    # flag produced a visibly different result via the CLI than the same combination produced via
+    # the GUI/backend, on the exact same source image.
+    if args.preset:
+        apply_preset(processor, args.preset)
     processor.apply_texture_clarity(args.texture, args.clarity)
     processor.apply_temperature_tint(args.temperature, args.tint)
     if args.curve:
@@ -93,9 +101,6 @@ def main() -> None:
         processor.crop(*args.crop)
     if args.aspect:
         processor.fit_aspect_ratio(*args.aspect)
-
-    if args.preset:
-        apply_preset(processor, args.preset)
 
     output_path = save_for_delivery(processor, args.output, quality=args.quality)
     print(f"Saved edited image to: {output_path}")
