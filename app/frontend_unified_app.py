@@ -21,6 +21,7 @@ from app.major_features import PhotoCatalog
 from app.presets import PRESETS, apply_preset
 from app.preset_exchange import export_presets, import_presets
 from app.portrait_tools import detect_faces
+from app.professional_color import HSL_BAND_ORDER
 from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
 
@@ -56,6 +57,20 @@ RECIPE_DEFAULTS = {
     "mask_target_exposure": 1.0, "mask_target_contrast": 1.0, "mask_target_saturation": 1.0,
     "crop_aspect": "Original", "removal_radius": 3,
 }
+
+
+def _hsl_widget_key(band: str, channel: str) -> str:
+    """channel is one of "h"/"s"/"l" -- e.g. _hsl_widget_key("Orange", "s") -> "hsl-orange-s"."""
+    return f"hsl-{band.lower()}-{channel}"
+
+
+# Every band/channel combination participates in Undo/Redo/Save-Project exactly like every other
+# control, via the same RECIPE_WIDGET_KEYS/RECIPE_DEFAULTS mechanism -- generated here instead of
+# 24 hand-written entries since it's a direct product of HSL_BAND_ORDER x {hue, sat, lum}.
+for _band in HSL_BAND_ORDER:
+    for _channel, _suffix in (("hue", "h"), ("sat", "s"), ("lum", "l")):
+        RECIPE_WIDGET_KEYS[f"hsl_{_band.lower()}_{_channel}"] = _hsl_widget_key(_band, _suffix)
+        RECIPE_DEFAULTS[f"hsl_{_band.lower()}_{_channel}"] = 0
 
 
 def _build_recipe() -> dict:
@@ -936,7 +951,28 @@ with st.container(key="workspace-split"):
             temp_val = st.slider("Temperature (Cool/Warm)", -100, 100, 0, key="c-temp")
             tint_val = st.slider("Tint (Green/Magenta)", -100, 100, 0, key="c-tint")
             sat_val = st.slider("Saturation", 0.0, 2.0, 1.0, 0.01, key="c-sat")
-            
+
+            st.markdown("**Color Mixer (HSL)**")
+            st.caption("Adjust Hue, Saturation, and Luminance independently for each color band, like a professional editor's Color Mixer.")
+            # Every band's sliders render unconditionally every rerun (not just a "currently
+            # selected" one behind a picker) -- an earlier version of this used a selectbox to
+            # show only one band's 3 sliders at a time, but Streamlit garbage-collects a widget's
+            # session_state value when its key isn't instantiated in a run, so switching away from
+            # a band silently reset it back to 0. Always rendering every widget sidesteps that
+            # entirely, and matches the same "list of expandable items" pattern already used for
+            # Mask Layers below -- collapsed by default, so this isn't much bulkier in practice.
+            # (Nested inside an outer expander it would be: st.expander cannot nest inside
+            # another st.expander, which is also why this whole section isn't wrapped in one.)
+            hsl_bands = {}
+            for band in HSL_BAND_ORDER:
+                h_key, s_key, l_key = _hsl_widget_key(band, "h"), _hsl_widget_key(band, "s"), _hsl_widget_key(band, "l")
+                is_active = any(st.session_state.get(k, 0) for k in (h_key, s_key, l_key))
+                with st.expander(f"{'🟢' if is_active else '⚪'} {band}", expanded=False):
+                    hue = st.slider("Hue", -100, 100, 0, key=h_key)
+                    sat = st.slider("Saturation", -100, 100, 0, key=s_key)
+                    lum = st.slider("Luminance", -100, 100, 0, key=l_key)
+                hsl_bands[band] = {"hue": hue, "sat": sat, "lum": lum}
+
             with st.expander("RGB Tone Curve", expanded=False):
                 curve_bounds = [(0, 64), (0, 128), (64, 192), (128, 255), (192, 255)]
                 preview_points = [
@@ -1225,6 +1261,7 @@ with st.container(key="workspace-split"):
             "temperature": temp_val,
             "tint": tint_val,
             "saturation": sat_val,
+            "hsl_bands": hsl_bands,
             "curve": [(0, c_black), (64, c_low), (128, c_mid), (192, c_high), (255, c_white)] if use_curve else None,
             "texture": text_val,
             "clarity": clar_val,

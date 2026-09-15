@@ -82,6 +82,9 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     # Color
     processor.apply_temperature_tint(_number(options, "temperature", 0), _number(options, "tint", 0))
     processor.apply_saturation(_number(options, "saturation", 1.0))
+    hsl_bands = options.get("hsl_bands")
+    if hsl_bands:
+        processor.apply_hsl_mixer(hsl_bands)
     curve = options.get("curve")
     if curve:
         processor.apply_curves([(int(point[0]), int(point[1])) for point in curve])

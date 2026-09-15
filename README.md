@@ -53,6 +53,7 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 
 - Exposure, contrast, highlights, shadows, temperature, tint, texture, clarity, sharpening, denoise, and a one-click "✨ Auto Enhance" pass, all live in the unified UI. Free-form or named-aspect-ratio crop, positioned right after Tone.
 - A draggable RGB tone curve (drag points on the curve itself, or use the numeric sliders below it for exact values).
+- Per-channel HSL color grading ("Color Mixer") — independent Hue/Saturation/Luminance adjustment for each of 8 named color bands (Red/Orange/Yellow/Green/Aqua/Blue/Purple/Magenta).
 - Object removal / repair: select a blemish or object with the same Luminance/Color/gradient/Radial/Painted selection tools as Masks, then it's inpainted away.
 - Built-in presets with live thumbnail previews, plus custom presets you can save, and export/import as a shareable `.json` file.
 - Undo/Redo and a one-click Reset to defaults, always available in the bar above the canvas regardless of which tab is open.
