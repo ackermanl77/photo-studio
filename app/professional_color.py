@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import colorsys
 import io
 from dataclasses import dataclass
 
@@ -151,6 +152,59 @@ def apply_hsl_mixer(image: Image.Image, adjustments: dict[str, dict[str, float]]
     return from_float_rgb(np.clip(hsl_to_rgb(new_hsl), 0.0, 1.0))
 
 
+def _tint_color(hue_degrees: float) -> np.ndarray:
+    """A pure, mid-lightness color at the given hue (0-360) -- the "paint" apply_color_grading()
+    tints each tonal range toward. Fixed at full saturation/50% lightness (colorsys.hls_to_rgb),
+    matching how every split-toning tool's hue slider works: the *amount* of tint comes from the
+    per-range intensity slider, not from varying this base color's own saturation or lightness."""
+    r, g, b = colorsys.hls_to_rgb((hue_degrees % 360.0) / 360.0, 0.5, 1.0)
+    return np.array([r, g, b], dtype=np.float32) * 255.0
+
+
+def apply_color_grading(
+    image: Image.Image,
+    shadows_hue: float = 0.0, shadows_intensity: float = 0.0,
+    midtones_hue: float = 0.0, midtones_intensity: float = 0.0,
+    highlights_hue: float = 0.0, highlights_intensity: float = 0.0,
+    balance: float = 0.0,
+) -> Image.Image:
+    """Split toning / color grading: tints shadows, midtones, and highlights toward independent
+    hues, like every professional editor's Color Grading panel (three color wheels, pre-2021
+    Lightroom's separate Split Toning panel, darktable's color balance). `*_intensity` is 0-100
+    (0 = that range untouched); `balance` (-100..100) shifts the shadow/highlight split point,
+    same direction convention as Lightroom's Balance slider (positive favors highlights).
+
+    Each pixel gets a luminance-based weight per range (shadows near 0, highlights near 255,
+    midtones peaking at the balance-adjusted midpoint, all three summing to 1) -- the same
+    "smooth handoff between tonal ranges" shape apply_highlights_shadows() already uses, just
+    normalized into three simultaneous weights instead of two independent ones. The tint color at
+    each pixel is then a weighted blend toward whichever range(s) apply, scaled by that range's
+    intensity; a pixel purely in one range only sees that range's tint, one near a boundary blends
+    both smoothly rather than snapping.
+    """
+    if not (shadows_intensity or midtones_intensity or highlights_intensity):
+        return image
+    arr = np.asarray(image.convert("RGB"), dtype=np.float32)
+    luminance = arr.mean(axis=2) / 255.0
+
+    pivot = min(0.9, max(0.1, 0.5 + (float(balance) / 100.0) * 0.35))
+    shadow_w = np.clip((pivot - luminance) / pivot, 0.0, 1.0)
+    highlight_w = np.clip((luminance - pivot) / (1.0 - pivot), 0.0, 1.0)
+    midtone_w = np.clip(1.0 - shadow_w - highlight_w, 0.0, 1.0)
+
+    shift = np.zeros_like(arr)
+    for hue, intensity, weight in (
+        (shadows_hue, shadows_intensity, shadow_w),
+        (midtones_hue, midtones_intensity, midtone_w),
+        (highlights_hue, highlights_intensity, highlight_w),
+    ):
+        if intensity:
+            tint = _tint_color(hue)
+            shift += (tint - arr) * weight[..., None] * (float(intensity) / 100.0) * 0.5
+    result = np.clip(arr + shift, 0, 255).astype(np.uint8)
+    return Image.fromarray(result, mode="RGB")
+
+
 def save_16bit_tiff(image: Image.Image, output: io.BytesIO | str) -> io.BytesIO | str:
     values = np.asarray(image.convert("RGB"), dtype=np.uint16) * 257
     tifffile.imwrite(output, values, photometric="rgb")
@@ -246,3 +300,26 @@ def gamut_warning_overlay(image: Image.Image, icc_bytes: bytes, warning_color: t
     perceptual = ImageCms.profileToProfile(rgb_image, input_profile, srgb_profile, renderingIntent=ImageCms.Intent.PERCEPTUAL, outputMode="RGB")
     highlighted = _highlight_mismatches(np.asarray(colorimetric), np.asarray(perceptual), warning_color, threshold)
     return Image.fromarray(highlighted, mode="RGB")
+
+
+def clipping_warning_overlay(
+    image: Image.Image,
+    shadow_color: tuple[int, int, int] = (0, 80, 255),
+    highlight_color: tuple[int, int, int] = (255, 40, 40),
+    shadow_threshold: int = 0,
+    highlight_threshold: int = 255,
+) -> Image.Image:
+    """A histogram clipping warning, the same idea as Lightroom's blown-highlight/blocked-shadow
+    triangles, but as a full preview overlay (matching this app's existing overlay-checkbox
+    pattern, e.g. gamut_warning_overlay above and the Masks tab's selection preview) rather than a
+    tiny toggleable icon on the histogram itself. Any channel at or below `shadow_threshold`
+    (default: pure black, 0) marks the whole pixel as a blocked shadow; any channel at or above
+    `highlight_threshold` (default: pure white, 255) marks it a blown highlight -- a channel-level
+    clip is treated as a whole-pixel warning, the same convention Lightroom's warning uses."""
+    arr = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    shadow_clip = (arr <= shadow_threshold).any(axis=2)
+    highlight_clip = (arr >= highlight_threshold).any(axis=2)
+    result = arr.copy()
+    result[shadow_clip] = shadow_color
+    result[highlight_clip] = highlight_color
+    return Image.fromarray(result, mode="RGB")

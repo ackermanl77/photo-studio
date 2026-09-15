@@ -87,6 +87,46 @@ def test_process_endpoint_applies_lens_corrections():
     assert result[:4, :4].mean() < result[18:22, 18:22].mean() - 10  # corners darkened
 
 
+def test_process_endpoint_applies_color_grading():
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes(color=(20, 20, 20), size=(20, 20))), "input.png"),
+            "options": json.dumps({"cg_shadows_hue": 220, "cg_shadows_intensity": 100}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    result = np.array(Image.open(io.BytesIO(response.data)), dtype=np.int32)
+    pixel = result[10, 10]
+    assert pixel[2] > pixel[0]  # tinted toward blue (hue ~220 degrees)
+
+
+def test_process_endpoint_applies_dehaze():
+    client = app.test_client()
+    hazy = np.full((40, 40, 3), 190, dtype=np.uint8)
+    hazy[10:30, 10:30] = 90  # a darker patch buried in uniform haze
+    stream = io.BytesIO()
+    Image.fromarray(hazy, "RGB").save(stream, format="PNG")
+
+    baseline = client.post(
+        "/process",
+        data={"image": (io.BytesIO(stream.getvalue()), "hazy.png"), "options": json.dumps({})},
+        content_type="multipart/form-data",
+    )
+    dehazed = client.post(
+        "/process",
+        data={"image": (io.BytesIO(stream.getvalue()), "hazy.png"), "options": json.dumps({"dehaze": 90})},
+        content_type="multipart/form-data",
+    )
+
+    assert baseline.status_code == 200
+    assert dehazed.status_code == 200
+    assert baseline.data != dehazed.data
+
+
 def test_process_endpoint_preserves_icc_profile():
     """Malformed/placeholder bytes under "icc_profile" (this fake marker isn't a real ICC
     profile) -- normalize_to_srgb() can't open it, so process_image() falls back to the old
