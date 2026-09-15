@@ -23,7 +23,14 @@ dist-release/
 dist/
 build/
 PhotoStudio-*-Windows/
+PhotoStudio-*-Windows.zip
+PhotoStudio-*-Windows.7z
+PhotoStudio-*-Windows.7z.sha256
 *.spec.bak
+
+# Downloaded/extracted third-party runtime bundled into releases (see scripts/build_release.ps1)
+# -- large binary, fetched on demand, never committed.
+vendor/
 
 # Runtime data / logs
 .photo-studio/
