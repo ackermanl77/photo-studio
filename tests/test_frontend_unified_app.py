@@ -498,6 +498,56 @@ def test_load_project_still_reads_the_legacy_photoproject_format():
     assert at.slider(key="t-exp").value == 1.4
 
 
+def test_hsl_color_mixer_defaults_to_no_adjustment():
+    at = run_with_uploaded_image()
+
+    for band in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta"):
+        assert at.slider(key=f"hsl-{band}-h").value == 0
+        assert at.slider(key=f"hsl-{band}-s").value == 0
+        assert at.slider(key=f"hsl-{band}-l").value == 0
+
+
+def test_hsl_color_mixer_changes_the_final_image_and_persists_across_bands():
+    """Every band's sliders render unconditionally every rerun (not behind a "currently selected
+    band" picker) specifically so Streamlit doesn't garbage-collect an untouched band's
+    session_state value -- see the comment above this UI in frontend_unified_app.py for why an
+    earlier version of this using a selectbox lost values that way. Uses a saturated reddish base
+    color (not neutral gray), since a Red-band saturation cut has nothing to do on a pixel that's
+    already fully desaturated."""
+    at = run_with_uploaded_image(color=(200, 60, 60))
+    baseline = canvas_hash(at)
+
+    at.slider(key="hsl-red-s").set_value(-80)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_hash(at) != baseline
+    red_only_hash = canvas_hash(at)
+
+    at.slider(key="hsl-blue-h").set_value(40)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="hsl-red-s").value == -80  # Red's value survived Blue's change
+    # Blue's hue shift correctly has no further effect here -- the base color (200, 60, 60) is
+    # pure red, ~120 degrees from Blue's hue center, well outside the mixer's falloff radius; see
+    # test_professional_color.py for coverage of a band actually changing a matching-hue pixel.
+    assert canvas_hash(at) == red_only_hash
+
+
+def test_hsl_color_mixer_is_included_in_reset():
+    at = run_with_uploaded_image()
+    at.slider(key="hsl-red-s").set_value(-80)
+    at.run(timeout=30)
+    assert at.slider(key="hsl-red-s").value == -80
+
+    at.button(key="hist-reset-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="hsl-red-s").value == 0
+
+
 def test_rgb_curve_defaults_to_identity_and_is_off():
     at = run_with_uploaded_image()
 
