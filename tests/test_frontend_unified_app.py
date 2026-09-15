@@ -13,6 +13,7 @@ pipeline in-process, just without the HTTP/subprocess round trip, so a regressio
 frontend assembles the request would still be caught.
 """
 
+import base64
 import io
 import json
 import re
@@ -37,6 +38,19 @@ def image_bytes(color=(90, 120, 160), size=(40, 30), fmt="PNG"):
     buf = io.BytesIO()
     Image.new("RGB", size, color).save(buf, format=fmt)
     return buf.getvalue()
+
+
+def painted_mask_base64(size=(20, 20)):
+    """Stands in for what the on-canvas paint editor's JS would produce: a solid-white PNG whose
+    ALPHA channel is the mask (right half painted, left half not) -- see
+    app.frontend_unified_app._decode_painted_mask, which reads exactly that alpha channel."""
+    mask = Image.new("RGBA", size, (255, 255, 255, 0))
+    for x in range(size[0] // 2, size[0]):
+        for y in range(size[1]):
+            mask.putpixel((x, y), (255, 255, 255, 255))
+    buf = io.BytesIO()
+    mask.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 class _FakeFileStorage:
@@ -165,6 +179,44 @@ def test_repair_selection_removes_content_and_changes_the_final_image():
 
     assert not at.exception
     assert at.session_state["removal_mask_layers"], "expected the removal selection to be added"
+    assert canvas_hash(at) != baseline
+
+
+def test_painted_mask_selection_changes_the_final_image_via_masks_tab():
+    """The on-canvas paint editor itself is JS an AppTest harness (no real DOM) can't drive -- this
+    instead verifies the Python-side wiring its "Add to selections" button ultimately depends on:
+    setting the hidden textarea it writes into (see _paint_editor_html / the "Painted" branch in
+    _render_selection_stack) is exactly what that JS does, just without a real canvas involved."""
+    at = run_with_uploaded_image(color=(80, 80, 80))
+    baseline = canvas_hash(at)
+
+    at.selectbox(key="m-new-kind").set_value("Painted")
+    at.run(timeout=30)
+    at.text_area(key="m-paint-data").set_value(painted_mask_base64())
+    at.run(timeout=30)
+    at.run(timeout=30)  # a second rerun with the same committed value must not add a duplicate layer
+
+    assert not at.exception
+    layers = at.session_state["mask_layers"]
+    assert len(layers) == 1
+    assert layers[0]["kind"] == "Painted"
+
+    at.slider(key="m-texp").set_value(1.5)
+    at.run(timeout=30)
+    assert canvas_hash(at) != baseline
+
+
+def test_painted_mask_selection_removes_content_via_repair_tab():
+    at = run_with_uploaded_image(color=(80, 80, 80))
+    baseline = canvas_hash(at)
+
+    at.selectbox(key="rm-new-kind").set_value("Painted")
+    at.run(timeout=30)
+    at.text_area(key="rm-paint-data").set_value(painted_mask_base64())
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["removal_mask_layers"][0]["kind"] == "Painted"
     assert canvas_hash(at) != baseline
 
 
