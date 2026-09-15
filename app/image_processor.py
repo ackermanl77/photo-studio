@@ -186,10 +186,22 @@ class PhotoProcessor:
         return self
 
     def apply_denoise(self, radius: int = 3) -> "PhotoProcessor":
+        """Edge-aware denoising via OpenCV's Non-Local Means (`cv2.fastNlMeansDenoisingColored`).
+        Classical, not a neural network -- this app is explicitly CPU-first with no GPU dependency
+        and avoids heavy new dependencies (see docs/PROJECT_STATUS.md), and a real learned denoiser
+        needs both (a several-MB-plus model file, and a slow-without-a-GPU inference pass). Still a
+        meaningful upgrade over the flat `ImageFilter.MedianFilter` this used to be: Non-Local Means
+        looks for similar patches across the whole search window instead of just averaging pixels
+        in a fixed neighborhood, so it smooths noise while preserving edges/detail far better than a
+        median blur does. `radius` keeps the same 0-9 range the UI's "Denoise" slider already used
+        for the old filter's kernel size, now driving Non-Local Means' "h" filter-strength parameter
+        instead (empirically timed at well under a second for a multi-megapixel photo).
+        """
         radius = max(1, int(radius))
-        if radius % 2 == 0:
-            radius += 1
-        self.image = self.image.filter(ImageFilter.MedianFilter(size=radius))
+        strength = float(radius) * 1.8
+        array = np.array(self.image.convert("RGB"))
+        denoised = cv2.fastNlMeansDenoisingColored(array, None, strength, strength, 7, 21)
+        self.image = Image.fromarray(denoised, mode="RGB")
         return self
 
     def apply_sharpen(self, radius: float = 1.0, percent: float = 150.0) -> "PhotoProcessor":

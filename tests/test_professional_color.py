@@ -8,13 +8,17 @@ from app.professional_color import (
     ColorSettings,
     HSL_BAND_HUES,
     WORKING_SPACES,
+    _highlight_mismatches,
     apply_gamma_curve,
     apply_hsl_mixer,
     from_float_rgb,
+    gamut_warning_overlay,
     hsl_to_rgb,
+    normalize_to_srgb,
     profile_export,
     rgb_to_hsl,
     save_16bit_tiff,
+    srgb_icc_bytes,
     to_float_rgb,
 )
 
@@ -78,6 +82,45 @@ def test_invalid_color_settings_are_rejected():
         ColorSettings("CMYK")
     with pytest.raises(ValueError):
         ColorSettings("sRGB", gamma=0)
+
+
+def test_srgb_icc_bytes_returns_a_profile_littlecms_can_reload():
+    from PIL import ImageCms
+
+    data = srgb_icc_bytes()
+    assert isinstance(data, bytes) and len(data) > 100
+    reloaded = ImageCms.ImageCmsProfile(io.BytesIO(data))
+    assert ImageCms.getProfileName(reloaded).strip()
+
+
+def test_normalize_to_srgb_is_a_near_identity_for_an_already_srgb_source():
+    """Converting an sRGB-tagged image through its own profile into sRGB again should reproduce
+    the same pixel values (modulo tiny floating-point rounding) -- the common case, since most
+    photos are already sRGB."""
+    image = Image.new("RGB", (6, 6), (180, 90, 40))
+    result = normalize_to_srgb(image, srgb_icc_bytes())
+    before = np.asarray(image, dtype=np.int16)
+    after = np.asarray(result, dtype=np.int16)
+    assert np.abs(before - after).max() <= 2
+
+
+def test_gamut_warning_overlay_shows_no_warnings_for_an_already_srgb_source():
+    image = Image.new("RGB", (10, 10), (220, 40, 200))
+    result = gamut_warning_overlay(image, srgb_icc_bytes())
+    assert np.array_equal(np.asarray(result), np.asarray(image))
+
+
+def test_highlight_mismatches_flags_only_pixels_beyond_the_threshold():
+    base = np.zeros((2, 3, 3), dtype=np.uint8)
+    comparison = base.copy()
+    comparison[0, 0] = [50, 0, 0]  # 50 > threshold -- should be flagged
+    comparison[0, 1] = [5, 0, 0]  # 5 <= threshold -- should not be flagged
+
+    result = _highlight_mismatches(base, comparison, warning_color=(255, 0, 255), threshold=24)
+
+    assert list(result[0, 0]) == [255, 0, 255]
+    assert list(result[0, 1]) == [0, 0, 0]
+    assert list(result[1, 2]) == [0, 0, 0]
 
 
 def test_rgb_to_hsl_matches_known_colors():

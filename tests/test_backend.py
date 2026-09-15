@@ -87,6 +87,9 @@ def test_process_endpoint_applies_lens_corrections():
 
 
 def test_process_endpoint_preserves_icc_profile():
+    """Malformed/placeholder bytes under "icc_profile" (this fake marker isn't a real ICC
+    profile) -- normalize_to_srgb() can't open it, so process_image() falls back to the old
+    preserve-as-is behavior instead of failing the whole edit over an unparseable color tag."""
     image = Image.new("RGB", (12, 12), color=(100, 110, 120))
     source = io.BytesIO()
     profile = b"test-icc-profile"
@@ -105,6 +108,37 @@ def test_process_endpoint_preserves_icc_profile():
 
     assert response.status_code == 200
     assert Image.open(io.BytesIO(response.data)).info.get("icc_profile") == profile
+
+
+def test_process_endpoint_normalizes_a_real_embedded_profile_to_srgb():
+    """A genuinely valid embedded ICC profile (unlike the fake marker bytes above) should be
+    converted through normalize_to_srgb() and the output re-tagged with a real sRGB profile
+    rather than the original bytes -- confirms the actual color-management code path runs
+    end-to-end through /process, not just that invalid profiles degrade gracefully."""
+    from app.professional_color import srgb_icc_bytes
+
+    profile = srgb_icc_bytes()
+    image = Image.new("RGB", (12, 12), color=(180, 90, 40))
+    source = io.BytesIO()
+    image.save(source, format="PNG", icc_profile=profile)
+    source.seek(0)
+    client = app.test_client()
+
+    response = client.post(
+        "/process",
+        data={"image": (source, "profiled.png"), "options": json.dumps({})},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    result = Image.open(io.BytesIO(response.data))
+    from PIL import ImageCms
+
+    output_profile = result.info.get("icc_profile")
+    assert output_profile  # re-tagged with a real profile (not silently dropped)
+    assert ImageCms.getProfileName(ImageCms.ImageCmsProfile(io.BytesIO(output_profile))).strip()  # a well-formed ICC profile, not garbage
+    pixel = np.array(result, dtype=np.int16)[0, 0]
+    assert (np.abs(pixel - np.array([180, 90, 40])) <= 2).all()  # near-identity for an already-sRGB source
 
 
 def test_process_endpoint_rejects_unknown_preset():

@@ -64,6 +64,21 @@ def test_apply_hsl_mixer_delegates_to_professional_color(tmp_path):
     assert abs(int(desaturated[0, 0, 1]) - int(desaturated[0, 0, 2])) < 5  # closer to gray: G ~= B
 
 
+def test_apply_denoise_actually_reduces_noise():
+    """apply_denoise() switched from a flat median filter to OpenCV's Non-Local Means -- this
+    confirms the new algorithm still does its actual job (reduces pixel-to-pixel variance on a
+    noisy image) rather than just asserting it runs without error."""
+    rng = np.random.default_rng(0)
+    base = np.full((60, 60, 3), 128, dtype=np.float32)
+    noisy = np.clip(base + rng.normal(0, 25, base.shape), 0, 255).astype(np.uint8)
+    processor = PhotoProcessor.from_image(Image.fromarray(noisy, mode="RGB"))
+
+    processor.apply_denoise(6)
+
+    denoised = np.array(processor.image, dtype=np.float32)
+    assert denoised.std() < noisy.astype(np.float32).std() * 0.5
+
+
 def test_apply_lens_corrections_delegates_to_lens_corrections_module(tmp_path):
     source = tmp_path / "grid.png"
     Image.new("RGB", (40, 40), color=(150, 150, 150)).save(source)

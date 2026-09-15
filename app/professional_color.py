@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import tifffile
-from PIL import Image
+from PIL import Image, ImageCms
 
 WORKING_SPACES = ("sRGB", "Adobe RGB", "Display P3")
 
@@ -165,3 +165,77 @@ def profile_export(image: Image.Image, profile: str = "sRGB", sixteen_bit: bool 
         return buffer.getvalue(), ".tif", "image/tiff"
     image.convert("RGB").save(buffer, format="PNG", optimize=True)
     return buffer.getvalue(), ".png", "image/png"
+
+
+# --- ICC color management -----------------------------------------------------------------
+# Real conversion through littlecms (bundled with Pillow as PIL.ImageCms), not just tagging and
+# hoping. Deliberately does NOT simulate a specific external printer/press profile -- that's what
+# "soft proofing" usually implies in Lightroom/Photoshop, but doing it properly needs a calibrated
+# profile file (e.g. a press house's own .icc) this offline-first app has no database or bundled
+# copy of. What's here instead: (1) real conversion of an image's *own* embedded profile into the
+# sRGB working space every other step in this app's pipeline assumes, replacing the previous
+# "preserve the original bytes, don't actually look at them" behavior, and (2) a soft-proof aimed
+# at this app's own sRGB pipeline as the "destination" -- proofing against your own output space is
+# itself a standard, meaningful proof target, and needs no external file since both conversions
+# below target the same built-in sRGB profile.
+
+def srgb_icc_bytes() -> bytes:
+    """A standard sRGB ICC profile's raw bytes, synthesized by littlecms (no file on disk needed).
+    For re-tagging an image that's just been normalize_to_srgb()'d -- re-attaching the *original*
+    (pre-conversion) profile bytes to already-converted pixel values would make a downstream viewer
+    interpret them a second time, effectively double-converting the color."""
+    return ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+
+
+def normalize_to_srgb(image: Image.Image, icc_bytes: bytes) -> Image.Image:
+    """Converts `image` from whatever profile `icc_bytes` describes into the sRGB working space,
+    using RELATIVE_COLORIMETRIC intent (preserves in-gamut colors exactly, clips the rest to the
+    nearest reproducible one -- the standard choice for a working-space conversion, as opposed to
+    PERCEPTUAL, which is meant for a final proof/print step instead). A no-op-equivalent (identity
+    transform, modulo floating-point rounding) when the embedded profile already describes sRGB;
+    genuinely changes pixel values for a wider source gamut (Adobe RGB, ProPhoto RGB, a camera's
+    own profile, ...) so colors that were correct under that wider profile still look correct once
+    downstream code (every other step in this app's pipeline) treats the pixels as plain sRGB.
+    """
+    input_profile = ImageCms.ImageCmsProfile(io.BytesIO(icc_bytes))
+    srgb_profile = ImageCms.createProfile("sRGB")
+    return ImageCms.profileToProfile(
+        image.convert("RGB"), input_profile, srgb_profile,
+        renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC, outputMode="RGB",
+    )
+
+
+def _highlight_mismatches(base: np.ndarray, comparison: np.ndarray, warning_color: tuple[int, int, int], threshold: int) -> np.ndarray:
+    """Pure array helper behind gamut_warning_overlay, factored out so its thresholding logic can
+    be unit-tested directly with synthetic arrays -- constructing a real, genuinely-different-gamut
+    ICC profile for a test fixture isn't practical without either bundling a real profile file
+    (which this feature deliberately avoids, see the module-level note above) or hand-building raw
+    ICC binary data, so the actual gamut-clipping-detection behavior is covered by this plus live
+    verification instead of an end-to-end automated test."""
+    base = np.asarray(base, dtype=np.uint8)
+    mismatch = np.abs(base.astype(np.int16) - np.asarray(comparison, dtype=np.int16)).sum(axis=2) > threshold
+    result = base.copy()
+    result[mismatch] = warning_color
+    return result
+
+
+def gamut_warning_overlay(image: Image.Image, icc_bytes: bytes, warning_color: tuple[int, int, int] = (255, 0, 255), threshold: int = 24) -> Image.Image:
+    """A soft-proofing preview: highlights, in `warning_color`, pixels that get clipped when this
+    app's pipeline converts `image` from `icc_bytes`'s source gamut down into the sRGB working
+    space (see normalize_to_srgb and the module-level note above for why sRGB, specifically, is the
+    proof target here).
+
+    Detects clipping by comparing two conversions of the same source: RELATIVE_COLORIMETRIC (clips
+    out-of-gamut colors to the nearest reproducible one) against PERCEPTUAL (compresses the whole
+    source gamut smoothly instead, so it never clips anything) -- a pixel where the two disagree by
+    more than `threshold` was pushed to the sRGB gamut boundary by the colorimetric conversion, i.e.
+    it was out of gamut for it. A source profile that's already within (or equal to) sRGB produces
+    no warnings at all, since both intents then agree everywhere.
+    """
+    input_profile = ImageCms.ImageCmsProfile(io.BytesIO(icc_bytes))
+    srgb_profile = ImageCms.createProfile("sRGB")
+    rgb_image = image.convert("RGB")
+    colorimetric = ImageCms.profileToProfile(rgb_image, input_profile, srgb_profile, renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC, outputMode="RGB")
+    perceptual = ImageCms.profileToProfile(rgb_image, input_profile, srgb_profile, renderingIntent=ImageCms.Intent.PERCEPTUAL, outputMode="RGB")
+    highlighted = _highlight_mismatches(np.asarray(colorimetric), np.asarray(perceptual), warning_color, threshold)
+    return Image.fromarray(highlighted, mode="RGB")
