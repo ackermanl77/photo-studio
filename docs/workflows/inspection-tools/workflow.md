@@ -1,5 +1,7 @@
 # Histogram and Clipping Inspection Workflow
 
+> **Histórico:** este archivo describe un panel de sesión expandible con 32 bins y porcentajes de clipping que ya no existe. El histograma actual (`app.professional_tools.compute_histogram()`) se muestra siempre visible debajo del canvas en `frontend_unified_app.py`, con 64 bins por canal y el eje X en valores de píxel (0-255) en vez de índice de bin — ver la entrada "processing… indicator, one-click reset, histogram" en `docs/PROJECT_STATUS.md`'s "Recently Fixed" para el estado vigente. No incluye porcentajes de clipping.
+
 ## Goal
 
 Evaluate tonal changes while editing instead of relying only on visual preview.
