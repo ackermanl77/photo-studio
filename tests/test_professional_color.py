@@ -13,7 +13,9 @@ from app.professional_color import (
     apply_color_grading,
     apply_gamma_curve,
     apply_hsl_mixer,
+    apply_vibrance,
     clipping_warning_overlay,
+    estimate_white_balance,
     from_float_rgb,
     gamut_warning_overlay,
     hsl_to_rgb,
@@ -282,3 +284,89 @@ def test_clipping_warning_overlay_flags_a_single_clipped_channel():
     image = Image.new("RGB", (1, 1), (100, 100, 255))
     result = np.asarray(clipping_warning_overlay(image, highlight_color=(9, 9, 9)))
     assert list(result[0, 0]) == [9, 9, 9]
+
+
+def _solid_from_hsl(hue: float, sat: float, light: float, size=(4, 4)) -> Image.Image:
+    hsl = np.tile(np.array([hue, sat, light], dtype=np.float32), (size[1], size[0], 1))
+    return from_float_rgb(hsl_to_rgb(hsl))
+
+
+def test_vibrance_is_a_no_op_at_zero():
+    image = Image.new("RGB", (5, 5), (120, 140, 90))
+    assert apply_vibrance(image, 0) is image
+
+
+def test_vibrance_boosts_pastel_saturation_more_than_already_saturated():
+    """RawTherapee's own description of Vibrance: it "protects skin tones and greys" and treats
+    pastel vs. already-saturated colors differently. Same hue (well outside the protected
+    skin-tone range) and lightness, two different starting saturations."""
+    pastel = _solid_from_hsl(200, 0.15, 0.5)
+    saturated = _solid_from_hsl(200, 0.9, 0.5)
+
+    pastel_gain = rgb_to_hsl(to_float_rgb(apply_vibrance(pastel, 80)))[0, 0, 1] - 0.15
+    saturated_gain = rgb_to_hsl(to_float_rgb(apply_vibrance(saturated, 80)))[0, 0, 1] - 0.9
+
+    assert pastel_gain > saturated_gain
+    assert pastel_gain > 0.05
+
+
+def test_vibrance_protects_skin_tone_hues():
+    skin = _solid_from_hsl(25, 0.4, 0.6)  # the protected skin-tone hue center
+    non_skin = _solid_from_hsl(200, 0.4, 0.6)  # same starting saturation/lightness, unrelated hue
+
+    skin_gain = rgb_to_hsl(to_float_rgb(apply_vibrance(skin, 80)))[0, 0, 1] - 0.4
+    non_skin_gain = rgb_to_hsl(to_float_rgb(apply_vibrance(non_skin, 80)))[0, 0, 1] - 0.4
+
+    assert skin_gain < non_skin_gain
+
+
+def test_vibrance_negative_amount_desaturates():
+    image = _solid_from_hsl(200, 0.5, 0.5)
+    result_sat = rgb_to_hsl(to_float_rgb(apply_vibrance(image, -80)))[0, 0, 1]
+    assert result_sat < 0.5
+
+
+def test_estimate_white_balance_is_zero_for_an_already_neutral_pixel():
+    image = Image.new("RGB", (10, 10), (128, 128, 128))
+    temp, tint = estimate_white_balance(image, 0.5, 0.5)
+    assert abs(temp) < 1e-6
+    assert abs(tint) < 1e-6
+
+
+def test_estimate_white_balance_cools_a_warm_cast_pixel():
+    image = Image.new("RGB", (10, 10), (180, 140, 90))  # R > B: a warm cast
+    temp, _ = estimate_white_balance(image, 0.5, 0.5)
+    assert temp < 0  # negative temperature cools
+
+
+def test_estimate_white_balance_pushes_toward_magenta_for_a_green_cast_pixel():
+    image = Image.new("RGB", (10, 10), (120, 170, 120))  # G high relative to R/B: a green cast
+    _, tint = estimate_white_balance(image, 0.5, 0.5)
+    assert tint > 0  # positive tint counteracts green with magenta
+
+
+def test_estimate_white_balance_samples_the_correct_fractional_pixel():
+    image = Image.new("RGB", (10, 10), (128, 128, 128))
+    image.putpixel((8, 8), (200, 100, 50))  # a warm patch near the bottom-right corner
+    temp, _ = estimate_white_balance(image, 0.85, 0.85)
+    assert temp < -5  # picked up the warm patch, not the neutral background
+
+
+def test_estimate_white_balance_handles_pure_black_without_dividing_by_zero():
+    image = Image.new("RGB", (5, 5), (0, 0, 0))
+    assert estimate_white_balance(image, 0.5, 0.5) == (0.0, 0.0)
+
+
+def test_estimate_white_balance_correction_actually_neutralizes_the_sampled_pixel():
+    """End-to-end sanity check: applying the returned temperature/tint through the real
+    PhotoProcessor.apply_temperature_tint() should land close to neutral gray -- confirms the
+    closed-form solve is numerically close, not just directionally right. A mild cast (not one
+    severe enough to clip temperature/tint at +-100) keeps the small linearization error this
+    formula's own docstring describes from being swamped by clipping."""
+    from app.image_processor import PhotoProcessor
+
+    image = Image.new("RGB", (10, 10), (150, 140, 125))
+    temp, tint = estimate_white_balance(image, 0.5, 0.5)
+    corrected = PhotoProcessor.from_image(image).apply_temperature_tint(temp, tint).image
+    r, g, b = corrected.getpixel((5, 5))
+    assert max(r, g, b) - min(r, g, b) < 3

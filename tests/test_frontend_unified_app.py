@@ -573,6 +573,26 @@ def test_delete_preset_button_removes_it_from_the_store(monkeypatch, tmp_path):
     assert any("Deleted preset 'Drop'" in t.value for t in at.toast)
 
 
+def test_batch_processor_preset_dropdown_lists_saved_custom_presets(monkeypatch, tmp_path):
+    """The Batch Processor's Preset dropdown ("sync settings" across a shoot) offers built-in
+    named looks and every saved custom preset side by side, the custom ones suffixed " (custom)"
+    so Run Batch can tell which lookup (app.presets.PRESETS vs. PresetStore.get()) to use."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    presets_path = tmp_path / ".photo-studio" / "presets.json"
+    presets_path.parent.mkdir(parents=True)
+    presets_path.write_text(json.dumps({"My Look": {"exposure": 1.2}}), encoding="utf-8")
+
+    at = run_with_uploaded_image()
+    at.radio[0].set_value("Batch Processor")
+    at.run(timeout=30)
+
+    assert not at.exception
+    options = at.selectbox(key="b-preset-sel").options
+    assert "None" in options
+    assert "My Look (custom)" in options
+    assert any(name in options for name in PRESETS)
+
+
 def test_save_project_shows_a_toast_pointing_at_the_download_button():
     """Safe to click for real: ProjectBundle.save() here writes to an in-memory io.BytesIO,
     not disk."""
@@ -821,6 +841,49 @@ def test_gamut_warning_checkbox_renders_the_overlay_for_a_profiled_image():
     assert any(img.captions and img.captions[0] == "Magenta = clipped when converted to this app's sRGB working space" for img in at.image)
 
 
+def test_vibrance_defaults_to_no_adjustment():
+    at = run_with_uploaded_image()
+    assert at.slider(key="c-vib").value == 0
+
+
+def test_vibrance_slider_changes_the_final_image():
+    at = run_with_uploaded_image(color=(200, 160, 160))
+    baseline = canvas_hash(at)
+
+    at.slider(key="c-vib").set_value(90)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_hash(at) != baseline
+
+
+def test_vibrance_is_included_in_reset():
+    at = run_with_uploaded_image()
+    at.slider(key="c-vib").set_value(60)
+    at.run(timeout=30)
+    assert at.slider(key="c-vib").value == 60
+
+    at.button(key="hist-reset-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="c-vib").value == 0
+
+
+def test_white_balance_picker_commits_via_the_hidden_click_field():
+    """Same JS-can't-be-driven-by-AppTest limitation as the Magic Wand picker (see
+    test_magic_wand_selection_commits_via_the_hidden_click_field) -- this instead verifies the
+    Python-side wiring the picker's click handler ultimately depends on: setting the hidden field
+    is exactly what a real click sends, just without a browser involved."""
+    at = run_with_uploaded_image(color=(180, 140, 90), size=(20, 20))  # a warm cast to correct
+
+    at.text_area(key="wb-wand-data").set_value(json.dumps({"x": 0.5, "y": 0.5}))
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="c-temp").value < 0  # cooled to counteract the warm cast
+
+
 def test_color_grading_defaults_to_no_adjustment():
     at = run_with_uploaded_image()
     assert at.slider(key="cg-sh-int").value == 0
@@ -1005,6 +1068,79 @@ def test_lens_corrections_are_included_in_reset():
 
     assert not at.exception
     assert at.slider(key="lens-distortion").value == 0
+
+
+def test_lens_perspective_defaults_to_no_adjustment():
+    at = run_with_uploaded_image()
+    assert at.slider(key="lens-persp-v").value == 0
+    assert at.slider(key="lens-persp-h").value == 0
+
+
+def test_lens_perspective_slider_changes_the_final_image():
+    """Unlike distortion (which visibly changes even a flat-color image, since cv2.undistort's
+    default border fill is black), correct_perspective() uses BORDER_REPLICATE -- a perfectly flat
+    image warps back to the exact same flat image, nothing to detect. Needs actual spatial
+    variation, the same reason test_dehaze_slider_changes_the_final_image needs a patterned
+    fixture instead of the flat-color image_bytes() convenience most tests here use."""
+    grid = Image.new("RGB", (60, 60), (30, 30, 30))
+    ImageDraw.Draw(grid).line([(30, 0), (30, 60)], fill=(220, 220, 220), width=2)
+    buf = io.BytesIO()
+    grid.save(buf, format="PNG")
+
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.file_uploader[0].set_value(("grid.png", buf.getvalue(), "image/png"))
+    at.run(timeout=30)
+    baseline = canvas_hash(at)
+
+    at.slider(key="lens-persp-v").set_value(60)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_hash(at) != baseline
+
+
+def test_lens_perspective_is_included_in_reset():
+    at = run_with_uploaded_image()
+    at.slider(key="lens-persp-h").set_value(50)
+    at.run(timeout=30)
+    assert at.slider(key="lens-persp-h").value == 50
+
+    at.button(key="hist-reset-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="lens-persp-h").value == 0
+
+
+def test_crop_preview_reflects_lens_perspective_correction():
+    """Same bug class -- and same fix -- as test_crop_preview_reflects_lens_distortion_correction,
+    now covering the newer Perspective (Keystone) sliders. Needs a patterned (not flat-color)
+    fixture -- see test_lens_perspective_slider_changes_the_final_image's docstring for why."""
+
+    def crop_preview_bytes(at):
+        matches = [img for img in at.image if img.captions and img.captions[0].startswith("Crop preview:")]
+        assert matches, "expected the crop preview image to be rendered"
+        return matches[0].value[0]
+
+    grid = Image.new("RGB", (40, 30), (30, 30, 30))
+    ImageDraw.Draw(grid).line([(20, 0), (20, 30)], fill=(220, 220, 220), width=2)
+    buf = io.BytesIO()
+    grid.save(buf, format="PNG")
+
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.file_uploader[0].set_value(("grid.png", buf.getvalue(), "image/png"))
+    at.run(timeout=30)
+    at.selectbox(key="crop-aspect").set_value("Free-form")
+    at.run(timeout=30)
+    baseline = crop_preview_bytes(at)
+
+    at.slider(key="lens-persp-v").set_value(70)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert crop_preview_bytes(at) != baseline
 
 
 def test_crop_preview_reflects_lens_distortion_correction():

@@ -152,6 +152,70 @@ def apply_hsl_mixer(image: Image.Image, adjustments: dict[str, dict[str, float]]
     return from_float_rgb(np.clip(hsl_to_rgb(new_hsl), 0.0, 1.0))
 
 
+_SKIN_TONE_HUE_CENTER = 25.0
+_SKIN_TONE_HUE_RANGE = 25.0
+_SKIN_TONE_PROTECTION = 0.6  # skin-tone hues get 60% less vibrance boost than the formula would otherwise give
+
+
+def apply_vibrance(image: Image.Image, amount: float = 0.0) -> Image.Image:
+    """Vibrance: a "smart" saturation boost, distinct from the app's existing flat Saturation
+    slider (PhotoProcessor.apply_saturation, PIL's ImageEnhance.Color, which scales every pixel's
+    saturation by the same factor regardless of how saturated it already is). RawTherapee's
+    Vibrance tool is the model here -- it "boosts colors but also protects skin tones and greys,
+    and can separately boost pastels and saturated colors" -- so each pixel's boost is weighted by
+    `1 - saturation`: an already-vivid pixel gets little extra push (avoiding clipped, oversaturated
+    colors), while a washed-out/pastel pixel gets nearly the full amount. A second weight further
+    dampens the effect specifically in the skin-tone hue range (a smooth falloff centered on ~25
+    degrees, the same "distance from a center hue" shape apply_hsl_mixer already uses for its
+    per-band falloff) so portraits don't turn artificially ruddy the way a global saturation boost
+    can. `amount` -100..100 (0 is a no-op; negative desaturates pastels first, the mirror image of
+    the positive case).
+    """
+    amount = max(-100.0, min(100.0, float(amount)))
+    if not amount:
+        return image
+    rgb = to_float_rgb(image)
+    hsl = rgb_to_hsl(rgb)
+    hue, sat, light = hsl[..., 0], hsl[..., 1], hsl[..., 2]
+
+    pastel_weight = 1.0 - sat
+    skin_distance = np.abs(((hue - _SKIN_TONE_HUE_CENTER + 180.0) % 360.0) - 180.0)
+    skin_protection = 1.0 - _SKIN_TONE_PROTECTION * np.clip(1.0 - skin_distance / _SKIN_TONE_HUE_RANGE, 0.0, 1.0)
+    new_sat = np.clip(sat * (1.0 + pastel_weight * skin_protection * (amount / 100.0)), 0.0, 1.0)
+
+    new_hsl = np.stack([hue, new_sat, light], axis=-1)
+    return from_float_rgb(np.clip(hsl_to_rgb(new_hsl), 0.0, 1.0))
+
+
+def estimate_white_balance(image: Image.Image, x_fraction: float, y_fraction: float) -> tuple[float, float]:
+    """The math behind a "click a neutral spot to set white balance" eyedropper, the same
+    convenience darktable's color-calibration module offers ("click on the eyedropper... the
+    module will automatically set the white balance, and often it works really well" -- an
+    approximation by the original tool's own admission, not an exact solve, which is exactly the
+    spirit implemented here). Samples the pixel at the given fractional (0..1, 0..1) position and
+    returns the (temperature, tint) pair (each -100..100, PhotoProcessor.apply_temperature_tint's
+    own scale) that would make that pixel neutral gray under that function's formula.
+
+    Closed-form solved from apply_temperature_tint's own multipliers (R *= 1+0.25t, G *= 1-0.2u,
+    B *= 1-0.25t, with the +-0.1u cross-terms on R/B dropped as second-order-small): setting all
+    three post-multiplier channels equal and solving the resulting 2x2 linear system in (t, u)
+    gives temperature = 600*g*(b-r)/(rb+rg+bg), tint = 500*(rg+bg-2rb)/(rb+rg+bg). Exact for a
+    pixel already close to neutral (the intended use -- click something that's *supposed* to be
+    gray or white); like the real tool, a good starting point to fine-tune from rather than a
+    guaranteed perfect neutralization for a wildly off-color sample.
+    """
+    width, height = image.size
+    x = min(width - 1, max(0, int(x_fraction * width)))
+    y = min(height - 1, max(0, int(y_fraction * height)))
+    r, g, b = (float(channel) for channel in image.convert("RGB").getpixel((x, y)))
+    denom = r * b + r * g + b * g
+    if denom <= 0:
+        return 0.0, 0.0
+    temperature = 600.0 * g * (b - r) / denom
+    tint = 500.0 * (r * g + b * g - 2.0 * r * b) / denom
+    return max(-100.0, min(100.0, temperature)), max(-100.0, min(100.0, tint))
+
+
 def _tint_color(hue_degrees: float) -> np.ndarray:
     """A pure, mid-lightness color at the given hue (0-360) -- the "paint" apply_color_grading()
     tints each tonal range toward. Fixed at full saturation/50% lightness (colorsys.hls_to_rgb),

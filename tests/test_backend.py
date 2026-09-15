@@ -87,6 +87,51 @@ def test_process_endpoint_applies_lens_corrections():
     assert result[:4, :4].mean() < result[18:22, 18:22].mean() - 10  # corners darkened
 
 
+def test_process_endpoint_applies_vibrance():
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes(color=(180, 150, 150), size=(12, 12))), "input.png"),
+            "options": json.dumps({"vibrance": 90}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    baseline = client.post(
+        "/process",
+        data={"image": (io.BytesIO(image_bytes(color=(180, 150, 150), size=(12, 12))), "input.png"), "options": json.dumps({})},
+        content_type="multipart/form-data",
+    )
+    assert baseline.data != response.data
+
+
+def test_process_endpoint_applies_lens_perspective():
+    client = app.test_client()
+    grid = Image.new("RGB", (40, 40), (30, 30, 30))
+    ImageDraw.Draw(grid).line([(20, 0), (20, 40)], fill=(220, 220, 220), width=2)
+    stream = io.BytesIO()
+    grid.save(stream, format="PNG")
+
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(stream.getvalue()), "grid.png"),
+            "options": json.dumps({"lens_perspective_v": 60}),
+        },
+        content_type="multipart/form-data",
+    )
+    baseline = client.post(
+        "/process",
+        data={"image": (io.BytesIO(stream.getvalue()), "grid.png"), "options": json.dumps({})},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert baseline.data != response.data
+
+
 def test_process_endpoint_applies_color_grading():
     client = app.test_client()
     response = client.post(

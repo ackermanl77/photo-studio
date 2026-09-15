@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.batch import process_folder
 from app.image_processor import PhotoProcessor
@@ -115,6 +115,34 @@ def test_apply_lens_corrections_delegates_to_lens_corrections_module(tmp_path):
     assert result is processor
     pixels = np.array(processor.image, dtype=np.int32)
     assert pixels[:4, :4].mean() < pixels[18:22, 18:22].mean() - 10  # corners darkened
+
+
+def test_apply_lens_corrections_passes_perspective_through(tmp_path):
+    source = tmp_path / "grid.png"
+    image = Image.new("RGB", (60, 60), (30, 30, 30))
+    draw = ImageDraw.Draw(image)
+    for x in range(0, 60, 6):
+        draw.line([(x, 0), (x, 60)], fill=(220, 220, 220))
+    image.save(source)
+    processor = PhotoProcessor(source)
+    before = processor.as_numpy().copy()
+
+    result = processor.apply_lens_corrections(perspective_vertical=60)
+
+    assert result is processor
+    assert not np.array_equal(before, processor.as_numpy())
+
+
+def test_apply_vibrance_delegates_to_professional_color(tmp_path):
+    source = tmp_path / "pastel.png"
+    Image.new("RGB", (12, 12), color=(180, 150, 150)).save(source)
+    processor = PhotoProcessor(source)
+    before = processor.as_numpy().copy()
+
+    result = processor.apply_vibrance(80)
+
+    assert result is processor
+    assert not np.array_equal(before, processor.as_numpy())
 
 
 def test_auto_enhance_is_available(tmp_path):
