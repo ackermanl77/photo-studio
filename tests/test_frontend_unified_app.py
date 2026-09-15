@@ -19,6 +19,7 @@ import json
 import re
 from pathlib import Path
 
+import cv2
 import pytest
 from PIL import Image
 from streamlit.testing.v1 import AppTest
@@ -73,7 +74,16 @@ def _fake_process_via_backend(image_bytes_, filename, options, local_mask_bytes=
     local_mask = _FakeFileStorage("mask.png", local_mask_bytes) if local_mask_bytes else None
     layer_file = _FakeFileStorage("layer.png", layer_bytes) if layer_bytes else None
     removal_mask = _FakeFileStorage("removal_mask.png", removal_mask_bytes) if removal_mask_bytes else None
-    return process_image(image_file, request_options, removal_mask=removal_mask, local_mask=local_mask, layer_file=layer_file)
+    try:
+        return process_image(image_file, request_options, removal_mask=removal_mask, local_mask=local_mask, layer_file=layer_file)
+    except (KeyError, ValueError, OSError, RuntimeError, json.JSONDecodeError, cv2.error) as error:
+        # Mirrors app/backend.py's /process route, which catches exactly this tuple and returns
+        # a 400 JSON error -- process_via_backend() (the real HTTP client) then turns a non-OK
+        # response into a RuntimeError. This stub calls process_image() directly, bypassing
+        # Flask's request/response cycle entirely, so without this it would let a raw exception
+        # (e.g. a corrupted layer image) escape here uncaught -- a failure mode a real HTTP round
+        # trip already can't produce, since the Flask route always catches it first.
+        raise RuntimeError(f"Processing backend error: {error}") from error
 
 
 @pytest.fixture(autouse=True)
@@ -116,6 +126,25 @@ def test_no_image_shows_upload_prompt_and_stops():
 
     assert not at.exception
     assert any("Upload an image" in info.value for info in at.info)
+    assert len(at.tabs) == 0
+
+
+def test_uploading_a_corrupted_image_shows_an_error_instead_of_crashing():
+    """Regression test for a real bug found in review: a truncated/corrupted image upload used
+    to raise an uncaught OSError (PIL's "image file is truncated" / UnidentifiedImageError) all
+    the way up, showing the end user a raw Python traceback -- including local file paths --
+    instead of a plain error message. Only RuntimeError was caught here before; reproduced live
+    by uploading a real PNG cut off halfway through."""
+    valid_png = image_bytes()
+    truncated = valid_png[: len(valid_png) // 2]
+
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.file_uploader[0].set_value(("broken.png", truncated, "image/png"))
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("corrupted" in message.value.lower() for message in at.error)
     assert len(at.tabs) == 0
 
 
@@ -479,6 +508,70 @@ def test_save_preset_without_a_name_shows_a_warning_toast():
     assert any("name" in t.value.lower() for t in at.toast)
 
 
+def test_save_preset_captures_the_full_recipe_not_just_five_fields(monkeypatch, tmp_path):
+    """Regression test for a real gap found in review: "Save Current Look as Preset" used to
+    hand-pick only 5 fields (exposure/contrast/saturation/temperature/tint), silently dropping
+    everything else -- a preset saved after dialing in a lens correction or a mask lost both.
+    Now it saves _build_recipe(), the same full snapshot Undo/Redo and Save Project already use."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    at = run_with_uploaded_image()
+
+    at.slider(key="lens-distortion").set_value(40)
+    at.run(timeout=30)
+    at.text_input(key="p-name-in").set_value("Full Look")
+    at.run(timeout=30)
+    at.button(key="p-save-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    saved = json.loads((tmp_path / ".photo-studio" / "presets.json").read_text(encoding="utf-8"))
+    assert saved["Full Look"]["lens_distortion"] == 40
+    assert "hsl_red_hue" in saved["Full Look"]  # a field the old 5-field save never touched
+    assert "mask_layers" in saved["Full Look"]
+
+
+def test_load_preset_button_applies_its_saved_values(monkeypatch, tmp_path):
+    """Regression test for a real gap found in review: PresetStore.get() existed and was
+    already tested in isolation, but nothing in the UI ever called it -- a saved preset could be
+    exported and imported, but never actually reapplied to a photo."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    presets_path = tmp_path / ".photo-studio" / "presets.json"
+    presets_path.parent.mkdir(parents=True)
+    presets_path.write_text(json.dumps({"Warm": {"exposure": 1.3, "temperature": 40}}), encoding="utf-8")
+
+    at = run_with_uploaded_image()
+    assert at.slider(key="t-exp").value == 1.0
+
+    at.selectbox(key="p-load-sel").set_value("Warm")
+    at.run(timeout=30)
+    at.button(key="p-load-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="t-exp").value == 1.3
+    assert at.slider(key="c-temp").value == 40
+
+
+def test_delete_preset_button_removes_it_from_the_store(monkeypatch, tmp_path):
+    """Same gap as the load-preset test above, for PresetStore.delete()."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    presets_path = tmp_path / ".photo-studio" / "presets.json"
+    presets_path.parent.mkdir(parents=True)
+    presets_path.write_text(json.dumps({"Keep": {"exposure": 1.0}, "Drop": {"exposure": 1.0}}), encoding="utf-8")
+
+    at = run_with_uploaded_image()
+    at.selectbox(key="p-load-sel").set_value("Drop")
+    at.run(timeout=30)
+    at.button(key="p-delete-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    saved = json.loads(presets_path.read_text(encoding="utf-8"))
+    assert "Drop" not in saved
+    assert "Keep" in saved
+    assert any("Deleted preset 'Drop'" in t.value for t in at.toast)
+
+
 def test_save_project_shows_a_toast_pointing_at_the_download_button():
     """Safe to click for real: ProjectBundle.save() here writes to an in-memory io.BytesIO,
     not disk."""
@@ -560,6 +653,29 @@ def test_save_project_button_builds_a_bundle_with_the_layer_without_erroring():
 
     assert not at.exception
     assert any(db.label == "⬇️ Download .photoproject" for db in at.download_button)
+
+
+def test_save_project_with_a_corrupted_layer_shows_an_error_instead_of_crashing():
+    """Same bug class as test_uploading_a_corrupted_image_shows_an_error_instead_of_crashing,
+    for the second unguarded Image.open() found in review: Save Project opens the layer bytes
+    locally to build a LayerWorkspace, which previously had no error handling of its own. In
+    practice a corrupted layer is already caught earlier too, by the same backend round-trip
+    every rerun already goes through (compare test_uploading_a_corrupted_image_... above) -- this
+    confirms clicking Save Project on top of that still doesn't crash, and gets its own clearer,
+    layer-specific message rather than relying only on the generic backend error."""
+    valid_png = image_bytes((255, 0, 0), (40, 30))
+    truncated = valid_png[: len(valid_png) // 2]
+
+    at = run_with_uploaded_image()
+    at.get_by_key("l-file").set_value(("overlay.png", truncated, "image/png"))
+    at.run(timeout=30)
+
+    at.button(key="proj-save-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("layer image" in message.value.lower() for message in at.error)
+    assert not any(db.label == "⬇️ Download .photoproject" for db in at.download_button)
 
 
 def test_load_project_restores_recipe_and_layer_from_a_project_bundle():

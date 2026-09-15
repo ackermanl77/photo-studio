@@ -928,6 +928,14 @@ try:
 except RuntimeError as error:
     st.error(f"⚠️ {error}")
     st.stop()
+except OSError:
+    # PIL raises OSError (UnidentifiedImageError, "image file is truncated", ...) for a corrupted,
+    # incomplete, or unrecognizable non-RAW file -- this used to propagate as an unhandled
+    # exception, showing the end user a raw Python traceback (including local file paths) instead
+    # of a plain explanation. The technical message isn't worth surfacing (PIL's own text for an
+    # unidentifiable file includes a raw memory address), so this doesn't interpolate `error`.
+    st.error(f"⚠️ Couldn't open '{upload_name}' — the file may be corrupted, incomplete, or not a supported image format.")
+    st.stop()
 source = processor.image
 
 # The actual edit pipeline runs on app/backend.py, not in this process (see docs/PROJECT_STATUS.md);
@@ -1250,18 +1258,38 @@ with st.container(key="workspace-split"):
         with tab_presets:
             st.markdown("**Preset Library**")
             p_store = PresetStore()
-            st.caption(f"Saved: {', '.join(p_store.names()) if p_store.names() else 'None'}")
+            p_names = p_store.names()
+            st.caption(f"Saved: {', '.join(p_names) if p_names else 'None'}")
+
+            # Load/apply/delete a saved custom preset -- p_store.get()/.delete() already existed
+            # and were tested, but nothing in the UI ever called them: a preset could be saved,
+            # exported, and imported, but never actually reapplied to a photo. Routed through the
+            # same "_pending_restore" + _request_rerun() mechanism as Undo/Redo/Load Project, since
+            # a preset is just a recipe like any other.
+            if p_names:
+                st.markdown("**Load a Preset**")
+                p_load_name = st.selectbox("Preset to load", p_names, key="p-load-sel", label_visibility="collapsed")
+                p_load_col, p_delete_col = st.columns(2)
+                if p_load_col.button("📂 Apply", key="p-load-btn", use_container_width=True):
+                    st.session_state["_pending_restore"] = p_store.get(p_load_name)
+                    st.toast(f"Applied preset '{p_load_name}'", icon="📂")
+                    _request_rerun()
+                if p_delete_col.button("🗑️ Delete", key="p-delete-btn", use_container_width=True):
+                    p_store.delete(p_load_name)
+                    st.toast(f"Deleted preset '{p_load_name}'", icon="🗑️")
+                    _request_rerun()
+
             p_new_name = st.text_input("New Preset Name", key="p-name-in")
             if st.button("Save Current Look as Preset", key="p-save-btn"):
                 if p_new_name.strip():
-                    p_store.save(p_new_name.strip(), {
-                        "exposure": exp_val,
-                        "contrast": cont_val,
-                        "saturation": sat_val,
-                        "temperature": temp_val,
-                        "tint": tint_val,
-                    })
+                    # The full recipe (every Tone/Lens/Color/Detail/Masks/... control, plus mask
+                    # layers), not just 5 basic fields -- a preset saved after building a mask or a
+                    # lens correction used to silently drop all of that. Deliberately excludes the
+                    # layer overlay image, same as Undo/Redo history (see _build_recipe's
+                    # docstring): a preset is a reusable style, not tied to one photo's overlay.
+                    p_store.save(p_new_name.strip(), _build_recipe())
                     st.toast(f"Preset '{p_new_name.strip()}' saved", icon="💾")
+                    _request_rerun()
                 else:
                     st.toast("Type a name before saving a preset", icon="⚠️")
 
@@ -1303,23 +1331,36 @@ with st.container(key="workspace-split"):
             st.markdown("**Project File**")
             st.caption("Save every adjustment (plus the source image and any layer) into one file you can reopen later.")
             if st.button("💾 Save Project", key="proj-save-btn"):
-                project_recipe = _build_recipe()
                 layer_workspace_json = None
+                layer_readable = True
                 if layer_bytes:
-                    overlay = Image.open(io.BytesIO(layer_bytes)).convert("RGBA")
-                    workspace = LayerWorkspace(source).add(WorkspaceLayer("Overlay", overlay, l_opacity, l_blend))
-                    layer_workspace_json = workspace.to_json()
-                project = ProjectBundle(source_name=upload_name, source_bytes=upload_bytes, recipe=project_recipe, layer_workspace=layer_workspace_json)
-                proj_buf = io.BytesIO()
-                project.save(proj_buf)
-                st.toast("Project packaged — click Download to save it", icon="💾")
-                st.download_button(
-                    "⬇️ Download .photoproject",
-                    proj_buf.getvalue(),
-                    file_name=f"{Path(upload_name).stem}.photoproject",
-                    mime="application/zip",
-                    key="proj-dl-btn",
-                )
+                    try:
+                        overlay = Image.open(io.BytesIO(layer_bytes)).convert("RGBA")
+                    except OSError:
+                        # Same "don't show a raw traceback for a bad file" fix as the main upload
+                        # above -- deliberately doesn't call st.stop() here, unlike that one: this
+                        # runs deep inside tools_col, and stopping the script early would abort
+                        # before canvas_col's widgets are instantiated this pass, resetting them
+                        # (the exact bug class _request_rerun() exists to prevent). Skipping just
+                        # the save, below, keeps the rest of the script running normally instead.
+                        st.error("⚠️ Couldn't read the layer image — it may be corrupted. Remove it in the Layers tab and try again.")
+                        layer_readable = False
+                    else:
+                        workspace = LayerWorkspace(source).add(WorkspaceLayer("Overlay", overlay, l_opacity, l_blend))
+                        layer_workspace_json = workspace.to_json()
+                if layer_readable:
+                    project_recipe = _build_recipe()
+                    project = ProjectBundle(source_name=upload_name, source_bytes=upload_bytes, recipe=project_recipe, layer_workspace=layer_workspace_json)
+                    proj_buf = io.BytesIO()
+                    project.save(proj_buf)
+                    st.toast("Project packaged — click Download to save it", icon="💾")
+                    st.download_button(
+                        "⬇️ Download .photoproject",
+                        proj_buf.getvalue(),
+                        file_name=f"{Path(upload_name).stem}.photoproject",
+                        mime="application/zip",
+                        key="proj-dl-btn",
+                    )
 
         # TAB 8: MORE (Catalog, Batch, System)
         with tab_more:
