@@ -1,6 +1,7 @@
 import io
 import json
 
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -325,6 +326,35 @@ def test_process_endpoint_crop_box_takes_priority_over_aspect():
     result = Image.open(io.BytesIO(response.data))
     # A 1:1 aspect fit on a 40x30 source would land at 30x30 -- confirms crop_box won, not aspect.
     assert result.size == (12, 8)
+
+
+def test_process_endpoint_returns_clean_json_error_for_a_cv2_failure(monkeypatch):
+    """apply_denoise() now calls cv2.fastNlMeansDenoisingColored (a real cv2.error source, e.g.
+    for a degenerate input) instead of the old flat median filter -- regression test for a real
+    gap found in review: cv2.error wasn't in the /process route's except tuple, so it used to
+    fall through to Flask's generic HTML 500 instead of the same clean JSON error every other
+    failure mode gets. Raises cv2.error directly (rather than trying to construct an image that
+    actually triggers OpenCV's internal assertion) to test the route's error handling in
+    isolation from OpenCV's own input-validation behavior."""
+
+    def fake_apply_denoise(self, radius=3):
+        raise cv2.error("synthetic failure for this test")
+
+    monkeypatch.setattr(PhotoProcessor, "apply_denoise", fake_apply_denoise)
+
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes()), "input.png"),
+            "options": json.dumps({"denoise": 3}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    assert response.is_json
+    assert "synthetic failure for this test" in response.get_json()["error"]
 
 
 def test_process_endpoint_still_validates_non_raw_uploads():

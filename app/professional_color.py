@@ -179,6 +179,13 @@ def profile_export(image: Image.Image, profile: str = "sRGB", sixteen_bit: bool 
 # itself a standard, meaningful proof target, and needs no external file since both conversions
 # below target the same built-in sRGB profile.
 
+# Every exception littlecms can raise for a malformed/truncated/non-ICC "icc_profile" tag, or for a
+# profile it can open but can't build a transform from -- one shared tuple so normalize_to_srgb()'s
+# and gamut_warning_overlay()'s callers (app/backend.py, app/frontend_unified_app.py) all fall back
+# on exactly the same set of failure modes instead of keeping their own copies in sync by hand.
+ICC_TRANSFORM_ERRORS = (OSError, ValueError, ImageCms.PyCMSError)
+
+
 def srgb_icc_bytes() -> bytes:
     """A standard sRGB ICC profile's raw bytes, synthesized by littlecms (no file on disk needed).
     For re-tagging an image that's just been normalize_to_srgb()'d -- re-attaching the *original*
