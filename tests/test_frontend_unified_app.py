@@ -250,6 +250,46 @@ def test_painted_mask_selection_removes_content_via_repair_tab():
     assert canvas_hash(at) != baseline
 
 
+def _full_painted_mask_base64(size=(20, 20)):
+    """A distinctly different painted region than painted_mask_base64()'s right-half default --
+    the whole canvas opaque -- for asserting an edit genuinely changed the stored mask rather than
+    round-tripping the same bytes."""
+    mask = Image.new("RGBA", size, (255, 255, 255, 255))
+    buf = io.BytesIO()
+    mask.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def test_editing_an_existing_painted_mask_updates_it_in_place():
+    """Regression coverage for the "Edit Painting" toggle (_render_selection_stack's per-layer
+    re-edit section): committing through it must update the same layer's mask_b64 in place, not
+    append a second layer -- the same "genuine new commit only" guard as adding a fresh Painted
+    selection, applied to the edit path instead."""
+    at = run_with_uploaded_image(color=(80, 80, 80))
+
+    at.selectbox(key="m-new-kind").set_value("Painted")
+    at.run(timeout=30)
+    at.text_area(key="m-paint-data").set_value(painted_mask_base64())
+    at.run(timeout=30)
+
+    layer_id = at.session_state["mask_layers"][0]["id"]
+    original_mask_b64 = at.session_state["mask_layers"][0]["params"]["mask_b64"]
+
+    at.checkbox(key=f"m-editpaint-toggle-{layer_id}").set_value(True)
+    at.run(timeout=30)
+    edited_mask = _full_painted_mask_base64()
+    at.text_area(key=f"m-ep-{layer_id}-paint-data").set_value(edited_mask)
+    at.run(timeout=30)
+    at.run(timeout=30)  # a second rerun with the same committed edit must not add a duplicate layer
+
+    assert not at.exception
+    layers = at.session_state["mask_layers"]
+    assert len(layers) == 1
+    assert layers[0]["id"] == layer_id
+    assert layers[0]["params"]["mask_b64"] == edited_mask
+    assert layers[0]["params"]["mask_b64"] != original_mask_b64
+
+
 def test_masks_tab_state_survives_adding_a_repair_selection():
     """Regression test for a real bug found live: Repair renders before Masks in the tab order
     (see the pipeline-order comment above `options = {...}`), and every tab's code runs on every
@@ -634,17 +674,44 @@ def test_split_view_still_works_after_a_crop_changes_the_edited_size():
 
 
 def test_free_form_crop_changes_output_dimensions_to_the_selected_box():
+    """The on-canvas draggable crop rectangle is JS an AppTest harness can't drive -- this instead
+    verifies the Python-side wiring its drag-release commit ultimately depends on: setting the
+    hidden field (_crop_editor_html's fractional {x0,y0,x1,y1} JSON) is exactly what a real drag
+    sends, just without a browser involved. 0.1..0.6 of a 40px width is 20px; 0.1..0.7 of a 30px
+    height is 18px."""
     at = run_with_uploaded_image(size=(40, 30))
     assert canvas_dims(at) == (40, 30)
 
     at.selectbox(key="crop-aspect").set_value("Free-form")
     at.run(timeout=30)
-    at.slider(key="crop-x").set_value((5, 25))
-    at.slider(key="crop-y").set_value((2, 20))
+    at.text_area(key="crop-editor-data").set_value(json.dumps({"x0": 0.1, "y0": 0.1, "x1": 0.6, "y1": 0.7}))
     at.run(timeout=30)
+    at.run(timeout=30)  # a second rerun with the same committed box must not re-trigger anything odd
 
     assert not at.exception
     assert canvas_dims(at) == (20, 18)
+
+
+def test_free_form_crop_box_survives_undo_redo():
+    """Regression coverage for the fractional-storage fix -- the old pixel-range-slider version's
+    Known Issue was that Free-form's exact box reset to the full frame after an Undo/Redo or a
+    project reload, because it was never added to RECIPE_WIDGET_KEYS/RECIPE_DEFAULTS at all."""
+    at = run_with_uploaded_image(size=(40, 30))
+    at.selectbox(key="crop-aspect").set_value("Free-form")
+    at.run(timeout=30)
+    at.text_area(key="crop-editor-data").set_value(json.dumps({"x0": 0.1, "y0": 0.1, "x1": 0.6, "y1": 0.7}))
+    at.run(timeout=30)
+    assert canvas_dims(at) == (20, 18)
+
+    at.button(key="hist-undo-btn").click()
+    at.run(timeout=30)
+    assert not at.exception
+    assert canvas_dims(at) == (40, 30)  # back to the full, uncropped frame
+
+    at.button(key="hist-redo-btn").click()
+    at.run(timeout=30)
+    assert not at.exception
+    assert canvas_dims(at) == (20, 18)  # the exact box restored, not reset to full-frame
 
 
 def test_undo_restores_previous_control_value():
@@ -959,6 +1026,82 @@ def test_dehaze_is_included_in_reset():
     assert at.slider(key="d-haze").value == 0
 
 
+def test_color_noise_slider_is_disabled_until_denoise_is_nonzero():
+    at = run_with_uploaded_image()
+    assert at.slider(key="d-den-color").value == 0
+    assert at.slider(key="d-den-color").disabled is True
+
+    at.slider(key="d-den").set_value(4)
+    at.run(timeout=30)
+
+    assert at.slider(key="d-den-color").disabled is False
+
+
+def test_color_noise_slider_changes_the_final_image_independently_of_denoise():
+    rng = np.random.default_rng(3)
+    noisy = np.clip(np.full((40, 40, 3), 128, dtype=np.float32) + rng.normal(0, 20, (40, 40, 3)), 0, 255).astype(np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(noisy, "RGB").save(buf, format="PNG")
+
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.file_uploader[0].set_value(("noisy.png", buf.getvalue(), "image/png"))
+    at.run(timeout=30)
+    at.slider(key="d-den").set_value(4)
+    at.run(timeout=30)
+    baseline = canvas_hash(at)
+
+    at.slider(key="d-den-color").set_value(9)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_hash(at) != baseline
+
+
+def test_post_crop_vignette_and_grain_default_to_no_adjustment():
+    at = run_with_uploaded_image()
+    assert at.slider(key="fx-vignette-amt").value == 0
+    assert at.slider(key="fx-vignette-mid").value == 50
+    assert at.slider(key="fx-grain-amt").value == 0
+
+
+def test_post_crop_vignette_changes_the_final_image():
+    at = run_with_uploaded_image(color=(200, 200, 200), size=(40, 40))
+    baseline = canvas_hash(at)
+
+    at.slider(key="fx-vignette-amt").set_value(-80)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_hash(at) != baseline
+
+
+def test_film_grain_changes_the_final_image():
+    at = run_with_uploaded_image(color=(120, 120, 120))
+    baseline = canvas_hash(at)
+
+    at.slider(key="fx-grain-amt").set_value(80)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_hash(at) != baseline
+
+
+def test_effects_are_included_in_reset():
+    at = run_with_uploaded_image()
+    at.slider(key="fx-vignette-amt").set_value(-60)
+    at.slider(key="fx-grain-amt").set_value(50)
+    at.run(timeout=30)
+    assert at.slider(key="fx-vignette-amt").value == -60
+
+    at.button(key="hist-reset-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="fx-vignette-amt").value == 0
+    assert at.slider(key="fx-grain-amt").value == 0
+
+
 def test_clipping_warning_checkbox_renders_the_overlay():
     at = run_with_uploaded_image()
     at.checkbox(key="clip-warning-toggle").set_value(True)
@@ -1113,60 +1256,20 @@ def test_lens_perspective_is_included_in_reset():
     assert at.slider(key="lens-persp-h").value == 0
 
 
-def test_crop_preview_reflects_lens_perspective_correction():
-    """Same bug class -- and same fix -- as test_crop_preview_reflects_lens_distortion_correction,
-    now covering the newer Perspective (Keystone) sliders. Needs a patterned (not flat-color)
-    fixture -- see test_lens_perspective_slider_changes_the_final_image's docstring for why."""
-
-    def crop_preview_bytes(at):
-        matches = [img for img in at.image if img.captions and img.captions[0].startswith("Crop preview:")]
-        assert matches, "expected the crop preview image to be rendered"
-        return matches[0].value[0]
-
-    grid = Image.new("RGB", (40, 30), (30, 30, 30))
-    ImageDraw.Draw(grid).line([(20, 0), (20, 30)], fill=(220, 220, 220), width=2)
-    buf = io.BytesIO()
-    grid.save(buf, format="PNG")
-
-    at = AppTest.from_file(APP_PATH)
-    at.run(timeout=30)
-    at.file_uploader[0].set_value(("grid.png", buf.getvalue(), "image/png"))
-    at.run(timeout=30)
-    at.selectbox(key="crop-aspect").set_value("Free-form")
-    at.run(timeout=30)
-    baseline = crop_preview_bytes(at)
-
-    at.slider(key="lens-persp-v").set_value(70)
-    at.run(timeout=30)
-
-    assert not at.exception
-    assert crop_preview_bytes(at) != baseline
-
-
-def test_crop_preview_reflects_lens_distortion_correction():
-    """Regression test for a real bug found in review: the free-form Crop preview used to draw
-    the crop box on the raw, uncorrected `source` image, but app/backend.py applies Lens
-    corrections (a real geometric warp) before Crop -- so a crop box framed against the
-    uncorrected preview could land on the wrong region once the backend actually corrects the
-    geometry first. Fixed by basing the preview on `_lens_corrected_source()` instead. A
-    zero-value baseline is compared against a large distortion value on the same crop box; if the
-    preview weren't actually re-warped, the two would render identical pixels."""
-
-    def crop_preview_bytes(at):
-        matches = [img for img in at.image if img.captions and img.captions[0].startswith("Crop preview:")]
-        assert matches, "expected the crop preview image to be rendered"
-        return matches[0].value[0]
-
-    at = run_with_uploaded_image(size=(40, 30))
-    at.selectbox(key="crop-aspect").set_value("Free-form")
-    at.run(timeout=30)
-    baseline = crop_preview_bytes(at)
-
-    at.slider(key="lens-distortion").set_value(80)
-    at.run(timeout=30)
-
-    assert not at.exception
-    assert crop_preview_bytes(at) != baseline
+# The two regression tests that used to live here (test_crop_preview_reflects_lens_distortion_
+# correction, test_crop_preview_reflects_lens_perspective_correction) asserted on a Crop-tab
+# st.image's rendered bytes to confirm the free-form crop preview was built from mask_source (the
+# lens-corrected geometry) rather than the raw, uncorrected source -- otherwise a crop box framed
+# against the wrong-looking preview could land on the wrong region once the backend actually warps
+# the image. The draggable on-canvas crop editor (_crop_editor_html, replacing the old plain X/Y
+# range sliders + st.image preview pair) still deliberately passes it
+# preview_image(mask_source, (480, 480)) for exactly the same reason, but that background image
+# now lives inside a components.html() iframe's srcdoc, which streamlit.testing.v1.AppTest has no
+# API to inspect (no real DOM, and there's no safe way to import app.frontend_unified_app directly
+# to monkeypatch around it -- see its own module docstring: it's a Streamlit script with top-level
+# st.* calls meant to run under AppTest/`streamlit run`, not to be imported as a plain library).
+# This is now covered by live manual verification only, the same documented limitation already
+# true of the Library Catalog's keyboard shortcuts (see "Known Issues" in docs/PROJECT_STATUS.md).
 
 
 def test_mask_overlay_preview_reflects_lens_distortion_correction():
@@ -1240,6 +1343,48 @@ def test_rgb_curve_drag_commit_via_hidden_field_changes_the_final_image():
     assert at.checkbox(key="c-curve-en").value is True
     assert at.slider(key="c-p2").value == 180
     assert canvas_hash(at) != before
+
+
+def test_rgb_curve_extra_point_commit_changes_the_final_image():
+    """Same hidden-field simulation as the drag-commit test above, now covering an added "extra"
+    point (click-to-add on the curve, not one of the 5 fixed Blacks/Shadows/Midtones/Highlights/
+    Whites sliders) -- the feature this app's Known Issues used to call a UI-only limitation of
+    PhotoProcessor.apply_curves(), which already accepted an arbitrary point list. color=(50,50,50)
+    deliberately: the extra point added below sits strictly between the identity curve's 0 and 64
+    fixed points, so a fixture whose value falls outside that 0-64 span (e.g. the default flat
+    image_bytes() color) would show no change at all -- the reshaping is local to that segment."""
+    at = run_with_uploaded_image(color=(50, 50, 50))
+    before = canvas_hash(at)
+
+    at.text_area(key="curve-commit-data").set_value(
+        json.dumps({
+            "curve_black": 0, "curve_shadows": 64, "curve_mid": 128, "curve_highlights": 192, "curve_white": 255,
+            "curve_enabled": True, "curve_extra_points": [[30, 220]],
+        })
+    )
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["curve_extra_points"] == [[30, 220]]
+    assert canvas_hash(at) != before
+
+
+def test_rgb_curve_extra_points_are_included_in_reset():
+    at = run_with_uploaded_image()
+    at.text_area(key="curve-commit-data").set_value(
+        json.dumps({
+            "curve_black": 0, "curve_shadows": 64, "curve_mid": 128, "curve_highlights": 192, "curve_white": 255,
+            "curve_enabled": True, "curve_extra_points": [[30, 220]],
+        })
+    )
+    at.run(timeout=30)
+    assert at.session_state["curve_extra_points"] == [[30, 220]]
+
+    at.button(key="hist-reset-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["curve_extra_points"] == []
 
 
 def test_library_rating_buttons_write_to_the_catalog(monkeypatch, tmp_path):

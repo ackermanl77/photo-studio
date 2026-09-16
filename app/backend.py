@@ -137,7 +137,7 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     if options.get("dehaze", 0):
         processor.apply_dehaze(_number(options, "dehaze", 0))
     if options.get("denoise", 0):
-        processor.apply_denoise(int(options["denoise"]))
+        processor.apply_denoise(int(options["denoise"]), int(options.get("denoise_color", 0)))
     if options.get("sharpen", False):
         processor.apply_sharpen()
 
@@ -175,6 +175,15 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
         if aspect != "Original":
             ratios = {"1:1": (1, 1), "4:5": (4, 5), "5:4": (5, 4), "3:2": (3, 2), "16:9": (16, 9), "9:16": (9, 16)}
             processor.fit_aspect_ratio(*ratios[aspect])
+
+    # Effects -- creative, applied to the final delivered frame, deliberately last: a post-crop
+    # vignette needs the crop to have already happened (its corners are the crop's corners, not
+    # the pre-crop source's), and grain is a finishing texture on top of everything else.
+    processor.apply_post_crop_vignette(
+        _number(options, "effects_vignette_amount", 0.0), _number(options, "effects_vignette_midpoint", 50.0)
+    )
+    if options.get("effects_grain_amount", 0):
+        processor.apply_film_grain(_number(options, "effects_grain_amount", 0.0))
 
     if source_exif and not options.get("strip_metadata", False):
         processor.image.info["exif"] = source_exif

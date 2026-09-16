@@ -1,5 +1,5 @@
 from app.professional_color import HSL_BAND_ORDER
-from app.recipe_options import ASPECT_RATIOS, recipe_to_options
+from app.recipe_options import ASPECT_RATIOS, merge_curve_points, recipe_to_options
 
 # Mirrors app.frontend_unified_app.RECIPE_DEFAULTS's shape (not imported directly: that module is a
 # Streamlit script with top-level st.* calls meant to run under AppTest/`streamlit run`, not to be
@@ -11,10 +11,13 @@ _BASE_RECIPE = {
     "exposure": 1.0, "contrast": 1.0, "highlights": 0, "shadows": 0, "preset": "None",
     "temperature": 0, "tint": 0, "saturation": 1.0, "vibrance": 0,
     "curve_enabled": False, "curve_black": 0, "curve_shadows": 64, "curve_mid": 128, "curve_highlights": 192, "curve_white": 255,
-    "texture": 0, "clarity": 0, "denoise": 0, "sharpen": False, "dehaze": 0,
+    "curve_extra_points": [],
+    "texture": 0, "clarity": 0, "denoise": 0, "denoise_color": 0, "sharpen": False, "dehaze": 0,
+    "effects_vignette_amount": 0, "effects_vignette_midpoint": 50, "effects_grain_amount": 0,
     "portrait_smoothing": 0.0,
     "mask_target_exposure": 1.0, "mask_target_contrast": 1.0, "mask_target_saturation": 1.0,
     "crop_aspect": "Original", "removal_radius": 3,
+    "crop_free_x0": 0.0, "crop_free_y0": 0.0, "crop_free_x1": 1.0, "crop_free_y1": 1.0,
     "lens_profile": "None", "lens_distortion": 0, "lens_vignette_amount": 0, "lens_vignette_midpoint": 50,
     "lens_chromatic_aberration": 0, "lens_perspective_v": 0, "lens_perspective_h": 0,
     "cg_shadows_hue": 0, "cg_shadows_intensity": 0,
@@ -65,6 +68,33 @@ def test_recipe_to_options_builds_the_curve_only_when_enabled():
     assert enabled["curve"] == [(0, 10), (64, 70), (128, 130), (192, 190), (255, 250)]
 
 
+def test_recipe_to_options_merges_extra_curve_points_in():
+    recipe = _full_recipe(curve_enabled=True, curve_extra_points=[[30, 90], [150, 40]])
+    options = recipe_to_options(recipe)
+
+    assert options["curve"] == [(0, 0), (30, 90), (64, 64), (128, 128), (150, 40), (192, 192), (255, 255)]
+
+
+def test_merge_curve_points_sorts_by_x():
+    fixed = [(0, 0), (64, 64), (128, 128), (192, 192), (255, 255)]
+    result = merge_curve_points(fixed, [[200, 10], [20, 200]])
+    assert result == [(0, 0), (20, 200), (64, 64), (128, 128), (192, 192), (200, 10), (255, 255)]
+
+
+def test_merge_curve_points_drops_an_extra_point_colliding_with_a_fixed_points_x():
+    """apply_curves() requires strictly increasing X -- a defensive drop, not a crash, for the one
+    case the on-canvas editor doesn't hard-prevent client-side: an extra point dragged exactly
+    onto an existing point's X."""
+    fixed = [(0, 0), (64, 64), (128, 128), (192, 192), (255, 255)]
+    result = merge_curve_points(fixed, [[64, 200]])
+    assert result == fixed  # the colliding extra point is silently dropped, fixed point kept
+
+
+def test_merge_curve_points_with_no_extra_points_returns_the_fixed_points_unchanged():
+    fixed = [(0, 0), (64, 64), (128, 128), (192, 192), (255, 255)]
+    assert merge_curve_points(fixed, []) == fixed
+
+
 def test_recipe_to_options_builds_hsl_bands_from_flat_keys():
     recipe = _full_recipe(hsl_red_hue=20, hsl_red_sat=-30, hsl_red_lum=5)
     options = recipe_to_options(recipe)
@@ -80,8 +110,9 @@ def test_recipe_to_options_translates_crop_aspect_label_to_the_short_code():
         assert options["aspect"] == f"{width_ratio}:{height_ratio}"
 
     assert "aspect" not in recipe_to_options(_full_recipe(crop_aspect="Original"))
-    # "Free-form" isn't persisted in a recipe (see docs/PROJECT_STATUS.md's Known Issues) -- falls
-    # back to no aspect option rather than raising on an unrecognized label.
+    # "Free-form" is excluded deliberately (see recipe_to_options()'s own docstring) even though
+    # it's now persisted (crop_free_x0/_y0/_x1/_y1) -- falls back to no aspect option rather than
+    # raising on the unrecognized label.
     assert "aspect" not in recipe_to_options(_full_recipe(crop_aspect="Free-form"))
 
 
