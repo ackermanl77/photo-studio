@@ -9,7 +9,7 @@ from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, magic_wand_mask, radial_mask, soften_mask
 from app.backend_client import ensure_backend_running, process_via_backend
@@ -27,7 +27,7 @@ from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS, clippin
 from app.lens_corrections import LENS_PROFILES, apply_lens_corrections
 from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
-from app.recipe_options import ASPECT_RATIOS
+from app.recipe_options import ASPECT_RATIOS, merge_curve_points
 
 # Maps a JSON-serializable recipe key to the session_state key of the widget that reads/writes it.
 # Shared by Undo/Redo (EditHistory snapshots) and Save/Load Project (ProjectBundle.recipe) so both
@@ -37,10 +37,15 @@ RECIPE_WIDGET_KEYS = {
     "temperature": "c-temp", "tint": "c-tint", "saturation": "c-sat", "vibrance": "c-vib",
     "curve_enabled": "c-curve-en", "curve_black": "c-p0", "curve_shadows": "c-p1", "curve_mid": "c-p2",
     "curve_highlights": "c-p3", "curve_white": "c-p4",
-    "texture": "d-text", "clarity": "d-clar", "denoise": "d-den", "sharpen": "d-sharp", "dehaze": "d-haze",
+    "texture": "d-text", "clarity": "d-clar", "denoise": "d-den", "denoise_color": "d-den-color",
+    "sharpen": "d-sharp", "dehaze": "d-haze",
+    "effects_vignette_amount": "fx-vignette-amt", "effects_vignette_midpoint": "fx-vignette-mid",
+    "effects_grain_amount": "fx-grain-amt",
     "portrait_smoothing": "port-sm",
     "mask_target_exposure": "m-texp", "mask_target_contrast": "m-tcont", "mask_target_saturation": "m-tsat",
     "crop_aspect": "crop-aspect", "removal_radius": "rm-radius",
+    "crop_free_x0": "crop-free-x0", "crop_free_y0": "crop-free-y0",
+    "crop_free_x1": "crop-free-x1", "crop_free_y1": "crop-free-y1",
     "lens_profile": "lens-profile", "lens_distortion": "lens-distortion",
     "lens_vignette_amount": "lens-vignette-amt", "lens_vignette_midpoint": "lens-vignette-mid",
     "lens_chromatic_aberration": "lens-ca",
@@ -54,10 +59,12 @@ RECIPE_DEFAULTS = {
     "exposure": 1.0, "contrast": 1.0, "highlights": 0, "shadows": 0, "preset": "None",
     "temperature": 0, "tint": 0, "saturation": 1.0, "vibrance": 0,
     "curve_enabled": False, "curve_black": 0, "curve_shadows": 64, "curve_mid": 128, "curve_highlights": 192, "curve_white": 255,
-    "texture": 0, "clarity": 0, "denoise": 0, "sharpen": False, "dehaze": 0,
+    "texture": 0, "clarity": 0, "denoise": 0, "denoise_color": 0, "sharpen": False, "dehaze": 0,
+    "effects_vignette_amount": 0, "effects_vignette_midpoint": 50, "effects_grain_amount": 0,
     "portrait_smoothing": 0.0,
     "mask_target_exposure": 1.0, "mask_target_contrast": 1.0, "mask_target_saturation": 1.0,
     "crop_aspect": "Original", "removal_radius": 3,
+    "crop_free_x0": 0.0, "crop_free_y0": 0.0, "crop_free_x1": 1.0, "crop_free_y1": 1.0,
     "lens_profile": "None", "lens_distortion": 0, "lens_vignette_amount": 0, "lens_vignette_midpoint": 50,
     "lens_chromatic_aberration": 0,
     "lens_perspective_v": 0, "lens_perspective_h": 0,
@@ -92,6 +99,7 @@ def _build_recipe() -> dict:
     recipe = {key: st.session_state.get(widget_key, RECIPE_DEFAULTS[key]) for key, widget_key in RECIPE_WIDGET_KEYS.items()}
     recipe["mask_layers"] = st.session_state.get("mask_layers", [])
     recipe["removal_mask_layers"] = st.session_state.get("removal_mask_layers", [])
+    recipe["curve_extra_points"] = st.session_state.get("curve_extra_points", [])
     return recipe
 
 
@@ -112,6 +120,8 @@ def _restore_recipe_to_state(recipe: dict) -> None:
         st.session_state.mask_layers = recipe["mask_layers"]
     if "removal_mask_layers" in recipe:
         st.session_state.removal_mask_layers = recipe["removal_mask_layers"]
+    if "curve_extra_points" in recipe:
+        st.session_state.curve_extra_points = recipe["curve_extra_points"]
     layer_payload = recipe.get("layer")
     if layer_payload:
         st.session_state["restored_layer_bytes"] = base64.b64decode(layer_payload["image_b64"])
@@ -268,6 +278,28 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
             if include_opacity:
                 layer["opacity"] = st.slider("Opacity", 0.0, 1.0, layer["opacity"], 0.05, key=f"{key_prefix}-op-{layer_id}")
             layer["soften"] = st.slider("Soften edges (px)", 0, 40, layer.get("soften", 0), key=f"{key_prefix}-sf-{layer_id}")
+            if layer["kind"] == "Painted":
+                # The only selection kind with a spatial shape that can't be re-derived from a
+                # handful of numeric params (Luminance/Color/gradient/Radial/Magic Wand all can,
+                # from their existing name/enabled/invert/opacity/soften controls above) -- a
+                # second pass at the canvas, not just parameter tweaks, needs its own toggle.
+                if st.checkbox("🎨 Edit Painting", key=f"{key_prefix}-editpaint-toggle-{layer_id}"):
+                    edit_prefix = f"{key_prefix}-ep-{layer_id}"
+                    edit_html, edit_height = _paint_editor_html(
+                        preview_image(source, (480, 480)), edit_prefix,
+                        preload_mask_b64=layer["params"].get("mask_b64"), commit_label="💾 Update Painting",
+                    )
+                    components.html(edit_html, height=edit_height)
+                    with st.container(key=f"{edit_prefix}-paint-hidden"):
+                        pending_edit = st.text_area("Edited painted mask data", key=f"{edit_prefix}-paint-data", label_visibility="collapsed")
+                    edit_committed_key = f"{edit_prefix}-paint-committed"
+                    # Same "only a genuine new commit updates anything" guard as adding a fresh
+                    # Painted selection -- clicking "Update Painting" twice without drawing
+                    # anything new between clicks is correctly a no-op.
+                    if pending_edit and pending_edit != st.session_state.get(edit_committed_key):
+                        layer["params"]["mask_b64"] = pending_edit
+                        st.session_state[edit_committed_key] = pending_edit
+                        _request_rerun()
             if st.button("🗑️ Remove", key=f"{key_prefix}-rm-{layer_id}"):
                 layers.pop(idx)
                 _request_rerun()
@@ -333,11 +365,15 @@ def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, in
     return html, display_height
 
 
-def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, int]]) -> str:
-    """A draggable RGB tone curve: an inline SVG with five points, each vertically draggable
-    within its own [min, max] (matching the five sliders below it -- Blacks/Shadows/Midtones/
-    Highlights/Whites). Dragging only updates the curve's own SVG locally; only on release does it
-    commit.
+def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, int]], extra_points: list[tuple[int, int]] | None = None) -> str:
+    """A draggable RGB tone curve: an inline SVG with five fixed points (Blacks/Shadows/Midtones/
+    Highlights/Whites, matching the five sliders below it), each vertically draggable within its
+    own [min, max], plus any number of user-added "extra" points -- click empty space on the curve
+    to add one, drag it freely in both X and Y, double-click to remove it. `PhotoProcessor.
+    apply_curves()` already accepted an arbitrary point list; the 5-fixed-point limit was purely a
+    UI one (see "Known Issues" in docs/PROJECT_STATUS.md before this). Dragging/adding/removing
+    only updates the curve's own SVG locally; each of those three actions commits on its own
+    (point release, the add-click itself, the remove-double-click).
 
     Earlier version of this function wrote the dragged value directly into the real
     `<input type="range">` via a native-value-setter trick, then dispatched `input`/`change`.
@@ -350,60 +386,85 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
     (button clicks and a text_area's Ctrl+Enter were confirmed to work synthetically, just not a
     slider's input/change).
 
-    So instead of touching the sliders at all, commit writes the whole 5-point curve as JSON into
-    a hidden `st.text_area` (`st.container(key="curve-hidden")`, same Ctrl+Enter trick used by
+    So instead of touching the sliders at all, commit writes the whole curve as JSON into a hidden
+    `st.text_area` (`st.container(key="curve-hidden")`, same Ctrl+Enter trick used by
     `_paint_editor_html`, confirmed reliable) using the RECIPE_WIDGET_KEYS names
-    (curve_black/curve_shadows/curve_mid/curve_highlights/curve_white/curve_enabled). Python reads
-    it and stores it in `st.session_state["_pending_restore"]` -- the exact same "write before any
-    widget instantiates, then rerun" mechanism Undo/Redo/Reset already use to update a slider's
-    value from outside the widget itself, which sidesteps the whole reliability question since it
-    never depends on a script-dispatched DOM event reaching a slider at all.
+    (curve_black/curve_shadows/curve_mid/curve_highlights/curve_white/curve_enabled) plus
+    `curve_extra_points` (a plain list, handled like `mask_layers` rather than through
+    RECIPE_WIDGET_KEYS -- see `_build_recipe`/`_restore_recipe_to_state`). Python reads it and
+    stores it in `st.session_state["_pending_restore"]` -- the exact same "write before any widget
+    instantiates, then rerun" mechanism Undo/Redo/Reset already use to update a slider's value from
+    outside the widget itself, which sidesteps the whole reliability question since it never
+    depends on a script-dispatched DOM event reaching a slider at all.
     """
+    extra_points = extra_points or []
     margin_left, margin_top, plot_size = 34, 12, 210
     svg_w, svg_h = margin_left + plot_size + 12, margin_top + plot_size + 12
 
     def _to_px(x: float, y: float) -> tuple[float, float]:
         return (margin_left + (x / 255) * plot_size, margin_top + plot_size - (y / 255) * plot_size)
 
-    poly = " ".join(f"{px:.1f},{py:.1f}" for px, py in (_to_px(x, y) for x, y in points))
-    circles = "\n".join(
-        f'<circle class="pt" data-idx="{i}" cx="{px:.1f}" cy="{py:.1f}" r="7"></circle>'
+    all_points_sorted = sorted(list(points) + list(extra_points), key=lambda point: point[0])
+    poly = " ".join(f"{px:.1f},{py:.1f}" for px, py in (_to_px(x, y) for x, y in all_points_sorted))
+    fixed_circles = "\n".join(
+        f'<circle class="pt fixed" data-idx="{i}" cx="{px:.1f}" cy="{py:.1f}" r="7"></circle>'
         for i, (px, py) in enumerate(_to_px(x, y) for x, y in points)
     )
     diag_x0, diag_y0 = _to_px(0, 0)
     diag_x1, diag_y1 = _to_px(255, 255)
     points_json = json.dumps(points)
     bounds_json = json.dumps(bounds)
+    extra_points_json = json.dumps(extra_points)
     return f"""
     <div style="background:#0f172a;border-radius:8px;padding:6px 8px;">
     <svg id="curve-svg" width="100%" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}"
          preserveAspectRatio="xMinYMin meet" style="touch-action:none;display:block;">
-      <rect x="{margin_left}" y="{margin_top}" width="{plot_size}" height="{plot_size}"
-            fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.15)"/>
+      <rect id="curve-bg" x="{margin_left}" y="{margin_top}" width="{plot_size}" height="{plot_size}"
+            fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.15)" style="cursor:copy;"/>
       <line x1="{diag_x0:.1f}" y1="{diag_y0:.1f}" x2="{diag_x1:.1f}" y2="{diag_y1:.1f}"
             stroke="rgba(255,255,255,0.2)" stroke-dasharray="3,3"/>
       <polyline id="curve-line" points="{poly}" fill="none" stroke="#fbbf24" stroke-width="2"/>
-      {circles}
+      {fixed_circles}
+      <g id="extra-points"></g>
     </svg>
     </div>
+    <div style="color:#94a3b8;font:11px system-ui;margin-top:4px;padding:0 2px;">
+      Click an empty spot on the curve to add a point, drag it, double-click to remove it.
+    </div>
     <style>
-      #curve-svg .pt {{ fill:#fbbf24; stroke:#1e293b; stroke-width:2; cursor:ns-resize; }}
-      #curve-svg .pt:hover {{ fill:#fde68a; }}
+      #curve-svg .pt.fixed {{ fill:#fbbf24; stroke:#1e293b; stroke-width:2; cursor:ns-resize; }}
+      #curve-svg .pt.fixed:hover {{ fill:#fde68a; }}
+      #curve-svg .pt.extra {{ fill:#60a5fa; stroke:#1e293b; stroke-width:2; cursor:move; }}
+      #curve-svg .pt.extra:hover {{ fill:#93c5fd; }}
     </style>
     <script>
       (function() {{
         const marginLeft = {margin_left}, marginTop = {margin_top}, plotSize = {plot_size}, svgW = {svg_w};
         const bounds = {bounds_json};
         const points = {points_json};
+        let extraPoints = {extra_points_json};
         const svg = document.getElementById('curve-svg');
+        const bg = document.getElementById('curve-bg');
         const line = document.getElementById('curve-line');
+        const extraGroup = document.getElementById('extra-points');
         function toPx(x, y) {{ return [marginLeft + (x / 255) * plotSize, marginTop + plotSize - (y / 255) * plotSize]; }}
         function fromPy(py) {{ return Math.max(0, Math.min(255, ((marginTop + plotSize - py) / plotSize) * 255)); }}
+        function fromPx(px) {{ return Math.max(0, Math.min(255, ((px - marginLeft) / plotSize) * 255)); }}
         function redraw() {{
-          line.setAttribute('points', points.map(p => toPx(p[0], p[1]).join(',')).join(' '));
-          svg.querySelectorAll('.pt').forEach((c, i) => {{
+          const all = points.concat(extraPoints).slice().sort((a, b) => a[0] - b[0]);
+          line.setAttribute('points', all.map(p => toPx(p[0], p[1]).join(',')).join(' '));
+          svg.querySelectorAll('.pt.fixed').forEach((c, i) => {{
             const [px, py] = toPx(points[i][0], points[i][1]);
             c.setAttribute('cx', px); c.setAttribute('cy', py);
+          }});
+          extraGroup.innerHTML = '';
+          extraPoints.forEach((p, i) => {{
+            const [px, py] = toPx(p[0], p[1]);
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('class', 'pt extra');
+            circle.setAttribute('data-idx', i);
+            circle.setAttribute('cx', px); circle.setAttribute('cy', py); circle.setAttribute('r', 7);
+            extraGroup.appendChild(circle);
           }});
         }}
         function commit() {{
@@ -411,6 +472,7 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
             const payload = JSON.stringify({{
               curve_black: points[0][1], curve_shadows: points[1][1], curve_mid: points[2][1],
               curve_highlights: points[3][1], curve_white: points[4][1], curve_enabled: true,
+              curve_extra_points: extraPoints,
             }});
             const container = window.parent.document.querySelector('.st-key-curve-hidden');
             if (!container) return;
@@ -425,8 +487,11 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
             textarea.blur();
           }} catch (e) {{}}
         }}
+
+        // Fixed points: Y-only drag within their own [min, max] -- unchanged from before extra
+        // points existed. Their count never changes, so listeners attach once, directly.
         let dragIdx = null;
-        svg.querySelectorAll('.pt').forEach((circle, i) => {{
+        svg.querySelectorAll('.pt.fixed').forEach((circle, i) => {{
           circle.addEventListener('pointerdown', (e) => {{
             dragIdx = i;
             circle.setPointerCapture(e.pointerId);
@@ -451,23 +516,81 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
         }}
         svg.addEventListener('pointerup', endDrag);
         svg.addEventListener('pointerleave', endDrag);
+
+        // Extra points: added/removed dynamically, so handled via event delegation on `svg`
+        // (checking e.target) instead of per-circle listeners that would need re-attaching every
+        // time redraw() rebuilds the #extra-points group's children.
+        let dragExtraIdx = null;
+        svg.addEventListener('pointerdown', (e) => {{
+          const el = e.target.closest('.pt.extra');
+          if (!el) return;
+          dragExtraIdx = Number(el.dataset.idx);
+          svg.setPointerCapture(e.pointerId);
+          e.preventDefault();
+          e.stopPropagation();
+        }});
+        svg.addEventListener('pointermove', (e) => {{
+          if (dragExtraIdx === null) return;
+          const rect = svg.getBoundingClientRect();
+          const scale = svgW / rect.width;
+          const px = (e.clientX - rect.left) * scale;
+          const py = (e.clientY - rect.top) * scale;
+          extraPoints[dragExtraIdx] = [Math.round(fromPx(px)), Math.round(fromPy(py))];
+          redraw();
+        }});
+        function endExtraDrag() {{
+          if (dragExtraIdx === null) return;
+          dragExtraIdx = null;
+          commit();
+        }}
+        svg.addEventListener('pointerup', endExtraDrag);
+        svg.addEventListener('pointerleave', endExtraDrag);
+        svg.addEventListener('dblclick', (e) => {{
+          const el = e.target.closest('.pt.extra');
+          if (!el) return;
+          extraPoints.splice(Number(el.dataset.idx), 1);
+          redraw();
+          commit();
+        }});
+
+        // Click empty background (not a drag-release from a point, which targets a circle
+        // element instead of the rect) adds a new extra point at the clicked position.
+        bg.addEventListener('click', (e) => {{
+          const rect = svg.getBoundingClientRect();
+          const scale = svgW / rect.width;
+          const px = (e.clientX - rect.left) * scale;
+          const py = (e.clientY - rect.top) * scale;
+          extraPoints.push([Math.round(fromPx(px)), Math.round(fromPy(py))]);
+          redraw();
+          commit();
+        }});
+
+        redraw();
       }})();
     </script>
     """
 
 
-def _paint_editor_html(background: Image.Image, key_prefix: str) -> tuple[str, int]:
+def _paint_editor_html(background: Image.Image, key_prefix: str, preload_mask_b64: str | None = None, commit_label: str = "➕ Add to selections") -> tuple[str, int]:
     """An on-canvas selection editor: brush (paint/erase freehand), radial (drag out a circle),
     and gradient (drag out a direction), all painted onto one HTML canvas as solid white at
-    varying alpha -- alpha *is* the mask value, so "Add to selections" just base64-encodes the
-    canvas as a PNG and that becomes a new MaskLayer's `params["mask_b64"]` (decoded by
-    `_decode_painted_mask`). Committing writes into the hidden `st.text_area` inside
-    `st.container(key=f"{key_prefix}-paint-hidden")` (CSS-hidden -- see the app's <style> block)
-    via the same native-value-setter trick as `_curve_editor_html`, so Python notices it on the
-    next rerun and appends the layer itself (see the "Painted" branch in _render_selection_stack)
-    -- there's no separate native Streamlit "Add" button to click after drawing, the in-canvas
-    button *is* the commit. No component library dependency, same approach as the other editors
-    in this file; avoids a repeat of the streamlit-drawable-canvas dead-weight episode.
+    varying alpha -- alpha *is* the mask value, so committing just base64-encodes the canvas as a
+    PNG and that becomes a MaskLayer's `params["mask_b64"]` (decoded by `_decode_painted_mask`).
+    Committing writes into the hidden `st.text_area` inside `st.container(key=f"{key_prefix}-
+    paint-hidden")` (CSS-hidden -- see the app's <style> block) via the same native-value-setter
+    trick as `_curve_editor_html`, so Python notices it on the next rerun (see the "Painted"
+    branch in _render_selection_stack for a new selection, or the per-layer "Edit Painting"
+    section for an existing one) -- there's no separate native Streamlit "Add" button to click
+    after drawing, the in-canvas button *is* the commit. No component library dependency, same
+    approach as the other editors in this file; avoids a repeat of the streamlit-drawable-canvas
+    dead-weight episode.
+
+    `preload_mask_b64`, when given (re-editing an existing "Painted" selection instead of
+    starting a fresh one), is a base64 PNG at this same canvas resolution -- the exact bytes
+    `_decode_painted_mask` would read back out -- drawn onto the canvas before any user input, so
+    painting continues from what was already there instead of a blank slate. `commit_label` lets
+    the re-edit path read "💾 Update Painting" instead of "➕ Add to selections" without a second,
+    near-duplicate template.
     """
     width, height = background.size
     display_w = min(480, width)
@@ -477,6 +600,13 @@ def _paint_editor_html(background: Image.Image, key_prefix: str) -> tuple[str, i
     background.convert("RGB").save(buffer, format="PNG")
     bg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
     hidden_selector = f".st-key-{key_prefix}-paint-hidden"
+    preload_js = (
+        f"""const preload = new Image();
+          preload.onload = () => ctx.drawImage(preload, 0, 0, W, H);
+          preload.src = 'data:image/png;base64,{preload_mask_b64}';"""
+        if preload_mask_b64
+        else ""
+    )
 
     return f"""
     <div style="background:#0f172a;border-radius:8px;padding:8px;">
@@ -499,7 +629,7 @@ def _paint_editor_html(background: Image.Image, key_prefix: str) -> tuple[str, i
       </div>
       <button type="button" id="commit-btn" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;
               border:none;background:#fbbf24;color:#1e293b;font:600 13px system-ui;cursor:pointer;">
-        ➕ Add to selections
+        {commit_label}
       </button>
     </div>
     <style>
@@ -517,6 +647,7 @@ def _paint_editor_html(background: Image.Image, key_prefix: str) -> tuple[str, i
         const W = maskCanvas.width, H = maskCanvas.height;
         let tool = 'brush', erasing = false, brushSize = 18;
         let drawing = false, lastX = 0, lastY = 0, startX = 0, startY = 0;
+        {preload_js}
 
         document.querySelectorAll('.tool-btn[data-tool]').forEach((btn) => {{
           btn.addEventListener('click', () => {{
@@ -686,6 +817,144 @@ def _wand_picker_html(background: Image.Image, key_prefix: str) -> tuple[str, in
       }})();
     </script>
     """, display_h + 60
+
+
+def _crop_editor_html(background: Image.Image, key_prefix: str, box: tuple[float, float, float, float], full_size: tuple[int, int]) -> tuple[str, int]:
+    """A draggable free-form crop rectangle directly on the photo -- replaces the old pair of
+    plain X/Y range sliders (see "Known Issues" in docs/PROJECT_STATUS.md, which explicitly called
+    that a deliberate stand-in to avoid reintroducing a third-party UI component dependency after
+    streamlit-drawable-canvas was removed as dead weight). No new dependency here either: two
+    round corner-drag handles plus a move-by-dragging-the-body rectangle, all plain absolutely-
+    positioned `<div>`s over the preview image, following the same "commit into a hidden
+    st.text_area via the native-value-setter trick" pattern as `_paint_editor_html`/
+    `_wand_picker_html`/`_curve_editor_html`.
+
+    `box` is `(x0, y0, x1, y1)` as fractions of the image (0..1 each) -- deliberately not pixel
+    coordinates, so the stored crop survives switching to a differently-sized photo (the exact gap
+    the old range-slider version's Known Issues entry called out: its pixel-bounded slider values
+    reset to the full frame on reload because they couldn't safely be interpreted against a new
+    image's dimensions). `full_size` is the *source* image's real (width, height) -- distinct from
+    `background`'s own (possibly downscaled-for-display) size -- purely so the on-canvas dimensions
+    label reads real pixel counts rather than the preview's.
+    """
+    width, height = background.size
+    display_w = min(480, width)
+    display_h = int(display_w * height / width) if width else 320
+    full_w, full_h = full_size
+    x0, y0, x1, y1 = box
+
+    buffer = io.BytesIO()
+    background.convert("RGB").save(buffer, format="PNG")
+    bg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+    hidden_selector = f".st-key-{key_prefix}-hidden"
+
+    return f"""
+    <div style="background:#0f172a;border-radius:8px;padding:8px;">
+      <div id="crop-wrap" style="position:relative;width:100%;max-width:{display_w}px;line-height:0;touch-action:none;">
+        <img src="data:image/png;base64,{bg_b64}" style="display:block;width:100%;height:auto;border-radius:4px;">
+        <div id="crop-rect" style="position:absolute;border:2px solid #fbbf24;background:rgba(251,191,36,0.15);cursor:move;box-sizing:border-box;"></div>
+        <div id="crop-tl" class="crop-handle" style="cursor:nwse-resize;"></div>
+        <div id="crop-br" class="crop-handle" style="cursor:nwse-resize;"></div>
+      </div>
+      <div id="crop-dims" style="color:#94a3b8;font:12px system-ui;margin-top:6px;"></div>
+    </div>
+    <style>
+      .crop-handle {{ position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px;
+                      background:#fbbf24; border:2px solid #1e293b; border-radius:50%; }}
+    </style>
+    <script>
+      (function() {{
+        const wrap = document.getElementById('crop-wrap');
+        const rectEl = document.getElementById('crop-rect');
+        const tl = document.getElementById('crop-tl');
+        const br = document.getElementById('crop-br');
+        const dimsLabel = document.getElementById('crop-dims');
+        const box = {{x0: {x0}, y0: {y0}, x1: {x1}, y1: {y1}}};
+        let dragMode = null, moveStart = null;
+
+        function redraw() {{
+          rectEl.style.left = (box.x0 * 100) + '%';
+          rectEl.style.top = (box.y0 * 100) + '%';
+          rectEl.style.width = ((box.x1 - box.x0) * 100) + '%';
+          rectEl.style.height = ((box.y1 - box.y0) * 100) + '%';
+          tl.style.left = (box.x0 * 100) + '%';
+          tl.style.top = (box.y0 * 100) + '%';
+          br.style.left = (box.x1 * 100) + '%';
+          br.style.top = (box.y1 * 100) + '%';
+          const pxW = Math.round((box.x1 - box.x0) * {full_w});
+          const pxH = Math.round((box.y1 - box.y0) * {full_h});
+          dimsLabel.textContent = 'Crop: ' + pxW + '×' + pxH + 'px -- drag a corner to resize, drag inside to move.';
+        }}
+        redraw();
+
+        function fractionalPos(e) {{
+          const rect = wrap.getBoundingClientRect();
+          const fx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+          const fy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+          return [fx, fy];
+        }}
+
+        function startDrag(mode) {{
+          return function(e) {{
+            dragMode = mode;
+            wrap.setPointerCapture(e.pointerId);
+            if (mode === 'move') {{
+              const [fx, fy] = fractionalPos(e);
+              moveStart = {{fx: fx, fy: fy, x0: box.x0, y0: box.y0, x1: box.x1, y1: box.y1}};
+            }}
+            e.preventDefault();
+            e.stopPropagation();
+          }};
+        }}
+        tl.addEventListener('pointerdown', startDrag('tl'));
+        br.addEventListener('pointerdown', startDrag('br'));
+        rectEl.addEventListener('pointerdown', startDrag('move'));
+
+        const MIN_SIZE = 0.02;
+        wrap.addEventListener('pointermove', function(e) {{
+          if (!dragMode) return;
+          const [fx, fy] = fractionalPos(e);
+          if (dragMode === 'tl') {{
+            box.x0 = Math.min(fx, box.x1 - MIN_SIZE);
+            box.y0 = Math.min(fy, box.y1 - MIN_SIZE);
+          }} else if (dragMode === 'br') {{
+            box.x1 = Math.max(fx, box.x0 + MIN_SIZE);
+            box.y1 = Math.max(fy, box.y0 + MIN_SIZE);
+          }} else if (dragMode === 'move') {{
+            const w = moveStart.x1 - moveStart.x0, h = moveStart.y1 - moveStart.y0;
+            let nx0 = Math.max(0, Math.min(1 - w, moveStart.x0 + (fx - moveStart.fx)));
+            let ny0 = Math.max(0, Math.min(1 - h, moveStart.y0 + (fy - moveStart.fy)));
+            box.x0 = nx0; box.y0 = ny0; box.x1 = nx0 + w; box.y1 = ny0 + h;
+          }}
+          redraw();
+        }});
+
+        function commit() {{
+          try {{
+            const payload = JSON.stringify(box);
+            const container = window.parent.document.querySelector('{hidden_selector}');
+            if (!container) return;
+            const textarea = container.querySelector('textarea');
+            if (!textarea) return;
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            textarea.focus();
+            setter.call(textarea, payload);
+            textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            textarea.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
+            textarea.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
+            textarea.blur();
+          }} catch (err) {{}}
+        }}
+        function endDrag() {{
+          if (!dragMode) return;
+          dragMode = null;
+          commit();
+        }}
+        wrap.addEventListener('pointerup', endDrag);
+        wrap.addEventListener('pointerleave', endDrag);
+      }})();
+    </script>
+    """, display_h + 40
 
 
 @st.cache_data(show_spinner=False)
@@ -958,10 +1227,17 @@ footer { visibility: hidden; }
    (_wand_picker_html -- Magic Wand in Masks/Repair, and the Color tab's White Balance picker)
    writes its clicked fractional position into -- plumbing details, not something the user should
    ever see or type into directly. */
-.st-key-m-paint-hidden, .st-key-rm-paint-hidden, .st-key-curve-hidden,
-.st-key-m-wand-hidden, .st-key-rm-wand-hidden, .st-key-wb-wand-hidden {
+.st-key-curve-hidden, .st-key-crop-editor-hidden,
+.st-key-m-wand-hidden, .st-key-rm-wand-hidden, .st-key-wb-wand-hidden,
+[class*="-paint-hidden"] {
     display: none !important;
 }
+/* [class*="-paint-hidden"] (substring match, not an exact ".st-key-..." pair) covers both the
+   original two Painted-selection commit containers (m-paint-hidden/rm-paint-hidden) *and* the
+   per-layer "re-edit an existing Painted selection" containers below -- those are keyed by the
+   layer's own uuid (a fresh one per layer, unknown ahead of time), so a fixed list of exact class
+   names can't enumerate them the way it can for the small, fixed set of other hidden containers
+   above. */
 </style>
 """, unsafe_allow_html=True)
 
@@ -1195,24 +1471,40 @@ with st.container(key="workspace-split"):
             st.markdown("**Crop / Aspect Ratio**")
             crop_choice = st.selectbox("Aspect Ratio", ["Original", "Free-form", *ASPECT_RATIOS], key="crop-aspect")
             if crop_choice == "Free-form":
-                st.caption("Drag the handles to choose an arbitrary crop box.")
-                src_w, src_h = source.size
-                # A slider's stored session_state value can't exceed the bounds passed to it -- if the
-                # user opened a smaller image after setting these against a larger one, drop the stale
-                # value so the widget falls back to its full-frame default instead of raising.
-                for axis_key, bound in (("crop-x", src_w), ("crop-y", src_h)):
-                    stored = st.session_state.get(axis_key)
-                    if stored and (stored[0] > bound or stored[1] > bound):
-                        del st.session_state[axis_key]
-                x_range = st.slider("Horizontal (X)", 0, src_w, (0, src_w), key="crop-x")
-                y_range = st.slider("Vertical (Y)", 0, src_h, (0, src_h), key="crop-y")
-                if x_range[1] - x_range[0] < 1 or y_range[1] - y_range[0] < 1:
+                # Fractional (0..1) storage, not pixel coordinates -- unlike the old pair of plain
+                # X/Y range sliders this replaced (bounded 0..src_w/src_h, so the stored box reset
+                # to the full frame whenever a differently-sized photo loaded -- see "Known Issues"
+                # in docs/PROJECT_STATUS.md), a fraction of the frame means the same box scales
+                # correctly to any image size, so it now genuinely persists through Undo/Redo and
+                # Save/Load Project via RECIPE_WIDGET_KEYS/RECIPE_DEFAULTS like every other control.
+                crop_box_fractional = (
+                    st.session_state.get("crop-free-x0", 0.0), st.session_state.get("crop-free-y0", 0.0),
+                    st.session_state.get("crop-free-x1", 1.0), st.session_state.get("crop-free-y1", 1.0),
+                )
+                editor_html, editor_height = _crop_editor_html(
+                    preview_image(mask_source, (480, 480)), "crop-editor", crop_box_fractional, mask_source.size
+                )
+                components.html(editor_html, height=editor_height)
+                with st.container(key="crop-editor-hidden"):
+                    pending_crop = st.text_area("Free-form crop box", key="crop-editor-data", label_visibility="collapsed")
+                if pending_crop and pending_crop != st.session_state.get("crop-editor-committed"):
+                    try:
+                        parsed_box = json.loads(pending_crop)
+                        fx0, fy0, fx1, fy1 = (float(parsed_box[k]) for k in ("x0", "y0", "x1", "y1"))
+                    except (json.JSONDecodeError, TypeError, KeyError, ValueError):
+                        fx0 = fy0 = fx1 = fy1 = None
+                    if fx0 is not None:
+                        st.session_state["crop-editor-committed"] = pending_crop
+                        st.session_state["crop-free-x0"], st.session_state["crop-free-y0"] = fx0, fy0
+                        st.session_state["crop-free-x1"], st.session_state["crop-free-y1"] = fx1, fy1
+                        crop_box_fractional = (fx0, fy0, fx1, fy1)
+                        _request_rerun()
+                src_w, src_h = mask_source.size
+                fx0, fy0, fx1, fy1 = crop_box_fractional
+                crop_box = (int(fx0 * src_w), int(fy0 * src_h), round(fx1 * src_w), round(fy1 * src_h))
+                if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
+                    crop_box = None
                     st.warning("Select a non-empty region.")
-                else:
-                    crop_box = (x_range[0], y_range[0], x_range[1], y_range[1])
-                    preview = mask_source.copy()
-                    ImageDraw.Draw(preview).rectangle(crop_box, outline=(255, 60, 40), width=max(2, src_w // 200))
-                    st.image(preview, caption=f"Crop preview: {crop_box[2] - crop_box[0]}×{crop_box[3] - crop_box[1]}px", use_container_width=True)
             elif crop_choice != "Original":
                 crop_w_ratio, crop_h_ratio = ASPECT_RATIOS[crop_choice]
                 st.caption(f"Center-cropping to {crop_choice} ({crop_w_ratio}:{crop_h_ratio}).")
@@ -1291,6 +1583,7 @@ with st.container(key="workspace-split"):
                 )
 
             with st.expander("RGB Tone Curve", expanded=False):
+                st.session_state.setdefault("curve_extra_points", [])
                 curve_bounds = [(0, 64), (0, 128), (64, 192), (128, 255), (192, 255)]
                 preview_points = [
                     (0, st.session_state.get("c-p0", 0)),
@@ -1299,7 +1592,9 @@ with st.container(key="workspace-split"):
                     (192, st.session_state.get("c-p3", 192)),
                     (255, st.session_state.get("c-p4", 255)),
                 ]
-                components.html(_curve_editor_html(preview_points, curve_bounds), height=246)
+                components.html(
+                    _curve_editor_html(preview_points, curve_bounds, st.session_state["curve_extra_points"]), height=270
+                )
                 with st.container(key="curve-hidden"):
                     curve_commit = st.text_area("Curve commit data", key="curve-commit-data", label_visibility="collapsed")
                 # See _curve_editor_html's docstring: a script-dispatched event on a range slider
@@ -1354,7 +1649,25 @@ with st.container(key="workspace-split"):
                 help="Reduces atmospheric haze (Dark Channel Prior, a classical algorithm -- not AI). Pushed too high, it can crush shadows or halo around strong edges.",
             )
             denoise_val = st.slider("Denoise", 0, 9, 0, step=2, key="d-den")
+            denoise_color_val = st.slider(
+                "Color Noise", 0, 9, 0, step=2, key="d-den-color", disabled=denoise_val == 0,
+                help="Independent chroma (color speckle) denoising strength, on top of Denoise's luminance/detail smoothing -- push higher than Denoise to clean up color blotches without softening detail as much. Has no effect while Denoise is 0.",
+            )
             sharp_en = st.checkbox("Sharpen (Unsharp Mask)", value=False, key="d-sharp")
+
+            with st.expander("✨ Effects", expanded=False):
+                st.caption("Creative finishing touches applied to the final, already-cropped frame -- separate from the Lens tab's corrective vignette, which runs before Crop.")
+                fx_v_col, fx_g_col = st.columns(2)
+                with fx_v_col:
+                    st.markdown("**Post-Crop Vignette**")
+                    fx_vignette_amount = st.slider(
+                        "Amount", -100, 100, 0, key="fx-vignette-amt",
+                        help="Negative darkens the corners; positive brightens them.",
+                    )
+                    fx_vignette_midpoint = st.slider("Midpoint", 0, 100, 50, key="fx-vignette-mid")
+                with fx_g_col:
+                    st.markdown("**Film Grain**")
+                    fx_grain_amount = st.slider("Amount", 0, 100, 0, key="fx-grain-amt")
 
         # TAB: REPAIR (OBJECT REMOVAL)
         with tab_repair:
@@ -1673,12 +1986,18 @@ with st.container(key="workspace-split"):
             "cg_midtones_hue": cg_midtones_hue, "cg_midtones_intensity": cg_midtones_intensity,
             "cg_highlights_hue": cg_highlights_hue, "cg_highlights_intensity": cg_highlights_intensity,
             "cg_balance": cg_balance,
-            "curve": [(0, c_black), (64, c_low), (128, c_mid), (192, c_high), (255, c_white)] if use_curve else None,
+            "curve": merge_curve_points(
+                [(0, c_black), (64, c_low), (128, c_mid), (192, c_high), (255, c_white)], st.session_state.get("curve_extra_points", [])
+            ) if use_curve else None,
             "texture": text_val,
             "clarity": clar_val,
             "dehaze": haze_val,
             "denoise": denoise_val,
+            "denoise_color": denoise_color_val,
             "sharpen": sharp_en,
+            "effects_vignette_amount": fx_vignette_amount,
+            "effects_vignette_midpoint": fx_vignette_midpoint,
+            "effects_grain_amount": fx_grain_amount,
             "removal_radius": removal_radius,
             "layer_opacity": l_opacity,
             "layer_blend": l_blend,
@@ -1733,7 +2052,7 @@ with st.container(key="workspace-split"):
             # Resets exactly the same "recipe" fields Undo/Redo operate on (see _build_recipe), so it
             # deliberately leaves an uploaded layer/RAW source alone -- only the adjustment values reset.
             if st.button("↺", key="hist-reset-btn", help="Reset all adjustments to defaults", use_container_width=True):
-                st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": []}
+                st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": []}
                 _request_rerun()
         with top_c2:
             zoom_level = st.selectbox("Zoom View", [1.0, 0.5, 1.5, 2.0, 4.0], format_func=lambda z: f"🔍 {int(z*100)}%" if z>=1 else f"🔍 {int(z*100)}% (Fit)", key="cv-zoom", label_visibility="collapsed")

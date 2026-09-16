@@ -7,7 +7,8 @@ import cv2
 from PIL import Image, ImageEnhance, ImageFilter
 
 from app.dehaze import apply_dehaze
-from app.lens_corrections import apply_lens_corrections
+from app.effects import apply_film_grain
+from app.lens_corrections import apply_lens_corrections, correct_vignette
 from app.professional_color import apply_color_grading, apply_hsl_mixer, apply_vibrance
 from app.raw_import import open_image
 
@@ -212,7 +213,7 @@ class PhotoProcessor:
         self.image = Image.fromarray(arr.astype(np.uint8), mode="RGB")
         return self
 
-    def apply_denoise(self, radius: int = 3) -> "PhotoProcessor":
+    def apply_denoise(self, radius: int = 3, color_radius: int = 0) -> "PhotoProcessor":
         """Edge-aware denoising via OpenCV's Non-Local Means (`cv2.fastNlMeansDenoisingColored`).
         Classical, not a neural network -- this app is explicitly CPU-first with no GPU dependency
         and avoids heavy new dependencies (see docs/PROJECT_STATUS.md), and a real learned denoiser
@@ -221,13 +222,23 @@ class PhotoProcessor:
         looks for similar patches across the whole search window instead of just averaging pixels
         in a fixed neighborhood, so it smooths noise while preserving edges/detail far better than a
         median blur does. `radius` keeps the same 0-9 range the UI's "Denoise" slider already used
-        for the old filter's kernel size, now driving Non-Local Means' "h" filter-strength parameter
-        instead (empirically timed at well under a second for a multi-megapixel photo).
+        for the old filter's kernel size, now driving Non-Local Means' "h" (luminance) filter-
+        strength parameter instead (empirically timed at well under a second for a multi-megapixel
+        photo).
+
+        `color_radius` (0-9, default 0) independently drives the same call's `hColor` parameter --
+        `fastNlMeansDenoisingColored` already accepts separate luminance/color strengths, so
+        RawTherapee's/darktable's "split luminance vs. chroma noise reduction" (color noise usually
+        wants heavier smoothing than luminance detail can afford to lose) needed no new algorithm,
+        just exposing the parameter this call already had. `color_radius=0` means "no override" --
+        `hColor` falls back to the same strength as `h`, exactly this method's pre-existing
+        behavior, so a caller that never passes `color_radius` sees no change at all.
         """
         radius = max(1, int(radius))
         strength = float(radius) * 1.8
+        color_strength = float(color_radius) * 1.8 if color_radius else strength
         array = np.array(self.image.convert("RGB"))
-        denoised = cv2.fastNlMeansDenoisingColored(array, None, strength, strength, 7, 21)
+        denoised = cv2.fastNlMeansDenoisingColored(array, None, strength, color_strength, 7, 21)
         self.image = Image.fromarray(denoised, mode="RGB")
         return self
 
@@ -235,6 +246,21 @@ class PhotoProcessor:
         radius = max(1, int(round(radius)))
         percent = max(0, int(percent))
         self.image = self.image.filter(ImageFilter.UnsharpMask(radius=radius, percent=percent))
+        return self
+
+    def apply_post_crop_vignette(self, amount: float = 0.0, midpoint: float = 50.0) -> "PhotoProcessor":
+        """A creative "Effects" vignette applied to the final, already-cropped frame -- unlike the
+        Lens tab's vignette (a corrective tool run before Crop, aimed at a lens's own optical
+        falloff), this is meant to be dialed in *after* framing, the same distinction Lightroom
+        draws between its Lens Corrections vignette and its separate Effects > Post-Crop Vignette.
+        Reuses `correct_vignette()` unchanged -- it's the identical radial darken/brighten math,
+        just applied at a different pipeline position and for a different (creative, not
+        corrective) reason, so a second implementation would just be duplicated code."""
+        self.image = correct_vignette(self.image, amount, midpoint)
+        return self
+
+    def apply_film_grain(self, amount: float = 0.0) -> "PhotoProcessor":
+        self.image = apply_film_grain(self.image, amount)
         return self
 
     def auto_enhance(self) -> "PhotoProcessor":

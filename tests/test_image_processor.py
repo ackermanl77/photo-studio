@@ -105,6 +105,44 @@ def test_apply_denoise_actually_reduces_noise():
     assert denoised.std() < noisy.astype(np.float32).std() * 0.5
 
 
+def test_apply_denoise_color_radius_independently_changes_the_result():
+    """color_radius drives fastNlMeansDenoisingColored's separate hColor parameter -- confirms it
+    actually changes the result relative to leaving it at its 0 ("same strength as radius")
+    default, not just that the parameter is accepted."""
+    rng = np.random.default_rng(1)
+    base = np.full((60, 60, 3), 128, dtype=np.float32)
+    noisy = np.clip(base + rng.normal(0, 20, base.shape), 0, 255).astype(np.uint8)
+
+    default_result = PhotoProcessor.from_image(Image.fromarray(noisy, mode="RGB")).apply_denoise(4).as_numpy()
+    color_boosted_result = PhotoProcessor.from_image(Image.fromarray(noisy, mode="RGB")).apply_denoise(4, 9).as_numpy()
+
+    assert not np.array_equal(default_result, color_boosted_result)
+
+
+def test_apply_post_crop_vignette_delegates_to_lens_corrections_module(tmp_path):
+    source = tmp_path / "flat.png"
+    Image.new("RGB", (60, 60), color=(200, 200, 200)).save(source)
+    processor = PhotoProcessor(source)
+
+    result = processor.apply_post_crop_vignette(-80, 30)
+
+    assert result is processor
+    pixels = np.array(processor.image, dtype=np.int32)
+    assert pixels[:4, :4].mean() < pixels[28:32, 28:32].mean() - 20  # corners darkened
+
+
+def test_apply_film_grain_delegates_to_effects_module(tmp_path):
+    source = tmp_path / "flat.png"
+    Image.new("RGB", (40, 40), color=(120, 120, 120)).save(source)
+    processor = PhotoProcessor(source)
+    before = processor.as_numpy().copy()
+
+    result = processor.apply_film_grain(80)
+
+    assert result is processor
+    assert not np.array_equal(before, processor.as_numpy())
+
+
 def test_apply_lens_corrections_delegates_to_lens_corrections_module(tmp_path):
     source = tmp_path / "grid.png"
     Image.new("RGB", (40, 40), color=(150, 150, 150)).save(source)

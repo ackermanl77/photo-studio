@@ -87,6 +87,66 @@ def test_process_endpoint_applies_lens_corrections():
     assert result[:4, :4].mean() < result[18:22, 18:22].mean() - 10  # corners darkened
 
 
+def test_process_endpoint_applies_color_noise_denoise():
+    client = app.test_client()
+    stream = io.BytesIO()
+    rng = np.random.default_rng(0)
+    noisy = np.clip(np.full((40, 40, 3), 128, dtype=np.float32) + rng.normal(0, 20, (40, 40, 3)), 0, 255).astype(np.uint8)
+    Image.fromarray(noisy, "RGB").save(stream, format="PNG")
+
+    same_strength = client.post(
+        "/process",
+        data={"image": (io.BytesIO(stream.getvalue()), "noisy.png"), "options": json.dumps({"denoise": 4})},
+        content_type="multipart/form-data",
+    )
+    color_boosted = client.post(
+        "/process",
+        data={"image": (io.BytesIO(stream.getvalue()), "noisy.png"), "options": json.dumps({"denoise": 4, "denoise_color": 9})},
+        content_type="multipart/form-data",
+    )
+
+    assert same_strength.status_code == 200
+    assert color_boosted.status_code == 200
+    assert same_strength.data != color_boosted.data
+
+
+def test_process_endpoint_applies_post_crop_vignette():
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes(color=(200, 200, 200), size=(40, 40))), "input.png"),
+            "options": json.dumps({"effects_vignette_amount": -80, "effects_vignette_midpoint": 30}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    result = np.array(Image.open(io.BytesIO(response.data)), dtype=np.int32)
+    assert result[:4, :4].mean() < result[18:22, 18:22].mean() - 10  # corners darkened
+
+
+def test_process_endpoint_applies_film_grain():
+    client = app.test_client()
+    baseline = client.post(
+        "/process",
+        data={"image": (io.BytesIO(image_bytes(color=(120, 120, 120), size=(30, 30))), "input.png"), "options": json.dumps({})},
+        content_type="multipart/form-data",
+    )
+    grainy = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes(color=(120, 120, 120), size=(30, 30))), "input.png"),
+            "options": json.dumps({"effects_grain_amount": 80}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert baseline.status_code == 200
+    assert grainy.status_code == 200
+    assert baseline.data != grainy.data
+
+
 def test_process_endpoint_applies_vibrance():
     client = app.test_client()
     response = client.post(
@@ -422,7 +482,7 @@ def test_process_endpoint_returns_clean_json_error_for_a_cv2_failure(monkeypatch
     actually triggers OpenCV's internal assertion) to test the route's error handling in
     isolation from OpenCV's own input-validation behavior."""
 
-    def fake_apply_denoise(self, radius=3):
+    def fake_apply_denoise(self, radius=3, color_radius=0):
         raise cv2.error("synthetic failure for this test")
 
     monkeypatch.setattr(PhotoProcessor, "apply_denoise", fake_apply_denoise)
