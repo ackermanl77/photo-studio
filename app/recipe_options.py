@@ -18,7 +18,8 @@ ASPECT_RATIOS = {
 _DIRECT_PASSTHROUGH_KEYS = (
     "exposure", "contrast", "highlights", "shadows", "preset",
     "temperature", "tint", "saturation", "vibrance",
-    "texture", "clarity", "denoise", "sharpen", "dehaze",
+    "texture", "clarity", "denoise", "denoise_color", "sharpen", "dehaze",
+    "effects_vignette_amount", "effects_vignette_midpoint", "effects_grain_amount",
     "portrait_smoothing", "removal_radius",
     "cg_shadows_hue", "cg_shadows_intensity",
     "cg_midtones_hue", "cg_midtones_intensity",
@@ -33,6 +34,23 @@ _RENAMED_KEYS = {
     "mask_target_contrast": "mask_contrast",
     "mask_target_saturation": "mask_saturation",
 }
+
+
+def merge_curve_points(fixed_points: list[tuple[int, int]], extra_points: list) -> list[tuple[int, int]]:
+    """Combines the tone curve's 5 fixed control points (Blacks/Shadows/Midtones/Highlights/
+    Whites) with any user-added extra points (the on-canvas curve editor's click-to-add points --
+    see app.frontend_unified_app._curve_editor_html), sorted by X. `PhotoProcessor.apply_curves()`
+    requires strictly increasing X values; the on-canvas editor doesn't hard-prevent a drag landing
+    an extra point exactly on another point's X, so this is the server-side safety net -- an extra
+    point whose X exactly collides with an already-placed one (in sorted order) is silently dropped
+    rather than raising, keeping whichever point came first."""
+    combined = sorted([tuple(point) for point in fixed_points] + [(int(x), int(y)) for x, y in extra_points], key=lambda point: point[0])
+    result: list[tuple[int, int]] = []
+    for x, y in combined:
+        if result and result[-1][0] == x:
+            continue
+        result.append((x, y))
+    return result
 
 
 def recipe_to_options(recipe: dict) -> dict:
@@ -51,8 +69,15 @@ def recipe_to_options(recipe: dict) -> dict:
     different photo in a batch would silently select or overlay the wrong region far more often
     than the right one. A saved preset's *global* tone/color/detail/lens settings still transfer
     correctly to a different photo (the whole point of "sync settings" across a shoot); only the
-    two local/spatial fields are left out, the same trade-off Lightroom's own Sync dialog makes
-    explicit by letting "Local Adjustments" be unchecked when photos differ.
+    local/spatial fields are left out, the same trade-off Lightroom's own Sync dialog makes
+    explicit by letting "Local Adjustments" be unchecked when photos differ. A Free-form crop
+    (`crop_aspect == "Free-form"`, its box in `crop_free_x0`/`_y0`/`_x1`/`_y1`) is excluded for the
+    same reason -- it's a specific photo's exact framing, not a pattern that generalizes -- even
+    though, unlike masks/layers, it's stored as size-independent fractions and so genuinely could
+    be translated into a per-photo pixel `crop_box` if a future caller had each batch photo's own
+    dimensions on hand at conversion time; today's single call site (`process_files()`, called once
+    per batch rather than once per file) doesn't, so it's left as an explicit gap rather than
+    solved partially.
     """
     options: dict = {}
     for key in _DIRECT_PASSTHROUGH_KEYS:
@@ -63,13 +88,14 @@ def recipe_to_options(recipe: dict) -> dict:
             options[options_key] = recipe[recipe_key]
 
     if recipe.get("curve_enabled"):
-        options["curve"] = [
+        fixed_curve_points = [
             (0, recipe.get("curve_black", 0)),
             (64, recipe.get("curve_shadows", 64)),
             (128, recipe.get("curve_mid", 128)),
             (192, recipe.get("curve_highlights", 192)),
             (255, recipe.get("curve_white", 255)),
         ]
+        options["curve"] = merge_curve_points(fixed_curve_points, recipe.get("curve_extra_points", []))
 
     hsl_bands = {}
     for band in HSL_BAND_ORDER:

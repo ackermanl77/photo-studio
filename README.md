@@ -56,9 +56,9 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 
 ## Core Features
 
-- Exposure, contrast, highlights, shadows, temperature, tint, texture, clarity, sharpening, and a one-click "✨ Auto Enhance" pass, all live in the unified UI. Free-form or named-aspect-ratio crop, positioned right after Tone.
-- Denoise via OpenCV's Non-Local Means — a real upgrade over a flat median filter (preserves edges/detail while smoothing noise), classical rather than a neural network (see `docs/PROJECT_STATUS.md` for why, given this app's CPU-first, no-GPU design).
-- A draggable RGB tone curve (drag points on the curve itself, or use the numeric sliders below it for exact values).
+- Exposure, contrast, highlights, shadows, temperature, tint, texture, clarity, sharpening, and a one-click "✨ Auto Enhance" pass, all live in the unified UI. A draggable free-form crop rectangle directly on the photo (drag a corner to resize, drag inside to move), or a named aspect ratio, positioned right after Tone.
+- Denoise via OpenCV's Non-Local Means — a real upgrade over a flat median filter (preserves edges/detail while smoothing noise), classical rather than a neural network (see `docs/PROJECT_STATUS.md` for why, given this app's CPU-first, no-GPU design). An independent "Color Noise" slider pushes chroma (color speckle) smoothing further than luminance/detail smoothing, without needing a second algorithm.
+- A draggable RGB tone curve — drag any of the 5 fixed Blacks/Shadows/Midtones/Highlights/Whites points vertically, or click an empty spot on the curve to add a fully free-form point (drag it anywhere, double-click to remove), or use the numeric sliders below it for exact values on the 5 fixed points.
 - Per-channel HSL color grading ("Color Mixer") — independent Hue/Saturation/Luminance adjustment for each of 8 named color bands (Red/Orange/Yellow/Green/Aqua/Blue/Purple/Magenta).
 - Vibrance — a smarter saturation boost than the plain Saturation slider: protects skin tones and already-saturated colors, pushing washed-out/pastel ones harder instead.
 - A "🎯 Pick White Balance" eyedropper — click a spot in the photo that's supposed to be neutral gray or white, and Temperature/Tint are set to whatever would neutralize it. A starting point to fine-tune from, the same convenience darktable's color-calibration picker offers.
@@ -69,7 +69,8 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 - A "⚠️ Show clipping" toggle next to the histogram highlights blocked shadows and blown highlights directly on the canvas, the same idea as Lightroom's clipping triangles.
 - Built-in presets with live thumbnail previews, plus custom presets you can save, load back onto a photo, delete, and export/import as a shareable `.json` file. Saving captures the full set of adjustments (masks included), not just a handful of basic sliders.
 - Undo/Redo and a one-click Reset to defaults, always available in the bar above the canvas regardless of which tab is open.
-- Combinable named masks (`app/advanced_masks.py::MaskStack`) — any number of Luminance/Color/gradient/Radial/Painted/Magic Wand selections, each with opacity/invert/soften, unioned into one target adjustment. "Painted" selections are made on-canvas — freehand brush (with an eraser), a drag-out radial, or a drag-out gradient — instead of typing in parameters; "Magic Wand" is a single click that samples a color and selects similar pixels around it.
+- Combinable named masks (`app/advanced_masks.py::MaskStack`) — any number of Luminance/Color/gradient/Radial/Painted/Magic Wand selections, each with opacity/invert/soften, unioned into one target adjustment. "Painted" selections are made on-canvas — freehand brush (with an eraser), a drag-out radial, or a drag-out gradient — instead of typing in parameters, and can be reopened later for a second pass at the canvas ("🎨 Edit Painting") instead of only delete-and-repaint; "Magic Wand" is a single click that samples a color and selects similar pixels around it.
+- Creative "✨ Effects" — a post-crop vignette (applied to the final, already-cropped frame, separate from the Lens tab's corrective one) and film grain, both on the Detail tab.
 - Layers with opacity, blending (normal/multiply/screen), preserved through Save/Load Project.
 - Camera RAW import (`.cr2/.cr3/.nef/.arw/.dng`, optional via `requirements-raw.txt`) directly from the unified UI's uploader.
 - A draggable before/after comparison ("Split View"), plus a live per-channel histogram.
@@ -79,7 +80,7 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 - Save/Load Project (`.photoproject`, `app/project_bundle.py`) persisting the source image, recipe, layer, and mask selections.
 - Preview caching, diagnostics, request IDs, image validation, and structured audit logs.
 
-See `docs/PROJECT_STATUS.md`'s "Known Issues" for the current gaps (e.g. free-form crop not yet in Undo/Redo, no draggable rectangle on the canvas for it).
+See `docs/PROJECT_STATUS.md`'s "Known Issues" for the current gaps.
 
 ## Test
 
