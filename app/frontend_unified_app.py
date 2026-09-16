@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import io
 import json
 import uuid
@@ -874,6 +875,26 @@ footer { visibility: hidden; }
     justify-content: space-between;
     align-items: center;
 }
+/* The canvas header's filename/dimensions label (see the top_c1 st.markdown call below), unlike
+   the static "Tool Workspace" header sharing .panel-header-title's flex layout above, carries a
+   variable-length uploaded filename -- at the narrow width this label's own column gets
+   (canvas_col's top_c1), even the label's own fixed text prefix could wrap onto its own line
+   inside a flex item, let alone a long filename, splitting the label across two illegible lines.
+   (Deliberately not quoting that prefix's exact wording here: tests/test_frontend_unified_app.py's
+   canvas_dims() helper locates this label in the rendered app by searching st.markdown() output
+   for that same text, and this comment is itself rendered through st.markdown() a few hundred
+   lines above the real label -- spelling the phrase out here previously made that search match
+   this comment block instead, before the real label ever rendered.) Overrides the shared class's
+   flex layout with plain single-line block truncation instead -- the entire label (icon, prefix,
+   filename, dimensions) is one truncatable unit, never wraps, and a `title=` attribute on the div
+   surfaces the full text on hover regardless of how much got cut off. */
+.canvas-live-view {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.canvas-live-view span { text-transform: none; letter-spacing: normal; }
 
 /* Image Canvas */
 .canvas-container {
@@ -931,11 +952,14 @@ footer { visibility: hidden; }
 }
 
 /* Holds the real <textarea> the on-canvas paint editor's "Add to selections" button writes a
-   base64 mask PNG into (see _paint_editor_html / _render_selection_stack's "Painted" branch), and
-   the one the tone curve editor's drag-commit writes curve-point JSON into (see
-   _curve_editor_html / the RGB Tone Curve expander) -- plumbing details, not something the user
-   should ever see or type into directly. */
-.st-key-m-paint-hidden, .st-key-rm-paint-hidden, .st-key-curve-hidden {
+   base64 mask PNG into (see _paint_editor_html / _render_selection_stack's "Painted" branch), the
+   one the tone curve editor's drag-commit writes curve-point JSON into (see _curve_editor_html /
+   the RGB Tone Curve expander), and the one every on-canvas click-to-sample picker
+   (_wand_picker_html -- Magic Wand in Masks/Repair, and the Color tab's White Balance picker)
+   writes its clicked fractional position into -- plumbing details, not something the user should
+   ever see or type into directly. */
+.st-key-m-paint-hidden, .st-key-rm-paint-hidden, .st-key-curve-hidden,
+.st-key-m-wand-hidden, .st-key-rm-wand-hidden, .st-key-wb-wand-hidden {
     display: none !important;
 }
 </style>
@@ -1688,7 +1712,15 @@ with st.container(key="workspace-split"):
         # Canvas Header Bar
         top_c1, top_undo, top_redo, top_reset, top_c2, top_c3 = st.columns([0.95, 0.18, 0.18, 0.18, 0.75, 0.95], gap="small")
         with top_c1:
-            st.markdown(f'<div class="panel-header-title">🖼️ Live View: <span>{upload_name} ({edited_image.width}×{edited_image.height})</span></div>', unsafe_allow_html=True)
+            # html.escape() here: upload_name is the uploaded file's own filename (user-controlled),
+            # interpolated into both an HTML attribute (title=) and element text below via
+            # unsafe_allow_html -- unescaped, a filename containing a quote or angle bracket could
+            # break out of the attribute or inject markup.
+            live_view_label = html.escape(f"{upload_name} ({edited_image.width}×{edited_image.height})")
+            st.markdown(
+                f'<div class="panel-header-title canvas-live-view" title="{live_view_label}">🖼️ Live View: <span>{live_view_label}</span></div>',
+                unsafe_allow_html=True,
+            )
         with top_undo:
             if st.button("↶", key="hist-undo-btn", disabled=not history.can_undo, help="Undo", use_container_width=True):
                 st.session_state["_pending_restore"] = history.undo() or {}
