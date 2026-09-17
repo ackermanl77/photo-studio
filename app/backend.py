@@ -54,92 +54,127 @@ def _image_mask(file_storage, size: tuple[int, int]) -> Image.Image:
 
 def process_image(image_file, options: dict, removal_mask=None, local_mask=None, layer_file=None) -> Image.Image:
     """Mirrors the exact step order of the unified UI's tabs (Lens -> Tone -> Color -> Detail ->
-    Layers -> Masks -> Portrait -> Crop) so that routing the frontend's edits through this endpoint
-    produces the same image as applying them in-process. Keeping this order in sync with
-    app/frontend_unified_app.py matters: a mismatched order is exactly the class of bug documented
-    under "Recently Fixed" in docs/PROJECT_STATUS.md (layers/masks silently producing a different
-    result than what the UI showed).
+    Layers -> Masks -> Portrait -> Crop -> Effects) so that routing the frontend's edits through
+    this endpoint produces the same image as applying them in-process. Keeping this order in sync
+    with app/frontend_unified_app.py matters: a mismatched order is exactly the class of bug
+    documented under "Recently Fixed" in docs/PROJECT_STATUS.md (layers/masks silently producing a
+    different result than what the UI showed).
+
+    Two option flags split this into two independently resumable/stoppable halves, used by
+    app/frontend_unified_app.py's two-stage cache (`_cached_process_through_detail` /
+    `_cached_process_from_repair_onward`) to resolve a Known Issue: a single cache keyed on the
+    *entire* options dict forced a full recompute -- including the genuinely expensive Non-Local
+    Means denoise step -- every time any option changed, even a Repair/Layers/Masks/Portrait/Crop/
+    Effects one that Detail's own output doesn't depend on at all.
+    - `options["stop_after"] == "detail"`: returns right after the Detail section, skipping
+      Repair/Layers/Masks/Portrait/Crop/Effects entirely.
+    - `options["resume_from_detail"]`: treats `image_file` as already having gone through Lens/
+      Tone/Color/Detail (a PNG this same function returned from a prior `stop_after="detail"`
+      call, not the original upload) and starts at Repair instead of re-running any of that.
+    Neither flag is set by any caller other than that frontend cache (the CLI, batch processing,
+    and every other existing test all still get the original one-pass behavior unchanged, since
+    both default to falsy).
     """
     source_bytes = image_file.read()
     filename = image_file.filename or "image"
-    # PIL (via validate_image_bytes) cannot decode camera RAW -- PhotoProcessor.from_bytes() routes
-    # RAW through rawpy and raises its own (already-tested) RuntimeError on failure, so RAW uploads
-    # skip this PIL-based check instead of always failing it.
-    if not is_raw_path(filename):
-        validate_image_bytes(source_bytes, filename)
-    processor = PhotoProcessor.from_bytes(source_bytes, filename)
-    source_exif = processor.image.getexif().tobytes()
-    source_icc = processor.image.info.get("icc_profile")
+    resume_from_detail = options.get("resume_from_detail", False)
 
-    # ICC color management -- real conversion (via littlecms) of the source's own embedded profile
-    # into the sRGB working space every step below assumes, instead of the old behavior of just
-    # preserving the original bytes unlooked-at. A no-op for the common case (already sRGB); for a
-    # wider-gamut source (Adobe RGB, ProPhoto RGB, a camera's own profile, ...) this is the
-    # difference between colors looking correct and looking oversaturated once the pixels are
-    # (mis)treated as sRGB by everything downstream. Runs before Lens corrections -- as early as
-    # possible, same reasoning as Lens itself running before Tone. Re-tags the *output* as sRGB
-    # afterward instead of re-attaching the original (now-stale, pre-conversion) profile bytes,
-    # which would make a viewer interpret the already-converted pixels a second time.
-    if source_icc:
-        try:
-            processor.image = normalize_to_srgb(processor.image, source_icc)
-            source_icc = srgb_icc_bytes()
-        except ICC_TRANSFORM_ERRORS:
-            # Malformed/truncated/non-ICC bytes under the "icc_profile" key, or a profile
-            # littlecms can open but can't build a transform from (some files carry genuine
-            # garbage there) -- fall back to the old behavior (preserve whatever was embedded,
-            # unconverted) rather than fail the whole edit over an unparseable color tag.
-            pass
+    if resume_from_detail:
+        # `source_bytes` is a prior `stop_after="detail"` call's own PNG output, not the original
+        # upload -- already RAW-decoded (if applicable), ICC-normalized to sRGB, and Lens/Tone/
+        # Color/Detail-processed, so none of that runs again. Its ICC profile survives that PNG
+        # hop (explicitly re-embedded below in the "detail" stop_after branch); its EXIF currently
+        # does not, the same pre-existing gap already true of the *unsplit* pipeline's own internal
+        # PNG round trip to the frontend (see "Known Issues") -- this split doesn't make that any
+        # worse, it just doesn't yet fix it either.
+        processor = PhotoProcessor.from_bytes(source_bytes, filename)
+        source_exif = None
+        source_icc = processor.image.info.get("icc_profile")
+    else:
+        # PIL (via validate_image_bytes) cannot decode camera RAW -- PhotoProcessor.from_bytes()
+        # routes RAW through rawpy and raises its own (already-tested) RuntimeError on failure, so
+        # RAW uploads skip this PIL-based check instead of always failing it.
+        if not is_raw_path(filename):
+            validate_image_bytes(source_bytes, filename)
+        processor = PhotoProcessor.from_bytes(source_bytes, filename)
+        source_exif = processor.image.getexif().tobytes()
+        source_icc = processor.image.info.get("icc_profile")
 
-    # Lens corrections -- geometric (distortion) and per-channel-radial (chromatic aberration)
-    # corrections need to run before anything else touches pixel positions or values, and before
-    # Crop (applied last, below) so the user frames their shot against the already-corrected
-    # geometry rather than having lens correction potentially introduce new edge artifacts inside
-    # a crop they already chose.
-    processor.apply_lens_corrections(
-        distortion=_number(options, "lens_distortion", 0.0),
-        vignette_amount=_number(options, "lens_vignette_amount", 0.0),
-        vignette_midpoint=_number(options, "lens_vignette_midpoint", 50.0),
-        chromatic_aberration=_number(options, "lens_chromatic_aberration", 0.0),
-        perspective_vertical=_number(options, "lens_perspective_v", 0.0),
-        perspective_horizontal=_number(options, "lens_perspective_h", 0.0),
-    )
+        # ICC color management -- real conversion (via littlecms) of the source's own embedded
+        # profile into the sRGB working space every step below assumes, instead of the old
+        # behavior of just preserving the original bytes unlooked-at. A no-op for the common case
+        # (already sRGB); for a wider-gamut source (Adobe RGB, ProPhoto RGB, a camera's own
+        # profile, ...) this is the difference between colors looking correct and looking
+        # oversaturated once the pixels are (mis)treated as sRGB by everything downstream. Runs
+        # before Lens corrections -- as early as possible, same reasoning as Lens itself running
+        # before Tone. Re-tags the *output* as sRGB afterward instead of re-attaching the original
+        # (now-stale, pre-conversion) profile bytes, which would make a viewer interpret the
+        # already-converted pixels a second time.
+        if source_icc:
+            try:
+                processor.image = normalize_to_srgb(processor.image, source_icc)
+                source_icc = srgb_icc_bytes()
+            except ICC_TRANSFORM_ERRORS:
+                # Malformed/truncated/non-ICC bytes under the "icc_profile" key, or a profile
+                # littlecms can open but can't build a transform from (some files carry genuine
+                # garbage there) -- fall back to the old behavior (preserve whatever was embedded,
+                # unconverted) rather than fail the whole edit over an unparseable color tag.
+                pass
 
-    # Tone
-    processor.apply_brightness(_number(options, "brightness", 1.0))
-    processor.apply_exposure(_number(options, "exposure", 1.0))
-    processor.apply_contrast(_number(options, "contrast", 1.0))
-    processor.apply_highlights_shadows(_number(options, "highlights", 0), _number(options, "shadows", 0))
-    if options.get("preset") and options["preset"] != "None":
-        if options["preset"] not in PRESETS:
-            raise ValueError(f"Unknown preset: {options['preset']}")
-        apply_preset(processor, options["preset"])
+        # Lens corrections -- geometric (distortion) and per-channel-radial (chromatic aberration)
+        # corrections need to run before anything else touches pixel positions or values, and
+        # before Crop (applied last, below) so the user frames their shot against the already-
+        # corrected geometry rather than having lens correction potentially introduce new edge
+        # artifacts inside a crop they already chose.
+        processor.apply_lens_corrections(
+            distortion=_number(options, "lens_distortion", 0.0),
+            vignette_amount=_number(options, "lens_vignette_amount", 0.0),
+            vignette_midpoint=_number(options, "lens_vignette_midpoint", 50.0),
+            chromatic_aberration=_number(options, "lens_chromatic_aberration", 0.0),
+            perspective_vertical=_number(options, "lens_perspective_v", 0.0),
+            perspective_horizontal=_number(options, "lens_perspective_h", 0.0),
+        )
 
-    # Color
-    processor.apply_temperature_tint(_number(options, "temperature", 0), _number(options, "tint", 0))
-    processor.apply_saturation(_number(options, "saturation", 1.0))
-    processor.apply_vibrance(_number(options, "vibrance", 0.0))
-    hsl_bands = options.get("hsl_bands")
-    if hsl_bands:
-        processor.apply_hsl_mixer(hsl_bands)
-    processor.apply_color_grading(
-        shadows_hue=_number(options, "cg_shadows_hue", 0), shadows_intensity=_number(options, "cg_shadows_intensity", 0),
-        midtones_hue=_number(options, "cg_midtones_hue", 0), midtones_intensity=_number(options, "cg_midtones_intensity", 0),
-        highlights_hue=_number(options, "cg_highlights_hue", 0), highlights_intensity=_number(options, "cg_highlights_intensity", 0),
-        balance=_number(options, "cg_balance", 0),
-    )
-    curve = options.get("curve")
-    if curve:
-        processor.apply_curves([(int(point[0]), int(point[1])) for point in curve])
+        # Tone
+        processor.apply_brightness(_number(options, "brightness", 1.0))
+        processor.apply_exposure(_number(options, "exposure", 1.0))
+        processor.apply_contrast(_number(options, "contrast", 1.0))
+        processor.apply_highlights_shadows(_number(options, "highlights", 0), _number(options, "shadows", 0))
+        if options.get("preset") and options["preset"] != "None":
+            if options["preset"] not in PRESETS:
+                raise ValueError(f"Unknown preset: {options['preset']}")
+            apply_preset(processor, options["preset"])
 
-    # Detail
-    processor.apply_texture_clarity(_number(options, "texture", 0), _number(options, "clarity", 0))
-    if options.get("dehaze", 0):
-        processor.apply_dehaze(_number(options, "dehaze", 0))
-    if options.get("denoise", 0):
-        processor.apply_denoise(int(options["denoise"]), int(options.get("denoise_color", 0)))
-    if options.get("sharpen", False):
-        processor.apply_sharpen()
+        # Color
+        processor.apply_temperature_tint(_number(options, "temperature", 0), _number(options, "tint", 0))
+        processor.apply_saturation(_number(options, "saturation", 1.0))
+        processor.apply_vibrance(_number(options, "vibrance", 0.0))
+        hsl_bands = options.get("hsl_bands")
+        if hsl_bands:
+            processor.apply_hsl_mixer(hsl_bands)
+        processor.apply_color_grading(
+            shadows_hue=_number(options, "cg_shadows_hue", 0), shadows_intensity=_number(options, "cg_shadows_intensity", 0),
+            midtones_hue=_number(options, "cg_midtones_hue", 0), midtones_intensity=_number(options, "cg_midtones_intensity", 0),
+            highlights_hue=_number(options, "cg_highlights_hue", 0), highlights_intensity=_number(options, "cg_highlights_intensity", 0),
+            balance=_number(options, "cg_balance", 0),
+        )
+        curve = options.get("curve")
+        if curve:
+            processor.apply_curves([(int(point[0]), int(point[1])) for point in curve])
+
+        # Detail
+        processor.apply_texture_clarity(_number(options, "texture", 0), _number(options, "clarity", 0))
+        if options.get("dehaze", 0):
+            processor.apply_dehaze(_number(options, "dehaze", 0))
+        if options.get("denoise", 0):
+            processor.apply_denoise(int(options["denoise"]), int(options.get("denoise_color", 0)))
+        if options.get("sharpen", False):
+            processor.apply_sharpen()
+
+        if options.get("stop_after") == "detail":
+            if source_icc and not options.get("strip_metadata", False):
+                processor.image.info["icc_profile"] = source_icc
+            return processor.image
 
     if removal_mask:
         processor.remove_objects(_image_mask(removal_mask, processor.image.size), radius=_number(options, "removal_radius", 3.0))
