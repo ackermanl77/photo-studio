@@ -21,11 +21,12 @@ class BatchResult:
     error: str | None = None
 
 
-class _FileLike:
+class FileLike:
     """Minimal stand-in for Flask's FileStorage -- just enough (`.filename`, `.read()`) for
-    app.backend.process_image() to accept a plain in-memory file, so batch's `recipe` path can
-    reuse that one already-tested pipeline-ordering implementation in-process instead of writing a
-    second copy of "how to apply a full recipe's worth of steps in the right order" here."""
+    app.backend.process_image() to accept a plain in-memory file, so a caller with a recipe (this
+    module's own `recipe` path, and app.frontend_unified_app's custom-preset thumbnail preview)
+    can reuse that one already-tested pipeline-ordering implementation in-process instead of
+    writing a second copy of "how to apply a full recipe's worth of steps in the right order"."""
 
     def __init__(self, filename: str, content: bytes):
         self.filename = filename
@@ -71,7 +72,7 @@ def process_files(
             if options is not None:
                 from app.backend import process_image
 
-                result_image = process_image(_FileLike(source.name, source.read_bytes()), dict(options))
+                result_image = process_image(FileLike(source.name, source.read_bytes()), dict(options))
                 content, suffix, _ = export_profile(result_image, profile)
             else:
                 processor = PhotoProcessor(source)
