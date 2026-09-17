@@ -9,6 +9,13 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Python = "C:\Users\MELEJ\AppData\Local\Python\pythoncore-3.14-64\python.exe"
 if (-not (Test-Path $Python)) { $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe" }
+if (-not (Test-Path $Python)) {
+    # Neither of the two dev-machine-specific paths above exist on a CI runner (e.g. the
+    # release-build GitHub Actions workflow, which sets up Python via actions/setup-python and
+    # puts it on PATH instead) -- fall back to whatever "python" resolves to there.
+    $onPath = Get-Command python -ErrorAction SilentlyContinue
+    if ($onPath) { $Python = $onPath.Source }
+}
 $Dist = Join-Path $ProjectRoot "dist-release"
 $Build = Join-Path $ProjectRoot "build-release"
 $Package = Join-Path $ProjectRoot "PhotoStudio-$Version-Windows"
