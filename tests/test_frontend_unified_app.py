@@ -1168,6 +1168,66 @@ def test_magic_wand_selection_commits_via_the_hidden_click_field():
     assert canvas_hash(at) != baseline
 
 
+def test_load_preset_section_shows_a_thumbnail_preview(monkeypatch, tmp_path):
+    """Regression test for a real UI gap found live: unlike the 4 built-in looks (each already
+    shown via _preset_thumbnails()), a saved custom preset had no visual preview anywhere -- you
+    had to load it blind to see what it did. Covers _custom_preset_thumbnail() wired into the
+    Presets tab's "Load a Preset" section."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    presets_path = tmp_path / ".photo-studio" / "presets.json"
+    presets_path.parent.mkdir(parents=True)
+    presets_path.write_text(json.dumps({"Warm": {"exposure": 1.3, "temperature": 40}}), encoding="utf-8")
+
+    at = run_with_uploaded_image()
+    at.selectbox(key="p-load-sel").set_value("Warm")
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any(img.captions and img.captions[0] == "Warm" for img in at.image)
+
+
+def test_batch_processor_shows_a_thumbnail_preview_for_a_selected_custom_preset(monkeypatch, tmp_path):
+    """Same gap as the Presets tab's "Load a Preset" preview, for the Batch Processor's preset
+    dropdown -- only custom presets lacked a preview (the 4 built-in looks are self-explanatory by
+    name), so the thumbnail should appear only once a " (custom)" option is actually selected."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    presets_path = tmp_path / ".photo-studio" / "presets.json"
+    presets_path.parent.mkdir(parents=True)
+    presets_path.write_text(json.dumps({"My Look": {"exposure": 1.2}}), encoding="utf-8")
+
+    at = run_with_uploaded_image()
+    at.radio[0].set_value("Batch Processor")
+    at.run(timeout=30)
+    images_before = len(at.image)
+
+    at.selectbox(key="b-preset-sel").set_value("My Look (custom)")
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert len(at.image) == images_before + 1
+
+
+def test_run_batch_shows_progress_and_a_done_summary(monkeypatch, tmp_path):
+    """Regression test for a real gap found live: process_files() already accepted a `progress`
+    callback and was tested for it in tests/test_batch_release.py, but the UI never passed one in
+    -- Run Batch gave no feedback at all until the whole batch finished. Confirms the progress
+    status reaches a final "Done" summary and the results table + download button render."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    at = run_with_uploaded_image()
+    at.radio[0].set_value("Batch Processor")
+    at.run(timeout=30)
+
+    at.get_by_key("b-up").set_value([("one.jpg", image_bytes(), "image/jpeg"), ("two.jpg", image_bytes(), "image/jpeg")])
+    at.run(timeout=30)
+    at.button(key="b-run-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("Done — 2/2 succeeded" in c.value for c in at.caption)
+    assert at.dataframe
+    assert any(db.label == "Download ZIP" for db in at.download_button)
+
+
 def test_magic_wand_selection_removes_content_via_repair_tab():
     """Unlike the flat-color fixture most tests here reuse, this needs an actual color patch to
     click on: a click on a perfectly uniform image would select the *entire* frame (nothing is
