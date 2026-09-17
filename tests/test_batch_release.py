@@ -4,7 +4,7 @@ import io
 
 from PIL import Image
 
-from app.batch_release import make_zip, process_files, render_name
+from app.batch_release import FileLike, make_zip, process_files, render_name
 
 
 def test_batch_release_reports_success_and_errors(tmp_path):
@@ -55,6 +55,40 @@ def test_process_files_recipe_takes_priority_over_named_preset(tmp_path):
 
     assert report[0].status == "ok"
     assert len(with_recipe) == 1
+
+
+def test_process_files_calls_progress_callback_for_each_file(tmp_path):
+    """The frontend's Batch Processor wires this into an st.progress() bar -- a real gap found
+    live (the callback parameter already existed and was tested for its own error-reporting
+    behavior, but nothing exercised the callback itself, and the UI never passed one in)."""
+    first = tmp_path / "one.jpg"
+    second = tmp_path / "two.jpg"
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(first)
+    Image.new("RGB", (8, 8), (40, 50, 60)).save(second)
+    calls = []
+
+    def progress(index, total, last_result):
+        calls.append((index, total, last_result.status if last_result else None))
+
+    process_files([first, second], profile="Web", progress=progress)
+
+    assert calls == [(1, 2, "ok"), (2, 2, "ok")]
+
+
+def test_process_files_progress_callback_reports_per_file_errors_too(tmp_path):
+    good = tmp_path / "one.jpg"
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(good)
+    calls = []
+
+    process_files([good, tmp_path / "missing.jpg"], profile="Web", progress=lambda i, t, r: calls.append(r.status))
+
+    assert calls == ["ok", "error"]
+
+
+def test_file_like_matches_the_flask_file_storage_interface_process_image_needs():
+    file_like = FileLike("photo.png", b"fake-bytes")
+    assert file_like.filename == "photo.png"
+    assert file_like.read() == b"fake-bytes"
 
 
 def test_a_bad_name_template_fails_only_that_file_not_the_whole_batch(tmp_path):

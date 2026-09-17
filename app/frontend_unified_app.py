@@ -11,9 +11,12 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image
 
+import cv2
+
 from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, magic_wand_mask, radial_mask, soften_mask
+from app.backend import process_image
 from app.backend_client import ensure_backend_running, process_via_backend
-from app.batch_release import make_zip, process_files
+from app.batch_release import FileLike, make_zip, process_files
 from app.custom_presets import PresetStore
 from app.edit_history import EditHistory
 from app.image_processor import PhotoProcessor
@@ -27,7 +30,7 @@ from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS, clippin
 from app.lens_corrections import LENS_PROFILES, apply_lens_corrections
 from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
-from app.recipe_options import ASPECT_RATIOS, merge_curve_points
+from app.recipe_options import ASPECT_RATIOS, merge_curve_points, recipe_to_options
 
 # Maps a JSON-serializable recipe key to the session_state key of the widget that reads/writes it.
 # Shared by Undo/Redo (EditHistory snapshots) and Save/Load Project (ProjectBundle.recipe) so both
@@ -972,6 +975,38 @@ def _preset_thumbnails(image_bytes: bytes, filename: str) -> dict[str, bytes]:
     return encoded
 
 
+@st.cache_data(show_spinner=False)
+def _custom_preset_thumbnail(image_bytes: bytes, filename: str, recipe: dict) -> bytes:
+    """A live preview render for one saved custom preset -- the "Load a Preset" dropdown's and the
+    Batch Processor's counterpart to `_preset_thumbnails()`'s built-in-look row above. Unlike a
+    built-in look (a handful of fields applied via `apply_preset()`), a custom preset is a full
+    recipe that can touch anything `RECIPE_WIDGET_KEYS` covers, so only the real pipeline
+    (`recipe_to_options()` + `app.backend.process_image()`, called in-process on a small thumbnail
+    rather than over HTTP) reproduces it faithfully -- the same "deliberately separate, decorative-
+    only path" precedent `_preset_thumbnails()` already established; the real edit still always
+    goes through `app/backend.py` regardless of what's previewed here. Deliberately shows only one
+    preset at a time (the currently-selected one), not a whole row like the 4 built-in looks --
+    there can be many custom presets, and each one here costs a real (if thumbnail-sized) pipeline
+    run, unlike a built-in look's cheap `apply_preset()` call.
+
+    Falls back to the plain, unprocessed thumbnail (rather than raising) if the recipe fails to
+    apply -- the same exception tuple `app/backend.py`'s own `/process` route catches, so a
+    preview glitch never blocks picking or running the preset itself, just shows an unstyled
+    thumbnail instead of a styled one.
+    """
+    base = PhotoProcessor.from_bytes(image_bytes, filename).image
+    base.thumbnail((96, 96), Image.Resampling.LANCZOS)
+    buffer = io.BytesIO()
+    base.save(buffer, format="PNG")
+    try:
+        preview = process_image(FileLike(filename, buffer.getvalue()), recipe_to_options(recipe))
+    except (KeyError, ValueError, OSError, RuntimeError, cv2.error):
+        preview = base
+    encoded = io.BytesIO()
+    preview.convert("RGB").save(encoded, format="PNG")
+    return encoded.getvalue()
+
+
 # Keyboard shortcuts for the Library Catalog's "Rate & Flag" panel: 1-5 rate, 0 clears, X toggles
 # reject, arrows move Prev/Next. Reaches into window.parent.document (the real Streamlit page --
 # this component's iframe is same-origin via `srcdoc`, confirmed live) to `.click()` the real
@@ -1825,6 +1860,10 @@ with st.container(key="workspace-split"):
             if p_names:
                 st.markdown("**Load a Preset**")
                 p_load_name = st.selectbox("Preset to load", p_names, key="p-load-sel", label_visibility="collapsed")
+                st.image(
+                    _custom_preset_thumbnail(upload_bytes, upload_name, p_store.get(p_load_name)),
+                    width=96, caption=p_load_name,
+                )
                 p_load_col, p_delete_col = st.columns(2)
                 if p_load_col.button("📂 Apply", key="p-load-btn", use_container_width=True):
                     st.session_state["_pending_restore"] = p_store.get(p_load_name)
@@ -1999,6 +2038,14 @@ with st.container(key="workspace-split"):
                     "Preset", b_preset_options, key="b-preset-sel",
                     help="A saved custom preset applies its full recipe (tone/color/detail/lens) to every photo in the batch -- the same thing Lightroom calls syncing develop settings across a shoot.",
                 )
+                if b_preset_choice.endswith(" (custom)"):
+                    # Only the custom presets lacked any visual preview at all before -- the 4
+                    # built-in looks already show themselves clearly by name and don't carry a
+                    # per-preview pipeline-run cost, so this stays scoped to the gap that existed.
+                    st.image(
+                        _custom_preset_thumbnail(upload_bytes, upload_name, p_store.get(b_preset_choice[: -len(" (custom)")])),
+                        width=96,
+                    )
                 if b_uploaded and st.button("Run Batch", key="b-run-btn"):
                     b_root = Path.home() / ".photo-studio" / "batch-input"
                     b_root.mkdir(parents=True, exist_ok=True)
@@ -2011,7 +2058,20 @@ with st.container(key="workspace-split"):
                         b_preset, b_recipe = None, p_store.get(b_preset_choice[: -len(" (custom)")])
                     else:
                         b_preset, b_recipe = (b_preset_choice if b_preset_choice != "None" else None), None
-                    outs, rep = process_files(b_paths, b_preset, b_prof, recipe=b_recipe)
+
+                    b_progress_bar = st.progress(0.0)
+                    b_progress_status = st.empty()
+
+                    def _update_batch_progress(index: int, total: int, last_result) -> None:
+                        b_progress_bar.progress(index / total if total else 1.0)
+                        label = f"Processing {index}/{total}"
+                        if last_result is not None:
+                            label += f" — {last_result.source.name} ({last_result.status})"
+                        b_progress_status.caption(label)
+
+                    outs, rep = process_files(b_paths, b_preset, b_prof, progress=_update_batch_progress, recipe=b_recipe)
+                    b_progress_bar.progress(1.0)
+                    b_progress_status.caption(f"Done — {sum(1 for x in rep if x.status == 'ok')}/{len(rep)} succeeded")
                     st.dataframe([{"source": x.source.name, "status": x.status, "error": x.error or ""} for x in rep], use_container_width=True)
                     st.download_button("Download ZIP", make_zip(outs), "batch.zip", "application/zip", key="b-dl")
             else:
