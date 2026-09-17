@@ -130,6 +130,36 @@ def test_no_image_shows_upload_prompt_and_stops():
     assert len(at.tabs) == 0
 
 
+def test_two_stage_cache_skips_detail_stage_when_only_a_later_option_changes(monkeypatch):
+    """The whole point of the two-stage cache split (_cached_process_through_detail /
+    _cached_process_from_repair_onward, see docs/PROJECT_STATUS.md's Known Issues): a Mask-only
+    change should not re-invoke the expensive "through Detail" stage -- st.cache_data should serve
+    it from cache instead, since none of its own inputs changed -- while the cheaper "Repair
+    onward" stage does re-run. Wraps the existing _fake_process_via_backend stub with a call
+    counter rather than replacing it, so this still exercises the real in-process pipeline."""
+    calls = []
+
+    def counting_stub(image_bytes_, filename, options, *args, **kwargs):
+        calls.append(dict(options))
+        return _fake_process_via_backend(image_bytes_, filename, options, *args, **kwargs)
+
+    monkeypatch.setattr(backend_client, "process_via_backend", counting_stub)
+
+    at = run_with_uploaded_image(color=(80, 80, 80))
+    assert sum(1 for c in calls if c.get("stop_after") == "detail") == 1
+
+    at.selectbox(key="m-new-kind").set_value("Radial")
+    at.run(timeout=30)
+    at.button(key="m-add-btn").click()
+    at.run(timeout=30)
+    at.slider(key="m-texp").set_value(1.3)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert sum(1 for c in calls if c.get("stop_after") == "detail") == 1  # still just the initial call -- cached
+    assert sum(1 for c in calls if c.get("resume_from_detail")) >= 2  # re-ran for each mask-related change
+
+
 def test_uploading_a_corrupted_image_shows_an_error_instead_of_crashing():
     """Regression test for a real bug found in review: a truncated/corrupted image upload used
     to raise an uncaught OSError (PIL's "image file is truncated" / UnidentifiedImageError) all

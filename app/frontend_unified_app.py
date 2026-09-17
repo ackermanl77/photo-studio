@@ -188,14 +188,13 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
                 pending_wand = st.text_area("Magic wand click", key=f"{key_prefix}-wand-data", label_visibility="collapsed")
             # Same "only a genuine new commit adds a layer" guard as the Painted branch below --
             # clicking the exact same spot twice in a row is correctly a no-op, not a duplicate.
-            wand_committed_key = f"{key_prefix}-wand-committed"
-            if pending_wand and pending_wand != st.session_state.get(wand_committed_key):
+            if _consume_new_commit(pending_wand, f"{key_prefix}-wand-committed"):
                 try:
                     click = json.loads(pending_wand)
                     click_x, click_y = float(click["x"]), float(click["y"])
                 except (json.JSONDecodeError, TypeError, KeyError, ValueError):
-                    click_x = click_y = None
-                if click_x is not None:
+                    pass
+                else:
                     layers.append(
                         {
                             "id": uuid.uuid4().hex,
@@ -208,7 +207,6 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
                             "enabled": True,
                         }
                     )
-                    st.session_state[wand_committed_key] = pending_wand
                     _request_rerun()
         elif new_kind == "Painted":
             st.caption('Paint directly on the photo below — brush, radial, or gradient, plus an eraser. Click "Add to selections" inside the canvas when done.')
@@ -224,8 +222,7 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
             # commit (the user drew something and clicked "Add to selections" again) produces
             # different base64 data; clicking it twice without drawing anything new is correctly
             # a no-op rather than a duplicate layer.
-            paint_committed_key = f"{key_prefix}-paint-committed"
-            if pending_paint and pending_paint != st.session_state.get(paint_committed_key):
+            if _consume_new_commit(pending_paint, f"{key_prefix}-paint-committed"):
                 layers.append(
                     {
                         "id": uuid.uuid4().hex,
@@ -238,7 +235,6 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
                         "enabled": True,
                     }
                 )
-                st.session_state[paint_committed_key] = pending_paint
                 _request_rerun()
         else:
             new_params: dict = {}
@@ -292,13 +288,11 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
                     components.html(edit_html, height=edit_height)
                     with st.container(key=f"{edit_prefix}-paint-hidden"):
                         pending_edit = st.text_area("Edited painted mask data", key=f"{edit_prefix}-paint-data", label_visibility="collapsed")
-                    edit_committed_key = f"{edit_prefix}-paint-committed"
                     # Same "only a genuine new commit updates anything" guard as adding a fresh
                     # Painted selection -- clicking "Update Painting" twice without drawing
                     # anything new between clicks is correctly a no-op.
-                    if pending_edit and pending_edit != st.session_state.get(edit_committed_key):
+                    if _consume_new_commit(pending_edit, f"{edit_prefix}-paint-committed"):
                         layer["params"]["mask_b64"] = pending_edit
-                        st.session_state[edit_committed_key] = pending_edit
                         _request_rerun()
             if st.button("🗑️ Remove", key=f"{key_prefix}-rm-{layer_id}"):
                 layers.pop(idx)
@@ -1018,13 +1012,60 @@ _LIBRARY_KEYBOARD_SHORTCUTS_HTML = """
 """
 
 
+# Keys belonging to app/backend.py::process_image()'s Lens/Tone/Color/Detail stage (the "through
+# Detail" half `_cached_process_through_detail` caches) -- every other key the `options = {...}`
+# dict below builds belongs to the Repair-onward stage (`_cached_process_from_repair_onward`)
+# instead. Kept as one explicit, auditable list rather than inferring the split some other way, so
+# it's easy to check against process_image()'s own step-order comments when either changes.
+_DETAIL_STAGE_OPTION_KEYS = (
+    "lens_distortion", "lens_vignette_amount", "lens_vignette_midpoint", "lens_chromatic_aberration",
+    "lens_perspective_v", "lens_perspective_h",
+    "exposure", "contrast", "highlights", "shadows", "preset",
+    "temperature", "tint", "saturation", "vibrance", "hsl_bands",
+    "cg_shadows_hue", "cg_shadows_intensity", "cg_midtones_hue", "cg_midtones_intensity",
+    "cg_highlights_hue", "cg_highlights_intensity", "cg_balance", "curve",
+    "texture", "clarity", "dehaze", "denoise", "denoise_color", "sharpen",
+)
+
+
+@st.cache_data(show_spinner="🎨 Applying edits (tone/color/detail)…")
+def _cached_process_through_detail(image_bytes: bytes, filename: str, detail_options: dict) -> bytes:
+    """Stage 1 of 2 of the edit pipeline (Lens -> Tone -> Color -> Detail -- see
+    app.backend.process_image()'s own docstring for the full order and the `stop_after`/
+    `resume_from_detail` flags this two-stage split is built on). Cached independently of every
+    Repair/Layers/Masks/Portrait/Crop/Effects option: resolves the Known Issue that the old single
+    combined cache (keyed on the *entire* options dict) forced a full recompute -- including the
+    genuinely expensive Non-Local Means denoise step -- every time *any* option changed, even a
+    Mask slider that Denoise's own output doesn't depend on at all. Returns PNG bytes (not a
+    decoded Image) so the cached value itself is what feeds `_cached_process_from_repair_onward`
+    as its own `image_bytes` argument, unchanged."""
+    options = dict(detail_options)
+    options["stop_after"] = "detail"
+    result = process_via_backend(image_bytes, filename, options)
+    buffer = io.BytesIO()
+    save_kwargs = {"format": "PNG"}
+    if result.info.get("icc_profile"):
+        save_kwargs["icc_profile"] = result.info["icc_profile"]
+    result.save(buffer, **save_kwargs)
+    return buffer.getvalue()
+
+
 @st.cache_data(show_spinner="🎨 Applying edits…")
-def _cached_process_via_backend(image_bytes: bytes, filename: str, options: dict, local_mask_bytes: bytes | None, layer_bytes: bytes | None, removal_mask_bytes: bytes | None = None):
-    """Cached so that reruns triggered by controls that don't affect the pipeline (zoom, Show
-    Original, etc.) don't repeat a full HTTP round trip with the whole image. The spinner message
-    is the only feedback the user gets that an edit is being sent over the network to
-    app/backend.py -- without it, a slider drag on a large image can look like the app hung."""
-    return process_via_backend(image_bytes, filename, options, local_mask_bytes, layer_bytes, removal_mask_bytes)
+def _cached_process_from_repair_onward(
+    stage_a_png_bytes: bytes, remaining_options: dict,
+    local_mask_bytes: bytes | None, layer_bytes: bytes | None, removal_mask_bytes: bytes | None = None,
+) -> Image.Image:
+    """Stage 2 of 2 -- Repair through Effects, resuming from `stage_a_png_bytes`
+    (`_cached_process_through_detail`'s own output, already processed through Detail) instead of
+    the original upload, via `options["resume_from_detail"]`. Cached independently of every Lens/
+    Tone/Color/Detail option, so nudging e.g. Exposure doesn't force this cheaper stage to redo
+    Repair/Masks/Portrait/Crop/Effects either -- each stage only recomputes when its own inputs
+    actually change. The spinner message is the only feedback the user gets that an edit is being
+    sent over the network to app/backend.py -- without it, a slider drag on a large image can look
+    like the app hung."""
+    options = dict(remaining_options)
+    options["resume_from_detail"] = True
+    return process_via_backend(stage_a_png_bytes, "stage_a.png", options, local_mask_bytes, layer_bytes, removal_mask_bytes)
 
 
 @st.cache_data(show_spinner=False)
@@ -1071,6 +1112,35 @@ def _request_rerun() -> None:
     same effect.) Setting this flag and rerunning only after the very last widget in the script has
     rendered (see the check at the bottom of this file) means nothing gets GC'd."""
     st.session_state["_rerun_pending"] = True
+
+
+def _consume_new_commit(pending_value: str, committed_key: str) -> bool:
+    """True exactly once per genuinely new value written into an on-canvas editor's hidden
+    `st.text_area` (see any `_*_editor_html()`/`_wand_picker_html()`'s `commit()` JS, and
+    `_paint_editor_html`'s docstring for why a hidden text_area is used instead of touching a real
+    widget directly). Marks `committed_key` immediately, before the caller even looks at
+    `pending_value`'s content -- so a second rerun carrying the exact same string (e.g. triggered
+    by an unrelated control elsewhere on the page, or a value that turns out to fail parsing) is
+    correctly a no-op rather than retried forever or reapplied as a duplicate.
+
+    Shared guard behind every on-canvas editor's commit handler (Magic Wand in both Masks and
+    Repair, the White Balance picker, adding a Painted selection in both Masks and Repair,
+    re-editing an existing Painted selection, the tone curve editor, and the free-form crop
+    editor) -- previously duplicated inline at each of those ~8 call sites with the exact same
+    three-line shape (`if pending and pending != st.session_state.get(key): st.session_state[key]
+    = pending; ...`), flagged in "Known Issues" as one of three independent, inline workarounds
+    for Streamlit's session_state-vs-widget-instantiation rules with no shared helper between
+    them -- this closes that gap for the two of the three (`_request_rerun` and the hidden-
+    textarea commit pattern) that share an actual "defer/guard a session_state write" shape. The
+    HSL Color Mixer's "always render every band" fix is a different strategy entirely (an
+    unconditional-rendering choice, not a guarded write) and isn't a natural fit for this helper;
+    unifying it would mean redesigning how that panel renders, which "Known Issues" explicitly
+    called out as not worth rushing.
+    """
+    if not pending_value or pending_value == st.session_state.get(committed_key):
+        return False
+    st.session_state[committed_key] = pending_value
+    return True
 
 
 st.set_page_config(page_title="Photo Studio Pro", page_icon="🎨", layout="wide", initial_sidebar_state="collapsed")
@@ -1487,14 +1557,13 @@ with st.container(key="workspace-split"):
                 components.html(editor_html, height=editor_height)
                 with st.container(key="crop-editor-hidden"):
                     pending_crop = st.text_area("Free-form crop box", key="crop-editor-data", label_visibility="collapsed")
-                if pending_crop and pending_crop != st.session_state.get("crop-editor-committed"):
+                if _consume_new_commit(pending_crop, "crop-editor-committed"):
                     try:
                         parsed_box = json.loads(pending_crop)
                         fx0, fy0, fx1, fy1 = (float(parsed_box[k]) for k in ("x0", "y0", "x1", "y1"))
                     except (json.JSONDecodeError, TypeError, KeyError, ValueError):
-                        fx0 = fy0 = fx1 = fy1 = None
-                    if fx0 is not None:
-                        st.session_state["crop-editor-committed"] = pending_crop
+                        pass
+                    else:
                         st.session_state["crop-free-x0"], st.session_state["crop-free-y0"] = fx0, fy0
                         st.session_state["crop-free-x1"], st.session_state["crop-free-y1"] = fx1, fy1
                         crop_box_fractional = (fx0, fy0, fx1, fy1)
@@ -1528,16 +1597,14 @@ with st.container(key="workspace-split"):
                 components.html(wb_html, height=wb_height)
                 with st.container(key="wb-wand-hidden"):
                     wb_click_raw = st.text_area("White balance click", key="wb-wand-data", label_visibility="collapsed")
-                wb_committed_key = "wb-wand-committed"
-                if wb_click_raw and wb_click_raw != st.session_state.get(wb_committed_key):
+                if _consume_new_commit(wb_click_raw, "wb-wand-committed"):
                     try:
                         wb_click = json.loads(wb_click_raw)
                         wb_x, wb_y = float(wb_click["x"]), float(wb_click["y"])
                     except (json.JSONDecodeError, TypeError, KeyError, ValueError):
-                        wb_x = wb_y = None
-                    if wb_x is not None:
+                        pass
+                    else:
                         new_temp, new_tint = estimate_white_balance(mask_source, wb_x, wb_y)
-                        st.session_state[wb_committed_key] = wb_click_raw
                         st.session_state["_pending_restore"] = {"temperature": new_temp, "tint": new_tint}
                         _request_rerun()
 
@@ -1601,13 +1668,12 @@ with st.container(key="workspace-split"):
                 # doesn't reliably commit in this Streamlit version, so the drag handler writes
                 # here instead and this reuses the same "set _pending_restore, then rerun" path
                 # Undo/Redo/Reset already use to update a slider from outside the widget itself.
-                if curve_commit and curve_commit != st.session_state.get("curve-committed"):
+                if _consume_new_commit(curve_commit, "curve-committed"):
                     try:
                         parsed = json.loads(curve_commit)
                     except (ValueError, TypeError):
                         parsed = None
                     if isinstance(parsed, dict):
-                        st.session_state["curve-committed"] = curve_commit
                         st.session_state["_pending_restore"] = parsed
                         _request_rerun()
                 with st.container(key="curve-points"):
@@ -2022,7 +2088,12 @@ with st.container(key="workspace-split"):
             removal_mask_bytes = removal_buffer.getvalue()
 
         try:
-            edited_image = _cached_process_via_backend(upload_bytes, upload_name, options, local_mask_bytes, layer_bytes, removal_mask_bytes)
+            detail_options = {key: options[key] for key in _DETAIL_STAGE_OPTION_KEYS}
+            remaining_options = {key: value for key, value in options.items() if key not in _DETAIL_STAGE_OPTION_KEYS}
+            stage_a_png_bytes = _cached_process_through_detail(upload_bytes, upload_name, detail_options)
+            edited_image = _cached_process_from_repair_onward(
+                stage_a_png_bytes, remaining_options, local_mask_bytes, layer_bytes, removal_mask_bytes
+            )
         except RuntimeError as error:
             st.error(f"⚠️ {error}")
             st.stop()

@@ -147,6 +147,121 @@ def test_process_endpoint_applies_film_grain():
     assert baseline.data != grainy.data
 
 
+def test_process_endpoint_stop_after_detail_skips_repair_onward_steps():
+    """options["stop_after"] == "detail" should return right after the Detail section, before
+    Repair/Layers/Masks/Portrait/Crop/Effects -- confirmed by requesting a crop that would
+    otherwise visibly change the output dimensions."""
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes(size=(40, 40))), "input.png"),
+            "options": json.dumps({"stop_after": "detail", "aspect": "1:1", "crop_box": [0, 0, 10, 10]}),
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+    result = Image.open(io.BytesIO(response.data))
+    assert result.size == (40, 40)  # crop never applied -- stopped before Crop
+
+
+def test_process_endpoint_resume_from_detail_skips_lens_tone_color_detail():
+    """options["resume_from_detail"] should treat the uploaded image as already Lens/Tone/Color/
+    Detail-processed and skip reapplying any of that -- confirmed by sending a large Exposure
+    value that would visibly blow out the image if it were actually reapplied."""
+    client = app.test_client()
+    stage_a = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes(color=(100, 100, 100), size=(20, 20))), "input.png"),
+            "options": json.dumps({"stop_after": "detail"}),
+        },
+        content_type="multipart/form-data",
+    )
+    assert stage_a.status_code == 200
+
+    resumed = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(stage_a.data), "stage_a.png"),
+            "options": json.dumps({"resume_from_detail": True, "exposure": 5.0}),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resumed.status_code == 200
+    assert Image.open(io.BytesIO(resumed.data)).getpixel((10, 10)) == (100, 100, 100)
+
+
+def test_process_endpoint_two_stage_split_matches_single_pass_output():
+    """The whole point of the split (see docs/PROJECT_STATUS.md's Known Issues): chaining
+    stop_after="detail" then resume_from_detail with the remaining options must produce the same
+    output as a single unsplit call with the combined options -- otherwise the cache split
+    app/frontend_unified_app.py performs would be a genuine behavior change, not just a
+    performance one."""
+    client = app.test_client()
+    base = image_bytes(color=(90, 140, 200), size=(30, 30))
+    detail_options = {"exposure": 1.2, "saturation": 1.1, "texture": 20}
+    repair_onward_options = {"aspect": "1:1"}
+
+    single_pass = client.post(
+        "/process",
+        data={"image": (io.BytesIO(base), "input.png"), "options": json.dumps({**detail_options, **repair_onward_options})},
+        content_type="multipart/form-data",
+    )
+    assert single_pass.status_code == 200
+
+    stage_a = client.post(
+        "/process",
+        data={"image": (io.BytesIO(base), "input.png"), "options": json.dumps({**detail_options, "stop_after": "detail"})},
+        content_type="multipart/form-data",
+    )
+    assert stage_a.status_code == 200
+    stage_b = client.post(
+        "/process",
+        data={"image": (io.BytesIO(stage_a.data), "stage_a.png"), "options": json.dumps({**repair_onward_options, "resume_from_detail": True})},
+        content_type="multipart/form-data",
+    )
+    assert stage_b.status_code == 200
+
+    single_pixels = np.array(Image.open(io.BytesIO(single_pass.data)))
+    split_pixels = np.array(Image.open(io.BytesIO(stage_b.data)))
+    assert single_pixels.shape == split_pixels.shape
+    assert np.array_equal(single_pixels, split_pixels)  # PNG is lossless, so this should be exact
+
+
+def test_process_endpoint_resume_from_detail_still_preserves_icc_profile():
+    """The "detail" stop_after branch explicitly re-embeds icc_profile before returning (it isn't
+    covered by the shared re-tagging at the very end of process_image(), since resume_from_detail
+    skips straight past that source's own ICC-normalization step) -- confirms it actually survives
+    both hops of a real split (source -> stage A -> stage B), not just the single-pass path
+    test_process_endpoint_normalizes_a_real_embedded_profile_to_srgb already covers."""
+    from app.professional_color import srgb_icc_bytes
+
+    profile = srgb_icc_bytes()
+    image = Image.new("RGB", (10, 10), color=(180, 90, 40))
+    source = io.BytesIO()
+    image.save(source, format="PNG", icc_profile=profile)
+    source.seek(0)
+    client = app.test_client()
+
+    stage_a = client.post(
+        "/process",
+        data={"image": (source, "profiled.png"), "options": json.dumps({"stop_after": "detail"})},
+        content_type="multipart/form-data",
+    )
+    assert stage_a.status_code == 200
+    assert Image.open(io.BytesIO(stage_a.data)).info.get("icc_profile")
+
+    resumed = client.post(
+        "/process",
+        data={"image": (io.BytesIO(stage_a.data), "stage_a.png"), "options": json.dumps({"resume_from_detail": True})},
+        content_type="multipart/form-data",
+    )
+    assert resumed.status_code == 200
+    output_profile = Image.open(io.BytesIO(resumed.data)).info.get("icc_profile")
+    assert output_profile  # survived the resume_from_detail hop too
+
+
 def test_process_endpoint_applies_vibrance():
     client = app.test_client()
     response = client.post(
