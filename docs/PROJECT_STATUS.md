@@ -233,6 +233,8 @@ Run `pytest -q` yourself before relying on a pass count. The suite's size and pa
 
   Verified live: at 700px width, the Export row went from "Save JPEG / [slider] / JPEG" back to the correct "JPEG / [slider] / Save JPEG", while the outer canvas-before-tools reorder (the rule's actual intended effect) still worked correctly at both 700px and a true 375px mobile width. Verified with the existing suite (`tests/test_frontend_unified_app.py`, 82 tests, unchanged — a CSS-only fix that `AppTest`'s headless harness has no way to catch, same limitation already noted elsewhere in this file for other CSS/layout fixes).
 
+- **A dedicated, fixed-name `release\` folder for the built `.exe`, asked for directly so it doesn't require knowing the current version number to find.** `build_release.ps1` already produced a version-suffixed `PhotoStudio-<version>-Windows\` folder (needed as-is for the `.7z`/GitHub Release filename), but that means the *path* to the exe changes on every version bump. **Fixed**: the script now also mirrors that folder's contents into a fixed `release\` (overwritten fresh on every run), so `release\PhotoStudio.exe` is always the latest build regardless of version. Gitignored, same as every other build output in this repo.
+
 ## Known Issues
 
 - ICC soft-proofing targets this app's own sRGB working space, not a real printer/press profile -- there's no profile database or bundled `.icc` file (see "Recently Fixed"), the same limitation already true of Lens Profiles above.

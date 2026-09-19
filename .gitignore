@@ -28,6 +28,11 @@ PhotoStudio-*-Windows.7z
 PhotoStudio-*-Windows.7z.sha256
 *.spec.bak
 
+# Fixed-name mirror of the current PhotoStudio-<version>-Windows/ build output (see
+# scripts/build_release.ps1) -- always the latest build, so PhotoStudio.exe has one stable place
+# to find it regardless of version.
+/release/
+
 # Downloaded/extracted third-party runtime bundled into releases (see scripts/build_release.ps1)
 # -- large binary, fetched on demand, never committed.
 vendor/
