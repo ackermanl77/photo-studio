@@ -1046,6 +1046,52 @@ _LIBRARY_KEYBOARD_SHORTCUTS_HTML = """
 </script>
 """
 
+# Global Ctrl+Z (undo) / Ctrl+Shift+Z / Ctrl+Y (redo) shortcuts for the canvas header's Undo/Redo
+# buttons -- unlike the Library shortcuts above, canvas_col (and these buttons) render on every
+# rerun regardless of which tab is selected, so this listener needs no "is my panel visible" guard
+# and can be mounted once, unconditionally. Targets `.st-key-hist-undo-btn button` /
+# `.st-key-hist-redo-btn button` -- confirmed live via the DOM that st.button(key=...) puts an
+# "st-key-<key>" class on the enclosing stElementContainer div, the same convention already relied
+# on for st.container(key=...) elsewhere in this file (e.g. "st-key-workspace-split"). Clicking a
+# disabled <button> is a browser no-op, so this naturally does nothing when Undo/Redo has nothing
+# to do -- no extra can_undo/can_redo check needed here. Skips real typing targets (text/number
+# inputs, textareas) so Ctrl+Z still does normal text-undo there (e.g. the preset name field)
+# instead of undoing a photo edit -- but NOT a slider: a real bug caught live here, not by the test
+# suite (AppTest can't exercise a keydown at all -- see Known Issues) -- every st.slider is also an
+# <input>, and it's the single most common place focus sits right when someone wants to hit Ctrl+Z
+# (just after dragging one), so treating every INPUT as a typing target made the shortcut a no-op
+# in the one moment it matters most.
+_UNDO_REDO_KEYBOARD_SHORTCUTS_HTML = """
+<script>
+  (function() {
+    const TEXT_ENTRY_INPUT_TYPES = new Set(['text', 'search', 'number', 'email', 'url', 'tel', 'password']);
+    function handler(e) {
+      const active = window.parent.document.activeElement;
+      const tag = active && active.tagName;
+      if (tag === 'TEXTAREA') return;
+      if (tag === 'INPUT' && TEXT_ENTRY_INPUT_TYPES.has(active.type)) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      let selector;
+      if (e.key === 'z' || e.key === 'Z') {
+        selector = e.shiftKey ? '.st-key-hist-redo-btn button' : '.st-key-hist-undo-btn button';
+      } else if (e.key === 'y' || e.key === 'Y') {
+        selector = '.st-key-hist-redo-btn button';
+      } else {
+        return;
+      }
+      const target = window.parent.document.querySelector(selector);
+      if (!target) return;
+      target.click();
+      e.preventDefault();
+    }
+    if (!window.parent._photoStudioUndoRedoShortcutsBound) {
+      window.parent.document.addEventListener('keydown', handler);
+      window.parent._photoStudioUndoRedoShortcutsBound = true;
+    }
+  })();
+</script>
+"""
+
 
 # Keys belonging to app/backend.py::process_image()'s Lens/Tone/Color/Detail stage (the "through
 # Detail" half `_cached_process_through_detail` caches) -- every other key the `options = {...}`
@@ -1973,8 +2019,17 @@ with st.container(key="workspace-split"):
                 lib_folder = st.text_input("Folder", str(Path.home() / "Pictures"), key="lib-f-in")
                 lib_db = Path.home() / ".photo-studio" / "catalog.sqlite"
                 if st.button("Scan Folder", key="lib-btn"):
-                    st.session_state.records = index_folder(lib_folder, lib_db, True)
+                    lib_progress_bar = st.progress(0.0)
+                    lib_progress_status = st.empty()
+
+                    def _update_scan_progress(index: int, total: int, info) -> None:
+                        lib_progress_bar.progress(index / total if total else 1.0)
+                        lib_progress_status.caption(f"Scanning {index}/{total} — {info.get('name', '')}")
+
+                    st.session_state.records = index_folder(lib_folder, lib_db, True, progress=_update_scan_progress)
                     st.session_state["lib-cursor"] = 0
+                    lib_progress_bar.progress(1.0)
+                    lib_progress_status.caption(f"Done — indexed {len(st.session_state.records)} photo(s)")
                     st.toast(f"Indexed {len(st.session_state.records)} photo(s)", icon="✅")
                 rec = st.session_state.get("records", [])
                 q = st.text_input("Search", key="lib-q-in")
@@ -2194,6 +2249,7 @@ with st.container(key="workspace-split"):
             if st.button("↺", key="hist-reset-btn", help="Reset all adjustments to defaults", use_container_width=True):
                 st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": []}
                 _request_rerun()
+        components.html(_UNDO_REDO_KEYBOARD_SHORTCUTS_HTML, height=0)
         with top_c2:
             zoom_level = st.selectbox("Zoom View", [1.0, 0.5, 1.5, 2.0, 4.0], format_func=lambda z: f"🔍 {int(z*100)}%" if z>=1 else f"🔍 {int(z*100)}% (Fit)", key="cv-zoom", label_visibility="collapsed")
         with top_c3:
