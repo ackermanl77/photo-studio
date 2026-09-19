@@ -1252,6 +1252,42 @@ def test_scan_folder_shows_progress_and_a_done_summary(monkeypatch, tmp_path):
     assert any("Indexed 2 photo(s)" in t.value for t in at.toast)
 
 
+def test_library_search_shows_a_no_results_message(monkeypatch, tmp_path):
+    """Regression test for a real UI gap found live: an empty search or a Min Stars filter that
+    matched nothing just rendered a blank table with no explanation -- easy to mistake for the
+    scan itself having found nothing. Seeds the catalog directly via PhotoCatalog.upsert() (what a
+    real Scan Folder run would have already done) rather than scanning a real folder."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    lib_db = tmp_path / ".photo-studio" / "catalog.sqlite"
+    lib_db.parent.mkdir(parents=True)
+    PhotoCatalog(lib_db).upsert("photo-a.jpg")
+
+    at = run_with_uploaded_image()
+    at.session_state["records"] = [{"path": "photo-a.jpg", "name": "photo-a.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1}]
+    at.run(timeout=30)
+
+    assert not any("No photos match" in c.value for c in at.caption)
+
+    at.text_input(key="lib-q-in").set_value("no-such-photo")
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("No photos match this search / star filter." in c.value for c in at.caption)
+
+
+def test_library_rate_and_flag_panel_shows_its_keyboard_shortcuts(monkeypatch, tmp_path):
+    """Same gap as the search caption above: the Library Catalog's 1-5/0/X/arrow shortcuts (see
+    _LIBRARY_KEYBOARD_SHORTCUTS_HTML) existed only in the docs, with nothing on screen telling a
+    user they're there."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    at = run_with_uploaded_image()
+    at.session_state["records"] = [{"path": "photo-a.jpg", "name": "photo-a.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1}]
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("1-5 rate" in c.value and "Prev/Next" in c.value for c in at.caption)
+
+
 def test_magic_wand_selection_removes_content_via_repair_tab():
     """Unlike the flat-color fixture most tests here reuse, this needs an actual color patch to
     click on: a click on a perfectly uniform image would select the *entire* frame (nothing is
