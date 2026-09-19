@@ -1315,14 +1315,23 @@ footer { visibility: hidden; }
    whole (long) tool panel renders above the canvas, pushing the actual photo out of view until
    the user scrolls past every slider. Flip the visual order so the canvas -- the thing being
    edited -- appears first, while leaving the underlying script order (and therefore which
-   column's widgets execute first) untouched. Scoped to the "workspace-split" keyed container so
-   this doesn't affect any other st.columns() row in the app. */
+   column's widgets execute first) untouched.
+
+   The intent was to scope this to just the outer tools_col/canvas_col split via the
+   "workspace-split" keyed container, but "A B" is a *descendant* selector -- it matched every
+   st.columns() row nested anywhere inside canvas_col too (the top toolbar row, Pan sliders, and
+   the Export Format/Quality/Save row), reordering and wrapping all of them at this width as a
+   real bug found live (reported as "widgets one above the other" below the Export row). Fixed by
+   matching only the one immediate child chain from the keyed container down to that single outer
+   row -- confirmed live via the DOM that "st-key-workspace-split" (a stVerticalBlock) has exactly
+   one child, a stLayoutWrapper, which directly contains the tools_col/canvas_col
+   stHorizontalBlock -- so a nested row several containers deeper can no longer match. */
 @media (max-width: 900px) {
-    .st-key-workspace-split [data-testid="stHorizontalBlock"] {
+    .st-key-workspace-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {
         flex-wrap: wrap !important;
     }
-    .st-key-workspace-split [data-testid="stColumn"]:nth-of-type(1) { order: 2; }
-    .st-key-workspace-split [data-testid="stColumn"]:nth-of-type(2) { order: 1; }
+    .st-key-workspace-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-of-type(1) { order: 2; }
+    .st-key-workspace-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-of-type(2) { order: 1; }
 }
 
 /* Holds the real <textarea> the on-canvas paint editor's "Add to selections" button writes a
