@@ -38,12 +38,19 @@ def thumbnail(path: str | Path, destination: str | Path, size: tuple[int, int] =
     return target
 
 
-def index_folder(folder: str | Path, database: str | Path, recursive: bool = True) -> list[dict[str, object]]:
+def index_folder(folder: str | Path, database: str | Path, recursive: bool = True, progress=None) -> list[dict[str, object]]:
+    """`progress`, when given, is called as `progress(index, total, info)` after each file --
+    same shape as app.batch_release.process_files()'s own `progress` callback -- so the frontend's
+    "Scan Folder" button can drive an st.progress() bar the same way Run Batch already does."""
     catalog = PhotoCatalog(database)
+    paths = scan_folder(folder, recursive)
+    total = len(paths)
     records = []
-    for path in scan_folder(folder, recursive):
+    for index, path in enumerate(paths, 1):
         info = image_info(path)
         if "error" not in info:
             catalog.upsert(path)
             records.append(info)
+        if progress:
+            progress(index, total, info)
     return records

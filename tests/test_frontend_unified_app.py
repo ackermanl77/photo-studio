@@ -1228,6 +1228,30 @@ def test_run_batch_shows_progress_and_a_done_summary(monkeypatch, tmp_path):
     assert any(db.label == "Download ZIP" for db in at.download_button)
 
 
+def test_scan_folder_shows_progress_and_a_done_summary(monkeypatch, tmp_path):
+    """Same gap as Run Batch above, for the Library Catalog's "Scan Folder" button:
+    app.library.index_folder() already accepted a `progress` callback (see
+    tests/test_library.py), but the UI never passed one in -- scanning a large folder gave no
+    feedback until it finished entirely."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    photos_dir = tmp_path / "Pictures"
+    photos_dir.mkdir()
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(photos_dir / "one.jpg")
+    Image.new("RGB", (8, 8), (40, 50, 60)).save(photos_dir / "two.jpg")
+
+    at = run_with_uploaded_image()
+    # "Library Catalog" is the radio's default (first) option -- no need to select it explicitly,
+    # unlike the Batch Processor tests above which switch away from that default.
+    at.text_input(key="lib-f-in").set_value(str(photos_dir))
+    at.run(timeout=30)
+    at.button(key="lib-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("Done — indexed 2 photo(s)" in c.value for c in at.caption)
+    assert any("Indexed 2 photo(s)" in t.value for t in at.toast)
+
+
 def test_magic_wand_selection_removes_content_via_repair_tab():
     """Unlike the flat-color fixture most tests here reuse, this needs an actual color patch to
     click on: a click on a perfectly uniform image would select the *entire* frame (nothing is
