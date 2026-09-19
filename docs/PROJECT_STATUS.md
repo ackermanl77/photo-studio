@@ -245,6 +245,14 @@ Run `pytest -q` yourself before relying on a pass count. The suite's size and pa
 
   Verified live: scanned a real 3-photo test folder and watched the progress bar fill with `"Done — indexed 3 photo(s)"` and a `✅ Indexed 3 photo(s)` toast. For Undo/Redo: bumped Exposure to 1.10 via arrow keys (slider still focused), pressed Ctrl+Z — Exposure moved back to 1.01; pressed Ctrl+Y — back to 1.10. Confirmed the typing guard still works correctly: focused the Presets tab's "New Preset Name" field, typed text, pressed Ctrl+Z — the photo-undo shortcut did not fire (no tab change, no `_pending_restore` rerun), leaving normal text-field behavior alone. All real `~/.photo-studio/catalog.sqlite` data written during that manual verification was deleted afterward.
 
+- **Two more UI gaps identified when asked what else could improve the UI: keyboard shortcuts existed only in the docs (nothing on screen told a user they were there), and an empty Library Catalog search/filter just rendered a blank table with no explanation.** **Fixed, both**:
+  - **Shortcut discoverability** — the Undo/Redo buttons' tooltips now read `"Undo (Ctrl+Z)"` / `"Redo (Ctrl+Shift+Z or Ctrl+Y)"` instead of the bare `"Undo"`/`"Redo"`; a new caption under the Library Catalog's "Rate & Flag" heading spells out its 1-5/0/X/arrow shortcuts (previously documented only in a code comment above `_LIBRARY_KEYBOARD_SHORTCUTS_HTML`).
+  - **Search "no results" message** — the Library Catalog now shows `"No photos match this search / star filter."` whenever a scan has records but the current Search text / Min Stars combination matches none of them, instead of an unexplained empty table.
+
+  Verified with new tests: `tests/test_frontend_unified_app.py` gained `test_library_search_shows_a_no_results_message` and `test_library_rate_and_flag_panel_shows_its_keyboard_shortcuts`. The tooltip text change has no automated test (a cosmetic `help=` string, verified live instead). Full suite: 288 passed.
+
+  Verified live: hovered the Undo button and read the tooltip as `"Undo (Ctrl+Z)"`, then Redo as `"Redo (Ctrl+Shift+Z or Ctrl+Y)"`; scanned a real 2-photo folder, confirmed the new "Keyboard: 1-5 rate, 0 clears, X toggles reject, ←/→ move Prev/Next." caption rendered under "Rate & Flag"; typed a search query matching neither indexed photo and confirmed the table went empty with the new "No photos match this search / star filter." caption appearing directly below it. All real `~/.photo-studio/catalog.sqlite` data written during that manual verification was deleted afterward.
+
 ## Known Issues
 
 - ICC soft-proofing targets this app's own sRGB working space, not a real printer/press profile -- there's no profile database or bundled `.icc` file (see "Recently Fixed"), the same limitation already true of Lens Profiles above.

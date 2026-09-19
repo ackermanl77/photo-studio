@@ -2034,10 +2034,14 @@ with st.container(key="workspace-split"):
                 rec = st.session_state.get("records", [])
                 q = st.text_input("Search", key="lib-q-in")
                 r_min = st.slider("Min Stars", 0, 5, 0, key="lib-r-in")
-                st.dataframe(PhotoCatalog(lib_db).search(q, r_min) if rec else [], use_container_width=True)
+                search_results = PhotoCatalog(lib_db).search(q, r_min) if rec else []
+                st.dataframe(search_results, use_container_width=True)
+                if rec and not search_results:
+                    st.caption("No photos match this search / star filter.")
 
                 if rec:
                     st.markdown("**Rate & Flag**")
+                    st.caption("Keyboard: 1-5 rate, 0 clears, X toggles reject, ←/→ move Prev/Next.")
                     cursor = max(0, min(st.session_state.get("lib-cursor", 0), len(rec) - 1))
                     current_path = rec[cursor]["path"]
                     catalog = PhotoCatalog(lib_db)
@@ -2236,11 +2240,11 @@ with st.container(key="workspace-split"):
                 unsafe_allow_html=True,
             )
         with top_undo:
-            if st.button("↶", key="hist-undo-btn", disabled=not history.can_undo, help="Undo", use_container_width=True):
+            if st.button("↶", key="hist-undo-btn", disabled=not history.can_undo, help="Undo (Ctrl+Z)", use_container_width=True):
                 st.session_state["_pending_restore"] = history.undo() or {}
                 _request_rerun()
         with top_redo:
-            if st.button("↷", key="hist-redo-btn", disabled=not history.can_redo, help="Redo", use_container_width=True):
+            if st.button("↷", key="hist-redo-btn", disabled=not history.can_redo, help="Redo (Ctrl+Shift+Z or Ctrl+Y)", use_container_width=True):
                 st.session_state["_pending_restore"] = history.redo() or {}
                 _request_rerun()
         with top_reset:
