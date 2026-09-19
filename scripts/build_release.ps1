@@ -20,6 +20,10 @@ $Dist = Join-Path $ProjectRoot "dist-release"
 $Build = Join-Path $ProjectRoot "build-release"
 $Package = Join-Path $ProjectRoot "PhotoStudio-$Version-Windows"
 $Archive = Join-Path $ProjectRoot "PhotoStudio-$Version-Windows.7z"
+# A fixed-name mirror of $Package, so the built .exe always has one stable, predictable place to
+# find it (release\PhotoStudio.exe) without having to know or grep for the current version number
+# baked into $Package's own folder name.
+$ReleaseFolder = Join-Path $ProjectRoot "release"
 
 # Microsoft Edge WebView2 Runtime is required to open the app's window at all (pywebview's
 # edgechromium backend needs it) -- confirmed missing on a second, freshly-provisioned PC. Rather
@@ -102,6 +106,10 @@ try {
         Write-Host "SHA-256 file: $hashPath"
     }
     Write-Host "Release folder: $Package"
+
+    if (Test-Path $ReleaseFolder) { Remove-Item $ReleaseFolder -Recurse -Force }
+    Copy-Item $Package $ReleaseFolder -Recurse
+    Write-Host "Release folder (fixed location): $ReleaseFolder"
 } finally {
     Pop-Location
 }

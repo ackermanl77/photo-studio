@@ -33,11 +33,11 @@ The unified workspace includes Tone, Color, Detail, Layers, Masks, Portrait, and
 
 ## Desktop App
 
-Current packaged app:
+**The built app always lands in `release\PhotoStudio.exe`** — a fixed-name folder `build_release.ps1` overwrites with the latest build on every run, so you don't need to know or look up the current version number to find it. (The version-suffixed `PhotoStudio-<version>-Windows\` folder next to it, and its `.7z`, still exist too — that's what actually gets distributed/attached to a release.)
 
 ```text
-PhotoStudio-0.1.0-Windows\PhotoStudio.exe
-PhotoStudio-0.1.0-Windows\WebView2Runtime\   <- bundled, see below
+release\PhotoStudio.exe
+release\WebView2Runtime\   <- bundled, see below
 ```
 
 Rebuild:
