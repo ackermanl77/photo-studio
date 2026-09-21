@@ -10,6 +10,7 @@ A CPU-first Python photo editor with a Streamlit interface, Windows desktop pack
 - Current packaged release: `PhotoStudio-0.1.0-Windows/`.
 - Designed for computers without a dedicated GPU.
 - `docs/PROJECT_STATUS.md` is the authoritative reference for entry points, architecture, and known issues — this README only covers day-to-day commands.
+- New to the app itself? [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) walks through every tab and feature in the unified workspace.
 
 ## Install
 
