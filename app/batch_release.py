@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
+from PIL import Image
 
 from app.image_processor import PhotoProcessor
 from app.professional_tools import EXPORT_PROFILES, export_profile
@@ -123,3 +124,18 @@ def make_zip(outputs: list[tuple[str, bytes]]) -> bytes:
         for name, content in outputs:
             bundle.writestr(name, content)
     return archive.getvalue()
+
+
+def export_multiple(image: Image.Image, profile_names: list[str], base_filename: str) -> bytes:
+    """One photo, several export variants (Web/Social/Print/Archive -- see EXPORT_PROFILES) in a
+    single ZIP -- the "Export As" multi-size workflow every major editor offers, distinct from
+    process_files()'s "one recipe, many photos" batch above. Reuses export_profile() (already the
+    single source of truth for what each named profile's format/quality/max_size/metadata-stripping
+    actually is) and make_zip(), rather than a third copy of either."""
+    if not profile_names:
+        raise ValueError("Select at least one export size")
+    outputs = []
+    for name in profile_names:
+        content, extension, _mime = export_profile(image, name)
+        outputs.append((f"{base_filename}-{name.lower()}{extension}", content))
+    return make_zip(outputs)

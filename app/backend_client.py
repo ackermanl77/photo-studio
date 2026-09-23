@@ -65,7 +65,7 @@ def process_via_backend(
     filename: str,
     options: dict,
     local_mask_bytes: bytes | None = None,
-    layer_bytes: bytes | None = None,
+    layers_bytes: bytes | None = None,
     removal_mask_bytes: bytes | None = None,
 ) -> Image.Image:
     """POST an image plus the accumulated tab options to backend.py's /process endpoint and
@@ -81,8 +81,8 @@ def process_via_backend(
     files = {"image": (filename, image_bytes)}
     if local_mask_bytes:
         files["local_mask"] = ("mask.png", local_mask_bytes)
-    if layer_bytes:
-        files["layer"] = ("layer.png", layer_bytes)
+    if layers_bytes:
+        files["layers"] = ("layers.json", layers_bytes)
     if removal_mask_bytes:
         files["removal_mask"] = ("removal_mask.png", removal_mask_bytes)
 

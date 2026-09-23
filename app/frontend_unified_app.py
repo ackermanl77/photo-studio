@@ -16,19 +16,21 @@ import cv2
 from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, magic_wand_mask, radial_mask, soften_mask
 from app.backend import process_image
 from app.backend_client import ensure_backend_running, process_via_backend
-from app.batch_release import FileLike, make_zip, process_files
+from app.batch_release import FileLike, export_multiple, make_zip, process_files
 from app.custom_presets import PresetStore
 from app.edit_history import EditHistory
 from app.image_processor import PhotoProcessor
-from app.layer_workspace import LayerWorkspace, WorkspaceLayer
+from app.layer_styles import apply_layer_styles
+from app.layer_workspace import LayerWorkspace, WorkspaceLayer, layers_to_json, render_text_layer
+from app.vector_shapes import SHAPE_TYPES, render_path_layer, render_shape_layer
 from app.library import index_folder
-from app.major_features import PhotoCatalog
+from app.major_features import BLEND_MODE_LABELS, PhotoCatalog
 from app.presets import PRESETS, apply_preset
 from app.preset_exchange import export_presets, import_presets
 from app.portrait_tools import detect_faces
 from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS, clipping_warning_overlay, estimate_white_balance, gamut_warning_overlay
 from app.lens_corrections import LENS_PROFILES, apply_lens_corrections
-from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, preview_image, zoom_preview
+from app.professional_tools import EXPORT_PROFILES, GRID_PRESETS, apply_mask_overlay, compute_histogram, draw_guides_and_grid, export_profile, grid_line_fractions, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
 from app.recipe_options import ASPECT_RATIOS, merge_curve_points, recipe_to_options
 
@@ -94,10 +96,10 @@ for _band in HSL_BAND_ORDER:
 
 def _build_recipe() -> dict:
     """Capture every editable control's current value into one JSON-serializable dict: used both
-    for Undo/Redo snapshots and for the recipe saved inside a .photoproject file. The uploaded
-    layer overlay image is deliberately NOT included here (see the Layers tab and the Project File
-    section) -- it is saved with the project file, but kept out of per-step Undo/Redo history so
-    that history snapshots stay small.
+    for Undo/Redo snapshots and for the recipe saved inside a .photoproject file. The layer stack's
+    image data is deliberately NOT included here (see the Layers tab and the Project File section)
+    -- it is saved with the project file, but kept out of per-step Undo/Redo history so that
+    history snapshots stay small.
     """
     recipe = {key: st.session_state.get(widget_key, RECIPE_DEFAULTS[key]) for key, widget_key in RECIPE_WIDGET_KEYS.items()}
     recipe["mask_layers"] = st.session_state.get("mask_layers", [])
@@ -125,11 +127,8 @@ def _restore_recipe_to_state(recipe: dict) -> None:
         st.session_state.removal_mask_layers = recipe["removal_mask_layers"]
     if "curve_extra_points" in recipe:
         st.session_state.curve_extra_points = recipe["curve_extra_points"]
-    layer_payload = recipe.get("layer")
-    if layer_payload:
-        st.session_state["restored_layer_bytes"] = base64.b64decode(layer_payload["image_b64"])
-        st.session_state["l-opac"] = layer_payload.get("opacity", 1.0)
-        st.session_state["l-blend"] = layer_payload.get("blend", "normal")
+    if "layers" in recipe:
+        st.session_state.image_layers = recipe["layers"]
 
 
 def _decode_painted_mask(mask_b64: str) -> Image.Image:
@@ -315,6 +314,475 @@ def _render_selection_stack(state_key: str, key_prefix: str, source: Image.Image
         mask_stack.add(MaskLayer(layer["name"], base_mask, layer["enabled"], layer["invert"], layer["opacity"]))
 
     return mask_stack
+
+
+def _hex_to_rgba(hex_color: str) -> tuple[int, int, int, int]:
+    hex_color = hex_color.lstrip("#")
+    return (int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16), 255)
+
+
+_STYLE_EFFECT_PREFIXES = ("drop_shadow", "outer_glow", "stroke", "color_overlay")
+_STYLE_COLOR_KEYS = ("drop_shadow_color", "outer_glow_color", "stroke_color", "color_overlay_color")
+
+
+def _resolved_layer_styles(styles: dict) -> dict:
+    """`styles` stores its colors as `st.color_picker` hex strings (e.g. "#FF0000") -- convert to
+    the plain RGB int tuples app.layer_styles.apply_layer_styles() expects, leaving every other
+    field (enabled flags, blur/offset/width/opacity numbers) untouched."""
+    resolved = dict(styles)
+    for key in _STYLE_COLOR_KEYS:
+        if key in resolved:
+            resolved[key] = _hex_to_rgba(resolved[key])[:3]
+    return resolved
+
+
+def _layer_dict_to_image(layer: dict, canvas_size: tuple[int, int]) -> Image.Image:
+    """Rasterize one entry of st.session_state.image_layers into an actual RGBA image -- an
+    "Image" layer decodes its stored upload (resized to the canvas's own size so Layer Styles below
+    compute their blur/offset/width in the same real pixel scale for either kind); a "Text" layer
+    renders fresh from its parametric fields every time (cheap: a single PIL draw call), the same
+    "stay parametric, only rasterize on demand" approach app.advanced_masks.MaskLayer's selections
+    already use, so editing the text after adding it doesn't require re-uploading anything. Shared
+    by _render_layer_stack() (the backend wire payload) and the Save Project handler so the two
+    never diverge on how a layer's kind maps to pixels.
+
+    Layer Styles (Drop Shadow/Outer Glow/Stroke/Color Overlay, see app.layer_styles) are applied
+    here too, after the base content is rasterized and before it becomes a WorkspaceLayer -- so the
+    normal opacity/blend-mode compositing on the resulting WorkspaceLayer runs on top of whatever
+    the styles produce, unmodified.
+    """
+    if layer.get("kind") == "text":
+        content = render_text_layer(
+            canvas_size, layer.get("text", ""), layer.get("font_size", 48), _hex_to_rgba(layer.get("color", "#FFFFFF")),
+            layer.get("align", "left"), layer.get("x_pct", 50.0), layer.get("y_pct", 50.0),
+        )
+    elif layer.get("kind") == "shape":
+        # fill_color/stroke_color are stored as st.color_picker hex strings, same UI convention as
+        # a Text layer's "color" -- render_shape_layer() wants plain RGB int tuples.
+        shape_params = {
+            **layer,
+            "fill_color": _hex_to_rgba(layer.get("fill_color", "#FFFFFF"))[:3],
+            "stroke_color": _hex_to_rgba(layer.get("stroke_color", "#000000"))[:3],
+        }
+        content = render_shape_layer(canvas_size, shape_params)
+    elif layer.get("kind") == "path":
+        path_params = {
+            **layer,
+            "fill_color": _hex_to_rgba(layer.get("fill_color", "#FFFFFF"))[:3],
+            "stroke_color": _hex_to_rgba(layer.get("stroke_color", "#FFFFFF"))[:3],
+        }
+        content = render_path_layer(canvas_size, path_params)
+    else:
+        content = Image.open(io.BytesIO(base64.b64decode(layer["image_b64"]))).convert("RGBA")
+        if content.size != canvas_size:
+            content = content.resize(canvas_size, Image.Resampling.LANCZOS)
+
+    styles = layer.get("styles")
+    if styles and any(styles.get(f"{prefix}_enabled") for prefix in _STYLE_EFFECT_PREFIXES):
+        content = apply_layer_styles(content, _resolved_layer_styles(styles))
+    return content
+
+
+def _render_layer_styles(layer: dict, layer_id: str) -> None:
+    """Layer Styles sub-section inside one layer's own expander in _render_layer_stack below
+    (Drop Shadow/Outer Glow/Stroke/Color Overlay -- see app.layer_styles.apply_layer_styles, which
+    this panel's values ultimately feed via _resolved_layer_styles). Plain checkboxes + inline
+    widget rows rather than a further st.expander: Streamlit doesn't allow nesting one expander
+    inside another, and this already lives inside the layer's own."""
+    layer.setdefault("styles", {})
+    styles = layer["styles"]
+    st.markdown("**Layer Styles**")
+
+    styles["drop_shadow_enabled"] = st.checkbox("Drop Shadow", styles.get("drop_shadow_enabled", False), key=f"l-ds-en-{layer_id}")
+    if styles["drop_shadow_enabled"]:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            styles["drop_shadow_offset_x"] = st.slider("Offset X", -50, 50, int(styles.get("drop_shadow_offset_x", 8)), key=f"l-ds-ox-{layer_id}")
+        with c2:
+            styles["drop_shadow_offset_y"] = st.slider("Offset Y", -50, 50, int(styles.get("drop_shadow_offset_y", 8)), key=f"l-ds-oy-{layer_id}")
+        with c3:
+            styles["drop_shadow_blur"] = st.slider("Blur", 0, 40, int(styles.get("drop_shadow_blur", 6)), key=f"l-ds-bl-{layer_id}")
+        with c4:
+            styles["drop_shadow_color"] = st.color_picker("Color", styles.get("drop_shadow_color", "#000000"), key=f"l-ds-col-{layer_id}")
+        styles["drop_shadow_opacity"] = st.slider("Shadow Opacity", 0.0, 1.0, float(styles.get("drop_shadow_opacity", 0.6)), 0.01, key=f"l-ds-op-{layer_id}")
+
+    styles["outer_glow_enabled"] = st.checkbox("Outer Glow", styles.get("outer_glow_enabled", False), key=f"l-og-en-{layer_id}")
+    if styles["outer_glow_enabled"]:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            styles["outer_glow_blur"] = st.slider("Blur", 0, 60, int(styles.get("outer_glow_blur", 10)), key=f"l-og-bl-{layer_id}")
+        with c2:
+            styles["outer_glow_color"] = st.color_picker("Color", styles.get("outer_glow_color", "#FFDC78"), key=f"l-og-col-{layer_id}")
+        with c3:
+            styles["outer_glow_opacity"] = st.slider("Glow Opacity", 0.0, 1.0, float(styles.get("outer_glow_opacity", 0.75)), 0.01, key=f"l-og-op-{layer_id}")
+
+    styles["stroke_enabled"] = st.checkbox("Stroke", styles.get("stroke_enabled", False), key=f"l-st-en-{layer_id}")
+    if styles["stroke_enabled"]:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            styles["stroke_width"] = st.slider("Width", 1, 40, int(styles.get("stroke_width", 4)), key=f"l-st-w-{layer_id}")
+        with c2:
+            styles["stroke_color"] = st.color_picker("Color", styles.get("stroke_color", "#FFFFFF"), key=f"l-st-col-{layer_id}")
+        with c3:
+            styles["stroke_opacity"] = st.slider("Stroke Opacity", 0.0, 1.0, float(styles.get("stroke_opacity", 1.0)), 0.01, key=f"l-st-op-{layer_id}")
+
+    styles["color_overlay_enabled"] = st.checkbox("Color Overlay", styles.get("color_overlay_enabled", False), key=f"l-co-en-{layer_id}")
+    if styles["color_overlay_enabled"]:
+        c1, c2 = st.columns(2)
+        with c1:
+            styles["color_overlay_color"] = st.color_picker("Color", styles.get("color_overlay_color", "#FF0000"), key=f"l-co-col-{layer_id}")
+        with c2:
+            styles["color_overlay_opacity"] = st.slider("Overlay Opacity", 0.0, 1.0, float(styles.get("color_overlay_opacity", 0.6)), 0.01, key=f"l-co-op-{layer_id}")
+
+
+def _render_pen_path_editor(source: Image.Image, key_prefix: str, points: list[dict], closed: bool) -> tuple[list[dict], bool]:
+    """The on-canvas Pen tool editor (_pen_editor_html) plus its Closed Path/Clear controls --
+    shared between the "Add a layer" draft flow (building a brand new path before it becomes a
+    layer) and an existing Path layer's own per-layer expander (refining it afterward). Returns the
+    possibly-updated (points, closed); the caller is responsible for writing that back into
+    wherever it actually lives (a draft session_state pair, or this specific layer's own dict),
+    since this helper has no way to know which."""
+    editor_html, editor_height = _pen_editor_html(preview_image(source, (480, 480)), key_prefix, points, closed)
+    components.html(editor_html, height=editor_height)
+    with st.container(key=f"{key_prefix}-hidden"):
+        pending_points = st.text_area("Pen path points", key=f"{key_prefix}-data", label_visibility="collapsed")
+    if _consume_new_commit(pending_points, f"{key_prefix}-committed"):
+        try:
+            parsed = json.loads(pending_points)
+            points = [
+                {
+                    "x_pct": float(point["x_pct"]), "y_pct": float(point["y_pct"]),
+                    "handle_dx_pct": float(point.get("handle_dx_pct", 0.0)), "handle_dy_pct": float(point.get("handle_dy_pct", 0.0)),
+                }
+                for point in parsed
+            ]
+        except (json.JSONDecodeError, TypeError, KeyError, ValueError):
+            pass
+        else:
+            _request_rerun()
+    closed = st.checkbox("Closed Path", closed, key=f"{key_prefix}-closed")
+    if points and st.button("🗑️ Clear Points", key=f"{key_prefix}-clear"):
+        points = []
+        _request_rerun()
+    return points, closed
+
+
+def _render_layer_stack(source: Image.Image) -> bytes | None:
+    """Layers tab: any number of stacked Image or Text layers, each with its own name/visibility/
+    opacity/blend mode, reorderable and duplicable -- the same "add, then list/edit/remove" shape
+    _render_selection_stack established for Masks/Repair. The compositing engine underneath
+    (app.layer_workspace.LayerWorkspace) already supported an arbitrary number of layers; only this
+    panel was ever limited to exactly one uploaded overlay image with no text option at all. Returns
+    the serialized payload for process_via_backend's `layers_bytes` argument
+    (app.layer_workspace.layers_to_json's wire format), or None when the stack is empty.
+
+    Storage/composite order is bottom-to-top (index 0 sits directly on the photo, the last entry is
+    on top) -- also the order layers are listed in below, called out in a caption since Photoshop's
+    own panel lists the topmost layer first.
+    """
+    if "image_layers" not in st.session_state:
+        st.session_state.image_layers = []
+    layers = st.session_state.image_layers
+    for layer in layers:
+        layer.setdefault("id", uuid.uuid4().hex)
+        layer.setdefault("kind", "image")  # backfill for layers added before Text layers existed
+
+    with st.expander("➕ Add a layer", expanded=not layers):
+        new_layer_kind = st.radio("Layer type", ["Image", "Text", "Shape", "Pen"], horizontal=True, key="l-new-kind")
+        if new_layer_kind == "Text":
+            if st.button("Add Text Layer", key="l-add-text-btn"):
+                layers.append(
+                    {
+                        "id": uuid.uuid4().hex,
+                        "kind": "text",
+                        "name": f"Text {len(layers) + 1}",
+                        "text": "Text",
+                        "font_size": 48,
+                        "color": "#FFFFFF",
+                        "align": "left",
+                        "x_pct": 50.0,
+                        "y_pct": 50.0,
+                        "opacity": 1.0,
+                        "blend_mode": "normal",
+                        "visible": True,
+                    }
+                )
+                _request_rerun()
+        elif new_layer_kind == "Shape":
+            new_shape_type = st.selectbox("Shape", SHAPE_TYPES, key="l-new-shape-type")
+            if st.button("Add Shape Layer", key="l-add-shape-btn"):
+                layers.append(
+                    {
+                        "id": uuid.uuid4().hex,
+                        "kind": "shape",
+                        "name": f"{new_shape_type} {len(layers) + 1}",
+                        "shape_type": new_shape_type,
+                        "x_pct": 50.0,
+                        "y_pct": 50.0,
+                        "width_pct": 30.0,
+                        "height_pct": 30.0,
+                        "rotation_deg": 0.0,
+                        "fill_enabled": True,
+                        "fill_color": "#FFFFFF",
+                        "fill_opacity": 1.0,
+                        "stroke_enabled": False,
+                        "stroke_color": "#000000",
+                        "stroke_width": 4,
+                        "sides": 5,
+                        "inner_ratio": 0.5,
+                        "line_thickness": 6,
+                        "opacity": 1.0,
+                        "blend_mode": "normal",
+                        "visible": True,
+                    }
+                )
+                _request_rerun()
+        elif new_layer_kind == "Pen":
+            st.caption('Click points on the photo below to trace a path, then "Add Path Layer" when done.')
+            # draft_closed itself needs no separate write-back: it's the "l-path-draft-closed"
+            # checkbox's own widget key, already persisted by Streamlit the moment that widget
+            # renders -- re-assigning it here would violate the "never write into an
+            # already-instantiated widget's session_state key" rule (see CLAUDE.md) and crash.
+            # draft_points has no widget of its own (it's a plain list, like mask_layers), so it
+            # does need this explicit write-back to survive into the next rerun.
+            draft_points, draft_closed = _render_pen_path_editor(
+                source, "l-path-draft", st.session_state.get("l-path-draft-points", []), st.session_state.get("l-path-draft-closed", False),
+            )
+            st.session_state["l-path-draft-points"] = draft_points
+            if st.button("➕ Add Path Layer", key="l-add-path-btn", disabled=len(draft_points) < 2):
+                layers.append(
+                    {
+                        "id": uuid.uuid4().hex,
+                        "kind": "path",
+                        "name": f"Path {len(layers) + 1}",
+                        "points": draft_points,
+                        "closed": draft_closed,
+                        "fill_enabled": False,
+                        "fill_color": "#FFFFFF",
+                        "fill_opacity": 1.0,
+                        "stroke_enabled": True,
+                        "stroke_color": "#FFFFFF",
+                        "stroke_width": 3,
+                        "opacity": 1.0,
+                        "blend_mode": "normal",
+                        "visible": True,
+                    }
+                )
+                # Only the points draft is reset -- "l-path-draft-closed" is the Closed Path
+                # checkbox's own widget key, already instantiated this run, so it can't be written
+                # to directly (same rule as the comment above _render_pen_path_editor's call). Left
+                # as whatever the user last set it to for the next new path being drafted, a minor,
+                # harmless carry-over rather than worth a bigger _pending_restore-style mechanism.
+                st.session_state["l-path-draft-points"] = []
+                _request_rerun()
+        else:
+            new_layer_file = st.file_uploader("Layer image", type=["png", "jpg", "jpeg", "webp"], key="l-new-file")
+            # Streamlit keeps a file_uploader's value across reruns until the user picks a different
+            # file or clears it -- adding on every rerun where it's truthy would append the same
+            # layer over and over. file_id is a fresh identifier per upload, so this only fires once
+            # per genuinely new file, the same "add exactly once per real commit" shape
+            # _consume_new_commit gives the on-canvas editors elsewhere in this file.
+            if new_layer_file is not None:
+                file_id = getattr(new_layer_file, "file_id", new_layer_file.name)
+                if st.session_state.get("l-last-added-file-id") != file_id:
+                    st.session_state["l-last-added-file-id"] = file_id
+                    try:
+                        decoded = Image.open(io.BytesIO(new_layer_file.getvalue())).convert("RGBA")
+                    except OSError:
+                        st.error("⚠️ Couldn't read that layer image — it may be corrupted.")
+                    else:
+                        buffer = io.BytesIO()
+                        decoded.save(buffer, format="PNG")
+                        layers.append(
+                            {
+                                "id": uuid.uuid4().hex,
+                                "kind": "image",
+                                "name": Path(new_layer_file.name).stem or f"Layer {len(layers) + 1}",
+                                "image_b64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+                                "opacity": 1.0,
+                                "blend_mode": "normal",
+                                "visible": True,
+                            }
+                        )
+                        _request_rerun()
+
+    if not layers:
+        st.caption("No layers yet — add one above.")
+    else:
+        st.caption("Listed bottom-to-top: the last layer here sits on top, same as the composite order.")
+
+    blend_mode_choices = list(BLEND_MODE_LABELS)
+    align_choices = ["left", "center", "right"]
+    for idx, layer in enumerate(layers):
+        layer_id = layer["id"]
+        status_icon = "✅" if layer["visible"] else "⬜"
+        kind_label = {"text": "Text", "shape": layer.get("shape_type", "Shape"), "path": "Path"}.get(layer["kind"], BLEND_MODE_LABELS[layer["blend_mode"]])
+        with st.expander(f"{status_icon} {layer['name']} — {kind_label}", expanded=False):
+            # Split into sub-tabs rather than one long scroll -- a layer's kind-specific fields,
+            # its Layer Styles, and its name/opacity/blend/reorder controls used to all render one
+            # after another in the same expander, which got dense once a layer could be four very
+            # different kinds (Image/Text/Shape/Pen) each with several controls, on top of Layer
+            # Styles' own four effects. Nesting st.tabs() inside st.expander() is allowed (unlike
+            # nesting a second st.expander(), which Streamlit forbids -- the reason
+            # _render_layer_styles already uses checkboxes instead of its own expander) and, like
+            # every other tab in this app, every sub-tab's body still executes on every rerun
+            # regardless of which one is visually selected -- so none of the widget-instantiation
+            # rules elsewhere in this file (deferred reruns, the break-after-mutation buttons below)
+            # need to change for this split.
+            tab_content, tab_styles, tab_settings = st.tabs(["🎨 Content", "✨ Styles", "⚙️ Settings"])
+            with tab_content:
+                if layer["kind"] == "text":
+                    layer["text"] = st.text_area("Text", layer.get("text", "Text"), key=f"l-text-{layer_id}")
+                    text_col1, text_col2 = st.columns(2)
+                    with text_col1:
+                        layer["font_size"] = st.slider("Font size (px)", 8, 400, int(layer.get("font_size", 48)), key=f"l-fsize-{layer_id}")
+                    with text_col2:
+                        layer["color"] = st.color_picker("Color", layer.get("color", "#FFFFFF"), key=f"l-fcolor-{layer_id}")
+                    layer["align"] = st.selectbox(
+                        "Alignment", align_choices, index=align_choices.index(layer.get("align", "left")), key=f"l-falign-{layer_id}",
+                    )
+                    pos_col1, pos_col2 = st.columns(2)
+                    with pos_col1:
+                        layer["x_pct"] = st.slider("Horizontal position (%)", 0.0, 100.0, float(layer.get("x_pct", 50.0)), key=f"l-fx-{layer_id}")
+                    with pos_col2:
+                        layer["y_pct"] = st.slider("Vertical position (%)", 0.0, 100.0, float(layer.get("y_pct", 50.0)), key=f"l-fy-{layer_id}")
+                    # A small live preview, computed locally (not through the backend) -- same
+                    # "cheap enough to recompute every rerun" pattern as the Masks tab's combined
+                    # overlay preview. A dark neutral background so light-colored text stays visible,
+                    # since the layer's own image is otherwise fully transparent outside the glyphs.
+                    preview_ratio = min(260 / source.width, 260 / source.height, 1.0)
+                    preview_size = (max(1, int(source.width * preview_ratio)), max(1, int(source.height * preview_ratio)))
+                    preview_bg = Image.new("RGBA", preview_size, (40, 40, 40, 255))
+                    preview_text = render_text_layer(
+                        preview_size, layer["text"], layer["font_size"] * preview_ratio, _hex_to_rgba(layer["color"]),
+                        layer["align"], layer["x_pct"], layer["y_pct"],
+                    )
+                    st.image(Image.alpha_composite(preview_bg, preview_text))
+                elif layer["kind"] == "shape":
+                    layer["shape_type"] = st.selectbox(
+                        "Shape", SHAPE_TYPES, index=SHAPE_TYPES.index(layer.get("shape_type", "Rectangle")), key=f"l-shp-type-{layer_id}",
+                    )
+                    shp_pos1, shp_pos2 = st.columns(2)
+                    with shp_pos1:
+                        layer["x_pct"] = st.slider("Horizontal position (%)", 0.0, 100.0, float(layer.get("x_pct", 50.0)), key=f"l-shp-x-{layer_id}")
+                    with shp_pos2:
+                        layer["y_pct"] = st.slider("Vertical position (%)", 0.0, 100.0, float(layer.get("y_pct", 50.0)), key=f"l-shp-y-{layer_id}")
+                    shp_size1, shp_size2 = st.columns(2)
+                    with shp_size1:
+                        layer["width_pct"] = st.slider("Width (%)", 1.0, 100.0, float(layer.get("width_pct", 30.0)), key=f"l-shp-w-{layer_id}")
+                    with shp_size2:
+                        layer["height_pct"] = st.slider(
+                            "Height (%)", 1.0, 100.0, float(layer.get("height_pct", 30.0)), key=f"l-shp-h-{layer_id}", disabled=layer["shape_type"] == "Line",
+                        )
+                    if layer["shape_type"] != "Ellipse":
+                        layer["rotation_deg"] = st.slider("Rotation", 0.0, 360.0, float(layer.get("rotation_deg", 0.0)), key=f"l-shp-rot-{layer_id}")
+                    if layer["shape_type"] in ("Polygon", "Star"):
+                        shp_sides1, shp_sides2 = st.columns(2)
+                        with shp_sides1:
+                            layer["sides"] = st.slider(
+                                "Sides" if layer["shape_type"] == "Polygon" else "Points", 3, 12, int(layer.get("sides", 5)), key=f"l-shp-sides-{layer_id}",
+                            )
+                        if layer["shape_type"] == "Star":
+                            with shp_sides2:
+                                layer["inner_ratio"] = st.slider("Inner Radius", 0.05, 0.95, float(layer.get("inner_ratio", 0.5)), key=f"l-shp-inner-{layer_id}")
+                    if layer["shape_type"] == "Line":
+                        shp_line1, shp_line2 = st.columns(2)
+                        with shp_line1:
+                            layer["line_thickness"] = st.slider("Thickness (px)", 1, 60, int(layer.get("line_thickness", 6)), key=f"l-shp-thick-{layer_id}")
+                        with shp_line2:
+                            layer["fill_color"] = st.color_picker("Color", layer.get("fill_color", "#FFFFFF"), key=f"l-shp-fcolor-{layer_id}")
+                    else:
+                        layer["fill_enabled"] = st.checkbox("Fill", layer.get("fill_enabled", True), key=f"l-shp-fen-{layer_id}")
+                        if layer["fill_enabled"]:
+                            shp_fill1, shp_fill2 = st.columns(2)
+                            with shp_fill1:
+                                layer["fill_color"] = st.color_picker("Fill Color", layer.get("fill_color", "#FFFFFF"), key=f"l-shp-fcolor-{layer_id}")
+                            with shp_fill2:
+                                layer["fill_opacity"] = st.slider("Fill Opacity", 0.0, 1.0, float(layer.get("fill_opacity", 1.0)), 0.01, key=f"l-shp-fop-{layer_id}")
+                        layer["stroke_enabled"] = st.checkbox("Outline", layer.get("stroke_enabled", False), key=f"l-shp-sen-{layer_id}")
+                        if layer["stroke_enabled"]:
+                            shp_stroke1, shp_stroke2 = st.columns(2)
+                            with shp_stroke1:
+                                layer["stroke_color"] = st.color_picker("Outline Color", layer.get("stroke_color", "#000000"), key=f"l-shp-scolor-{layer_id}")
+                            with shp_stroke2:
+                                layer["stroke_width"] = st.slider("Outline Width", 1, 40, int(layer.get("stroke_width", 4)), key=f"l-shp-sw-{layer_id}")
+                    # Same locally-computed live preview pattern as the Text branch above.
+                    preview_ratio = min(260 / source.width, 260 / source.height, 1.0)
+                    preview_size = (max(1, int(source.width * preview_ratio)), max(1, int(source.height * preview_ratio)))
+                    preview_bg = Image.new("RGBA", preview_size, (40, 40, 40, 255))
+                    shape_preview_params = {
+                        **layer,
+                        "fill_color": _hex_to_rgba(layer.get("fill_color", "#FFFFFF"))[:3],
+                        "stroke_color": _hex_to_rgba(layer.get("stroke_color", "#000000"))[:3],
+                    }
+                    st.image(Image.alpha_composite(preview_bg, render_shape_layer(preview_size, shape_preview_params)))
+                elif layer["kind"] == "path":
+                    layer["points"], layer["closed"] = _render_pen_path_editor(
+                        source, f"l-path-{layer_id}", layer.get("points", []), layer.get("closed", False),
+                    )
+                    if layer["closed"]:
+                        layer["fill_enabled"] = st.checkbox("Fill", layer.get("fill_enabled", False), key=f"l-path-fen-{layer_id}")
+                        if layer["fill_enabled"]:
+                            path_fill1, path_fill2 = st.columns(2)
+                            with path_fill1:
+                                layer["fill_color"] = st.color_picker("Fill Color", layer.get("fill_color", "#FFFFFF"), key=f"l-path-fcolor-{layer_id}")
+                            with path_fill2:
+                                layer["fill_opacity"] = st.slider("Fill Opacity", 0.0, 1.0, float(layer.get("fill_opacity", 1.0)), 0.01, key=f"l-path-fop-{layer_id}")
+                    layer["stroke_enabled"] = st.checkbox("Stroke", layer.get("stroke_enabled", True), key=f"l-path-sen-{layer_id}")
+                    if layer["stroke_enabled"]:
+                        path_stroke1, path_stroke2 = st.columns(2)
+                        with path_stroke1:
+                            layer["stroke_color"] = st.color_picker("Stroke Color", layer.get("stroke_color", "#FFFFFF"), key=f"l-path-scolor-{layer_id}")
+                        with path_stroke2:
+                            layer["stroke_width"] = st.slider("Stroke Width", 1, 40, int(layer.get("stroke_width", 3)), key=f"l-path-sw-{layer_id}")
+                else:
+                    thumb = Image.open(io.BytesIO(base64.b64decode(layer["image_b64"])))
+                    st.image(preview_image(thumb, (160, 160)))
+            with tab_styles:
+                _render_layer_styles(layer, layer_id)
+            with tab_settings:
+                layer["name"] = st.text_input("Name", layer["name"], key=f"l-name-{layer_id}")
+                layer["visible"] = st.checkbox("Visible", layer["visible"], key=f"l-vis-{layer_id}")
+                layer["opacity"] = st.slider("Opacity", 0.0, 1.0, layer["opacity"], 0.01, key=f"l-op-{layer_id}")
+                layer["blend_mode"] = st.selectbox(
+                    "Blend Mode", blend_mode_choices, format_func=lambda mode: BLEND_MODE_LABELS[mode],
+                    index=blend_mode_choices.index(layer["blend_mode"]), key=f"l-blend-{layer_id}",
+                )
+                # Every mutation below (reorder/duplicate/remove) is followed by `break`, not just
+                # _request_rerun() -- swapping or inserting into `layers` while an outer `enumerate()`
+                # over that same list keeps iterating would re-visit the layer that just got swapped/
+                # shifted into a later idx this same pass, rendering its widgets a second time under
+                # the same id and raising StreamlitDuplicateElementKey. The deferred rerun (see
+                # _request_rerun()) redraws the rest of the list correctly on the very next pass.
+                up_col, down_col, dup_col, rm_col = st.columns(4)
+                with up_col:
+                    if st.button("⬆️ Up", key=f"l-up-{layer_id}", disabled=idx == len(layers) - 1):
+                        layers[idx], layers[idx + 1] = layers[idx + 1], layers[idx]
+                        _request_rerun()
+                        break
+                with down_col:
+                    if st.button("⬇️ Down", key=f"l-down-{layer_id}", disabled=idx == 0):
+                        layers[idx], layers[idx - 1] = layers[idx - 1], layers[idx]
+                        _request_rerun()
+                        break
+                with dup_col:
+                    if st.button("📄 Duplicate", key=f"l-dup-{layer_id}"):
+                        layers.insert(idx + 1, {**layer, "id": uuid.uuid4().hex, "name": f"{layer['name']} copy"})
+                        _request_rerun()
+                        break
+                with rm_col:
+                    if st.button("🗑️ Remove", key=f"l-rm-{layer_id}"):
+                        layers.pop(idx)
+                        _request_rerun()
+                        break
+
+    if not layers:
+        return None
+    workspace_layers = [
+        WorkspaceLayer(layer["name"], _layer_dict_to_image(layer, source.size), layer["opacity"], layer["blend_mode"], layer["visible"])
+        for layer in layers
+    ]
+    return layers_to_json(workspace_layers).encode("utf-8")
 
 
 def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, int]:
@@ -816,7 +1284,10 @@ def _wand_picker_html(background: Image.Image, key_prefix: str) -> tuple[str, in
     """, display_h + 60
 
 
-def _crop_editor_html(background: Image.Image, key_prefix: str, box: tuple[float, float, float, float], full_size: tuple[int, int]) -> tuple[str, int]:
+def _crop_editor_html(
+    background: Image.Image, key_prefix: str, box: tuple[float, float, float, float], full_size: tuple[int, int],
+    snap_x: list[float] | None = None, snap_y: list[float] | None = None,
+) -> tuple[str, int]:
     """A draggable free-form crop rectangle directly on the photo -- replaces the old pair of
     plain X/Y range sliders (see "Known Issues" in docs/PROJECT_STATUS.md, which explicitly called
     that a deliberate stand-in to avoid reintroducing a third-party UI component dependency after
@@ -833,6 +1304,12 @@ def _crop_editor_html(background: Image.Image, key_prefix: str, box: tuple[float
     image's dimensions). `full_size` is the *source* image's real (width, height) -- distinct from
     `background`'s own (possibly downscaled-for-display) size -- purely so the on-canvas dimensions
     label reads real pixel counts rather than the preview's.
+
+    `snap_x`/`snap_y` are the caller's active grid-line/guide fractions (see the Guides & Grid panel
+    in canvas_col) -- only the two corner handles snap to them, not a body drag/move; snapping a
+    translate against two independent edges per axis is a meaningfully bigger piece of geometry for
+    comparatively little extra value over "frame this edge exactly on a guide," which the corners
+    already cover, so it's left as a known, deliberate gap (see "Known Issues").
     """
     width, height = background.size
     display_w = min(480, width)
@@ -867,7 +1344,17 @@ def _crop_editor_html(background: Image.Image, key_prefix: str, box: tuple[float
         const br = document.getElementById('crop-br');
         const dimsLabel = document.getElementById('crop-dims');
         const box = {{x0: {x0}, y0: {y0}, x1: {x1}, y1: {y1}}};
+        const snapX = {json.dumps(list(snap_x or []))};
+        const snapY = {json.dumps(list(snap_y or []))};
+        const SNAP_THRESHOLD = 0.012;
         let dragMode = null, moveStart = null;
+
+        function snapValue(value, candidates) {{
+          for (const candidate of candidates) {{
+            if (Math.abs(value - candidate) < SNAP_THRESHOLD) return candidate;
+          }}
+          return value;
+        }}
 
         function redraw() {{
           rectEl.style.left = (box.x0 * 100) + '%';
@@ -910,7 +1397,12 @@ def _crop_editor_html(background: Image.Image, key_prefix: str, box: tuple[float
         const MIN_SIZE = 0.02;
         wrap.addEventListener('pointermove', function(e) {{
           if (!dragMode) return;
-          const [fx, fy] = fractionalPos(e);
+          let [fx, fy] = fractionalPos(e);
+          if (dragMode === 'tl' || dragMode === 'br') {{
+            // Snap only the corner handles -- not a body drag/move, see the docstring above.
+            fx = snapValue(fx, snapX);
+            fy = snapValue(fy, snapY);
+          }}
           if (dragMode === 'tl') {{
             box.x0 = Math.min(fx, box.x1 - MIN_SIZE);
             box.y0 = Math.min(fy, box.y1 - MIN_SIZE);
@@ -952,6 +1444,214 @@ def _crop_editor_html(background: Image.Image, key_prefix: str, box: tuple[float
       }})();
     </script>
     """, display_h + 40
+
+
+def _pen_editor_html(background: Image.Image, key_prefix: str, points: list[dict], closed: bool) -> tuple[str, int]:
+    """The Pen tool: click to add anchor points on the photo, drag a point to move it, drag its
+    amber handle to curve the path through that point (a symmetric "smooth point" handle -- see
+    app.vector_shapes's module docstring for why it's not independent in/out handles), double-click
+    a point to remove it. Same "commit into a hidden st.text_area via the native-value-setter
+    trick" pattern as every other on-canvas editor in this file (_paint_editor_html/
+    _wand_picker_html/_curve_editor_html/_crop_editor_html) -- confirmed the only reliable
+    cross-iframe commit mechanism in this Streamlit version.
+
+    Anchor/handle dots are plain absolutely-positioned `<div>`s (percentage left/top, exactly like
+    _crop_editor_html's corner handles) rather than SVG circles inside a percentage-viewBox SVG --
+    a 100x100 viewBox stretched with `preserveAspectRatio="none"` onto a non-square display box
+    would visually squash circles into ellipses. The connecting path/handle-guide-lines don't need
+    to be perfect circles, so they stay as an overlaid SVG using that same simple 0-100 coordinate
+    space, avoiding any pixel/fraction conversion math for either layer.
+
+    The "add a point" click listener is attached to the background `<img>` specifically, not the
+    whole wrapper div -- anchor/handle dots are siblings layered on top of it (not descendants), so
+    a click landing on one of them never bubbles into "add a new point at this spot" the way
+    attaching the listener to a shared ancestor would.
+    """
+    width, height = background.size
+    display_w = min(480, width)
+    display_h = int(display_w * height / width) if width else 320
+
+    buffer = io.BytesIO()
+    background.convert("RGB").save(buffer, format="PNG")
+    bg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+    hidden_selector = f".st-key-{key_prefix}-hidden"
+    points_json = json.dumps(points)
+    closed_json = json.dumps(bool(closed))
+
+    return f"""
+    <div style="background:#0f172a;border-radius:8px;padding:8px;">
+      <div id="pen-wrap" style="position:relative;width:100%;max-width:{display_w}px;line-height:0;touch-action:none;">
+        <img id="pen-bg" src="data:image/png;base64,{bg_b64}" style="display:block;width:100%;height:auto;border-radius:4px;">
+        <svg id="pen-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path id="pen-path" d="" fill="none" stroke="#60a5fa" stroke-width="0.6"></path>
+          <g id="pen-handle-lines" stroke="rgba(251,191,36,0.7)" stroke-width="0.3"></g>
+        </svg>
+        <div id="pen-anchors"></div>
+        <div id="pen-handles"></div>
+      </div>
+      <div style="color:#94a3b8;font:12px system-ui;margin-top:6px;">Click the photo to add a point. Drag a point to move it, drag its amber handle to curve the path. Double-click a point to remove it.</div>
+    </div>
+    <style>
+      #pen-wrap .pen-anchor {{ position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px;
+                      background:#60a5fa; border:2px solid #1e293b; border-radius:50%; cursor:move; }}
+      #pen-wrap .pen-handle {{ position:absolute; width:10px; height:10px; margin:-5px 0 0 -5px;
+                      background:#fbbf24; border:2px solid #1e293b; border-radius:50%; cursor:crosshair; }}
+    </style>
+    <script>
+      (function() {{
+        const wrap = document.getElementById('pen-wrap');
+        const bg = document.getElementById('pen-bg');
+        const pathEl = document.getElementById('pen-path');
+        const handleLines = document.getElementById('pen-handle-lines');
+        const anchorLayer = document.getElementById('pen-anchors');
+        const handleLayer = document.getElementById('pen-handles');
+        let points = {points_json};
+        const closed = {closed_json};
+        let dragMode = null;  // {{type: 'anchor'|'handle', idx: number}}
+
+        function fractionalPos(e) {{
+          const rect = wrap.getBoundingClientRect();
+          const fx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+          const fy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+          return [fx * 100, fy * 100];
+        }}
+
+        // Mirrors app.vector_shapes.path_outline_points()/_cubic_bezier_points() exactly -- the
+        // preview drawn while editing and the layer actually rendered by the backend must trace
+        // the same curve, or a point could look right here and land somewhere else once applied.
+        function cubicPoints(p0, c1, c2, p1, steps) {{
+          const pts = [];
+          for (let i = 0; i <= steps; i++) {{
+            const t = i / steps, mt = 1 - t;
+            const x = mt*mt*mt*p0[0] + 3*mt*mt*t*c1[0] + 3*mt*t*t*c2[0] + t*t*t*p1[0];
+            const y = mt*mt*mt*p0[1] + 3*mt*mt*t*c1[1] + 3*mt*t*t*c2[1] + t*t*t*p1[1];
+            pts.push([x, y]);
+          }}
+          return pts;
+        }}
+
+        function outline() {{
+          if (points.length < 2) return points.map(p => [p.x_pct, p.y_pct]);
+          const anchors = points.map(p => [p.x_pct, p.y_pct]);
+          const handles = points.map(p => [p.handle_dx_pct || 0, p.handle_dy_pct || 0]);
+          const n = anchors.length;
+          const segCount = closed ? n : n - 1;
+          let out = [anchors[0]];
+          for (let i = 0; i < segCount; i++) {{
+            const p0 = anchors[i], p1 = anchors[(i + 1) % n];
+            const h0 = handles[i], h1 = handles[(i + 1) % n];
+            const c1 = [p0[0] + h0[0], p0[1] + h0[1]];
+            const c2 = [p1[0] - h1[0], p1[1] - h1[1]];
+            out = out.concat(cubicPoints(p0, c1, c2, p1, 20).slice(1));
+          }}
+          return out;
+        }}
+
+        function redraw() {{
+          const out = outline();
+          const d = out.length ? ('M ' + out.map(p => p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join(' L ')) + (closed ? ' Z' : '') : '';
+          pathEl.setAttribute('d', d);
+          pathEl.setAttribute('fill', closed ? 'rgba(96,165,250,0.25)' : 'none');
+
+          anchorLayer.innerHTML = '';
+          handleLayer.innerHTML = '';
+          handleLines.innerHTML = '';
+          points.forEach((p, i) => {{
+            const anchor = document.createElement('div');
+            anchor.className = 'pen-anchor';
+            anchor.style.left = p.x_pct + '%';
+            anchor.style.top = p.y_pct + '%';
+            anchor.dataset.idx = i;
+            anchorLayer.appendChild(anchor);
+
+            const hx = p.x_pct + (p.handle_dx_pct || 0);
+            const hy = p.y_pct + (p.handle_dy_pct || 0);
+            const handle = document.createElement('div');
+            handle.className = 'pen-handle';
+            handle.style.left = hx + '%';
+            handle.style.top = hy + '%';
+            handle.dataset.idx = i;
+            handleLayer.appendChild(handle);
+
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', p.x_pct); line.setAttribute('y1', p.y_pct);
+            line.setAttribute('x2', hx); line.setAttribute('y2', hy);
+            handleLines.appendChild(line);
+          }});
+        }}
+        redraw();
+
+        function commit() {{
+          try {{
+            const payload = JSON.stringify(points);
+            const container = window.parent.document.querySelector('{hidden_selector}');
+            if (!container) return;
+            const textarea = container.querySelector('textarea');
+            if (!textarea) return;
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            textarea.focus();
+            setter.call(textarea, payload);
+            textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            textarea.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
+            textarea.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
+            textarea.blur();
+          }} catch (err) {{}}
+        }}
+
+        anchorLayer.addEventListener('pointerdown', (e) => {{
+          const el = e.target.closest('.pen-anchor');
+          if (!el) return;
+          dragMode = {{type: 'anchor', idx: Number(el.dataset.idx)}};
+          wrap.setPointerCapture(e.pointerId);
+          e.preventDefault();
+          e.stopPropagation();
+        }});
+        handleLayer.addEventListener('pointerdown', (e) => {{
+          const el = e.target.closest('.pen-handle');
+          if (!el) return;
+          dragMode = {{type: 'handle', idx: Number(el.dataset.idx)}};
+          wrap.setPointerCapture(e.pointerId);
+          e.preventDefault();
+          e.stopPropagation();
+        }});
+        wrap.addEventListener('pointermove', (e) => {{
+          if (!dragMode) return;
+          const [fx, fy] = fractionalPos(e);
+          const p = points[dragMode.idx];
+          if (dragMode.type === 'anchor') {{
+            p.x_pct = fx; p.y_pct = fy;
+          }} else {{
+            p.handle_dx_pct = fx - p.x_pct;
+            p.handle_dy_pct = fy - p.y_pct;
+          }}
+          redraw();
+        }});
+        function endDrag() {{
+          if (!dragMode) return;
+          dragMode = null;
+          commit();
+        }}
+        wrap.addEventListener('pointerup', endDrag);
+        wrap.addEventListener('pointerleave', endDrag);
+
+        anchorLayer.addEventListener('dblclick', (e) => {{
+          const el = e.target.closest('.pen-anchor');
+          if (!el) return;
+          points.splice(Number(el.dataset.idx), 1);
+          redraw();
+          commit();
+        }});
+
+        // Attached to the background image itself, not `wrap` -- see the docstring above for why.
+        bg.addEventListener('click', (e) => {{
+          const [fx, fy] = fractionalPos(e);
+          points.push({{x_pct: fx, y_pct: fy, handle_dx_pct: 0, handle_dy_pct: 0}});
+          redraw();
+          commit();
+        }});
+      }})();
+    </script>
+    """, display_h + 60
 
 
 @st.cache_data(show_spinner=False)
@@ -1134,7 +1834,7 @@ def _cached_process_through_detail(image_bytes: bytes, filename: str, detail_opt
 @st.cache_data(show_spinner="🎨 Applying edits…")
 def _cached_process_from_repair_onward(
     stage_a_png_bytes: bytes, remaining_options: dict,
-    local_mask_bytes: bytes | None, layer_bytes: bytes | None, removal_mask_bytes: bytes | None = None,
+    local_mask_bytes: bytes | None, layers_bytes: bytes | None, removal_mask_bytes: bytes | None = None,
 ) -> Image.Image:
     """Stage 2 of 2 -- Repair through Effects, resuming from `stage_a_png_bytes`
     (`_cached_process_through_detail`'s own output, already processed through Detail) instead of
@@ -1146,7 +1846,7 @@ def _cached_process_from_repair_onward(
     like the app hung."""
     options = dict(remaining_options)
     options["resume_from_detail"] = True
-    return process_via_backend(stage_a_png_bytes, "stage_a.png", options, local_mask_bytes, layer_bytes, removal_mask_bytes)
+    return process_via_backend(stage_a_png_bytes, "stage_a.png", options, local_mask_bytes, layers_bytes, removal_mask_bytes)
 
 
 @st.cache_data(show_spinner=False)
@@ -1269,27 +1969,30 @@ footer { visibility: hidden; }
 .header-info {
     font-size: 0.8rem;
     font-weight: 600;
-    color: #475569;
-    background: #f8fafc;
+    color: #cbd5e1;
+    background: rgba(255, 255, 255, 0.06);
     padding: 0.3rem 0.8rem;
     border-radius: 20px;
-    border: 1px solid #cbd5e1;
+    border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-/* Tool Panel & Canvas Panel styling */
-.panel-card {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 0.75rem;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
-}
+/* #94a3b8 matches the muted caption color already used elsewhere in this file for secondary text
+   on a dark background (e.g. the crop editor's own "drag a corner to resize..." caption) -- this
+   class previously hardcoded #475569 (a dark slate meant for text on a LIGHT background), which
+   both the "Tool Workspace" header above the tabs and the canvas header's own filename/dimensions
+   label (see .canvas-live-view below) used, and neither sits inside any light-background wrapper.
+   #475569 was a pre-dark-mode leftover: the same class of bug already found and fixed once for
+   .brand-title below (that fix pinned the theme and relit .brand-title's own color, but didn't
+   audit the rest of the stylesheet for the same leftover-light-color issue -- this is that audit,
+   done afterward rather than caught live, since this session has no browser tool to visually
+   confirm contrast with). Deliberately not quoting the canvas header label's own exact text here --
+   see the comment above .canvas-live-view for why that specific phrase breaks a test. */
 .panel-header-title {
     font-size: 0.75rem;
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #475569;
+    color: #94a3b8;
     margin-bottom: 0.35rem;
     display: flex;
     justify-content: space-between;
@@ -1334,10 +2037,11 @@ footer { visibility: hidden; }
     border-radius: 4px;
 }
 
-/* Export Panel */
+/* Export Panel -- same pre-dark-mode leftover-light-color issue as .header-info/.panel-header-title
+   above, fixed the same way (a subtle translucent-white panel instead of a near-white one). */
 .export-panel {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 8px;
     padding: 0.55rem 0.85rem;
 }
@@ -1389,7 +2093,7 @@ footer { visibility: hidden; }
    ever see or type into directly. */
 .st-key-curve-hidden, .st-key-crop-editor-hidden,
 .st-key-m-wand-hidden, .st-key-rm-wand-hidden, .st-key-wb-wand-hidden,
-[class*="-paint-hidden"] {
+[class*="-paint-hidden"], [class*="l-path-"][class*="-hidden"] {
     display: none !important;
 }
 /* [class*="-paint-hidden"] (substring match, not an exact ".st-key-..." pair) covers both the
@@ -1397,7 +2101,12 @@ footer { visibility: hidden; }
    per-layer "re-edit an existing Painted selection" containers below -- those are keyed by the
    layer's own uuid (a fresh one per layer, unknown ahead of time), so a fixed list of exact class
    names can't enumerate them the way it can for the small, fixed set of other hidden containers
-   above. */
+   above. [class*="l-path-"][class*="-hidden"] is the same idea for the Pen tool's own commit
+   container (_render_pen_path_editor): "l-path-draft-hidden" for the "Add a layer" draft, or
+   "l-path-<uuid>-hidden" per existing Path layer -- caught in a UI review after the fact, not live
+   (this app currently has no browser-testing tool available), by noticing this rule's existing
+   selectors have no entry that would match either one; the exact bug class the wand-picker fix
+   above already exists to prevent. */
 </style>
 """, unsafe_allow_html=True)
 
@@ -1441,27 +2150,34 @@ with st.expander("📁 Open a saved project (.photoproject)"):
             loaded_project = ProjectBundle.load(project_upload.getvalue())
             pending_recipe = dict(loaded_project.recipe)
             workspace = loaded_project.layer_workspace_object()
-            overlay_image_b64 = None
-            if workspace and len(workspace.layers) > 1:
-                overlay_layer = workspace.layers[1]
-                overlay_buffer = io.BytesIO()
-                overlay_layer.image.save(overlay_buffer, format="PNG")
-                overlay_image_b64 = base64.b64encode(overlay_buffer.getvalue()).decode("ascii")
+            restored_layers = []
+            if workspace:
+                # workspace.layers[0] is always the LayerWorkspace-internal "Background" (the
+                # source image itself, already captured separately as restored_source_bytes) --
+                # everything from index 1 on is a real overlay layer the Layers tab added. A
+                # project saved before this multi-layer panel existed only ever had exactly one
+                # (workspace.layers[1]), so this naturally still restores those old files correctly
+                # as a one-item list.
+                for overlay_layer in workspace.layers[1:]:
+                    overlay_buffer = io.BytesIO()
+                    overlay_layer.image.save(overlay_buffer, format="PNG")
+                    restored_layers.append(
+                        {
+                            "id": uuid.uuid4().hex,
+                            "kind": "image",  # a saved project only ever stores flattened pixels, even for what was a Text layer -- see the Save Project handler
+                            "name": overlay_layer.name,
+                            "image_b64": base64.b64encode(overlay_buffer.getvalue()).decode("ascii"),
+                            "opacity": overlay_layer.opacity,
+                            "blend_mode": overlay_layer.blend_mode,
+                            "visible": overlay_layer.visible,
+                        }
+                    )
         except (ValueError, KeyError, OSError) as error:
             st.error(f"⚠️ Could not open this project file: {error}")
         else:
             st.session_state["restored_source_bytes"] = loaded_project.source_bytes
             st.session_state["restored_source_name"] = loaded_project.source_name
-            # ProjectBundle stores the overlay layer in its own structured `layer_workspace` field
-            # (a serialized LayerWorkspace), not base64-embedded in the recipe like the old
-            # PhotoProject format -- translate it into the same recipe["layer"] shape
-            # _restore_recipe_to_state() already knows how to apply, so that function needs no changes.
-            if overlay_image_b64 is not None:
-                pending_recipe["layer"] = {
-                    "image_b64": overlay_image_b64,
-                    "opacity": overlay_layer.opacity,
-                    "blend": overlay_layer.blend_mode,
-                }
+            pending_recipe["layers"] = restored_layers
             st.session_state["_pending_restore"] = pending_recipe
             st.rerun()
 
@@ -1534,9 +2250,7 @@ with st.container(key="workspace-split"):
         pan_x = 0.5
         pan_y = 0.5
         edited_image = source
-        layer_bytes = None
-        l_opacity = 1.0
-        l_blend = "normal"
+        layers_bytes = None
         aspect_code = "Original"
         crop_box = None
 
@@ -1641,8 +2355,21 @@ with st.container(key="workspace-split"):
                     st.session_state.get("crop-free-x0", 0.0), st.session_state.get("crop-free-y0", 0.0),
                     st.session_state.get("crop-free-x1", 1.0), st.session_state.get("crop-free-y1", 1.0),
                 )
+                # Read (not written) here -- the Guides & Grid panel lives in canvas_col, which
+                # renders later in the script; session_state still carries last rerun's value, and
+                # on the very first-ever run these default to "no grid, no guides" (see the comment
+                # above that panel). Drawn onto the crop preview's own background and fed to the
+                # editor as snap targets, so the corner handles below can snap to the same lines the
+                # user sees drawn on the photo.
+                crop_grid_type = st.session_state.get("grid-type", "None")
+                crop_guides = st.session_state.get("guides", [])
+                snap_x = list(grid_line_fractions(crop_grid_type)) + [g["position_pct"] / 100.0 for g in crop_guides if g.get("orientation") == "vertical"]
+                snap_y = list(grid_line_fractions(crop_grid_type)) + [g["position_pct"] / 100.0 for g in crop_guides if g.get("orientation") == "horizontal"]
+                crop_preview_bg = preview_image(mask_source, (480, 480))
+                if crop_grid_type != "None" or crop_guides:
+                    crop_preview_bg = draw_guides_and_grid(crop_preview_bg, crop_grid_type, crop_guides)
                 editor_html, editor_height = _crop_editor_html(
-                    preview_image(mask_source, (480, 480)), "crop-editor", crop_box_fractional, mask_source.size
+                    crop_preview_bg, "crop-editor", crop_box_fractional, mask_source.size, snap_x=snap_x, snap_y=snap_y,
                 )
                 components.html(editor_html, height=editor_height)
                 with st.container(key="crop-editor-hidden"):
@@ -1850,18 +2577,9 @@ with st.container(key="workspace-split"):
 
         # TAB 4: LAYERS & COMPOSITING
         with tab_layers:
-            st.markdown("**Add Image Layer**")
-            layer_file = st.file_uploader("Layer File", type=["png", "jpg", "jpeg", "webp"], key="l-file")
-            # A freshly uploaded layer wins; otherwise fall back to the overlay bundled inside a loaded
-            # .photoproject, so re-opening a project restores its layer without asking for a re-upload.
-            if layer_file:
-                layer_bytes = layer_file.getvalue()
-            elif "restored_layer_bytes" in st.session_state:
-                layer_bytes = st.session_state["restored_layer_bytes"]
-            if layer_bytes:
-                l_opacity = st.slider("Opacity", 0.0, 1.0, 1.0, 0.01, key="l-opac")
-                l_blend = st.selectbox("Blend Mode", ["normal", "multiply", "screen"], key="l-blend")
-                st.caption("This layer is composited on the processing backend when the image renders.")
+            st.markdown("**Layers**")
+            st.caption("Add any number of image layers, each with its own opacity and blend mode -- composited on the processing backend when the image renders.")
+            layers_bytes = _render_layer_stack(source)
 
         # TAB 5: MASKS & LOCAL ADJUSTMENTS
         with tab_masks:
@@ -1979,42 +2697,39 @@ with st.container(key="workspace-split"):
 
             st.markdown("---")
             st.markdown("**Project File**")
-            st.caption("Save every adjustment (plus the source image and any layer) into one file you can reopen later.")
+            st.caption("Save every adjustment (plus the source image and any layers) into one file you can reopen later.")
             if st.button("💾 Save Project", key="proj-save-btn"):
+                # Layer images are already decoded and validated when added in the Layers tab (see
+                # _render_layer_stack) -- a corrupted upload never makes it into image_layers, so
+                # there's nothing left to fail here the way the old single-uploader version could.
+                # Text layers are flattened to a plain image here too, via the same
+                # _layer_dict_to_image() _render_layer_stack() itself uses -- a saved project keeps
+                # the text's appearance, not its still-editable text/font/color/position (those live
+                # only in this session's image_layers); reopening a project shows it as an Image
+                # layer instead of a Text one. See docs/PROJECT_STATUS.md's "Known Issues".
                 layer_workspace_json = None
-                layer_readable = True
-                if layer_bytes:
-                    try:
-                        overlay = Image.open(io.BytesIO(layer_bytes)).convert("RGBA")
-                    except OSError:
-                        # Same "don't show a raw traceback for a bad file" fix as the main upload
-                        # above -- deliberately doesn't call st.stop() here, unlike that one: this
-                        # runs deep inside tools_col, and stopping the script early would abort
-                        # before canvas_col's widgets are instantiated this pass, resetting them
-                        # (the exact bug class _request_rerun() exists to prevent). Skipping just
-                        # the save, below, keeps the rest of the script running normally instead.
-                        st.error("⚠️ Couldn't read the layer image — it may be corrupted. Remove it in the Layers tab and try again.")
-                        layer_readable = False
-                    else:
-                        workspace = LayerWorkspace(source).add(WorkspaceLayer("Overlay", overlay, l_opacity, l_blend))
-                        layer_workspace_json = workspace.to_json()
-                if layer_readable:
-                    project_recipe = _build_recipe()
-                    project = ProjectBundle(source_name=upload_name, source_bytes=upload_bytes, recipe=project_recipe, layer_workspace=layer_workspace_json)
-                    proj_buf = io.BytesIO()
-                    project.save(proj_buf)
-                    st.toast("Project packaged — click Download to save it", icon="💾")
-                    st.download_button(
-                        "⬇️ Download .photoproject",
-                        proj_buf.getvalue(),
-                        file_name=f"{Path(upload_name).stem}.photoproject",
-                        mime="application/zip",
-                        key="proj-dl-btn",
-                    )
+                if st.session_state.get("image_layers"):
+                    workspace = LayerWorkspace(source)
+                    for layer in st.session_state.image_layers:
+                        overlay = _layer_dict_to_image(layer, source.size)
+                        workspace.add(WorkspaceLayer(layer["name"], overlay, layer["opacity"], layer["blend_mode"], layer["visible"]))
+                    layer_workspace_json = workspace.to_json()
+                project_recipe = _build_recipe()
+                project = ProjectBundle(source_name=upload_name, source_bytes=upload_bytes, recipe=project_recipe, layer_workspace=layer_workspace_json)
+                proj_buf = io.BytesIO()
+                project.save(proj_buf)
+                st.toast("Project packaged — click Download to save it", icon="💾")
+                st.download_button(
+                    "⬇️ Download .photoproject",
+                    proj_buf.getvalue(),
+                    file_name=f"{Path(upload_name).stem}.photoproject",
+                    mime="application/zip",
+                    key="proj-dl-btn",
+                )
 
         # TAB 8: MORE (Catalog, Batch, System)
         with tab_more:
-            more_mode = st.radio("Tool", ["Library Catalog", "Batch Processor", "System Health"], horizontal=True, label_visibility="collapsed")
+            more_mode = st.radio("Tool", ["Library Catalog", "Batch Processor", "System Health"], horizontal=True, label_visibility="collapsed", key="more-mode")
             if more_mode == "Library Catalog":
                 lib_folder = st.text_input("Folder", str(Path.home() / "Pictures"), key="lib-f-in")
                 lib_db = Path.home() / ".photo-studio" / "catalog.sqlite"
@@ -2193,8 +2908,6 @@ with st.container(key="workspace-split"):
             "effects_vignette_midpoint": fx_vignette_midpoint,
             "effects_grain_amount": fx_grain_amount,
             "removal_radius": removal_radius,
-            "layer_opacity": l_opacity,
-            "layer_blend": l_blend,
             "mask_exposure": m_exp,
             "mask_contrast": m_cont,
             "mask_saturation": m_sat,
@@ -2220,7 +2933,7 @@ with st.container(key="workspace-split"):
             remaining_options = {key: value for key, value in options.items() if key not in _DETAIL_STAGE_OPTION_KEYS}
             stage_a_png_bytes = _cached_process_through_detail(upload_bytes, upload_name, detail_options)
             edited_image = _cached_process_from_repair_onward(
-                stage_a_png_bytes, remaining_options, local_mask_bytes, layer_bytes, removal_mask_bytes
+                stage_a_png_bytes, remaining_options, local_mask_bytes, layers_bytes, removal_mask_bytes
             )
         except RuntimeError as error:
             st.error(f"⚠️ {error}")
@@ -2267,6 +2980,43 @@ with st.container(key="workspace-split"):
             with pan_c2:
                 pan_y = st.slider("Pan Vertical", 0.0, 1.0, 0.5, 0.01, key="cv-pany")
 
+        # Guides & Grid -- a pure composition/alignment aid, the same "view-only, never sent
+        # through the backend or included in an export" pattern as the clipping-warning and Masks
+        # preview overlays below. Lives here (not in a tool tab) because, like zoom/pan/Split View,
+        # it's a canvas viewing setting rather than a per-photo edit -- present regardless of which
+        # tool tab is open. Read (not written) by the Crop tab above for on-canvas snapping, which
+        # is why session_state is initialized with plain dict/list defaults rather than only via
+        # the widgets below: the Crop tab renders earlier in the script and needs a value to read
+        # even on the very first run, before this expander has created its own widgets yet.
+        if "guides" not in st.session_state:
+            st.session_state.guides = []
+        with st.expander("🧭 Guides & Grid", expanded=False):
+            st.caption("View-only -- never affects the exported image. The free-form Crop tool's corner handles snap to these lines.")
+            grid_type = st.selectbox("Grid overlay", list(GRID_PRESETS), key="grid-type")
+            guides = st.session_state.guides
+            for guide in guides:
+                guide.setdefault("id", uuid.uuid4().hex)
+            add_col1, add_col2, add_col3 = st.columns([1, 1.4, 0.8])
+            with add_col1:
+                new_guide_orientation = st.selectbox("Orientation", ["Horizontal", "Vertical"], key="guide-new-orientation", label_visibility="collapsed")
+            with add_col2:
+                new_guide_position = st.slider("Position %", 0.0, 100.0, 50.0, key="guide-new-position", label_visibility="collapsed")
+            with add_col3:
+                if st.button("➕ Add", key="guide-add-btn"):
+                    guides.append({"id": uuid.uuid4().hex, "orientation": new_guide_orientation.lower(), "position_pct": new_guide_position})
+                    _request_rerun()
+            for idx, guide in enumerate(guides):
+                guide_col1, guide_col2 = st.columns([3, 1])
+                with guide_col1:
+                    st.caption(f"{guide['orientation'].capitalize()} guide at {guide['position_pct']:.0f}%")
+                with guide_col2:
+                    if st.button("🗑️ Remove", key=f"guide-rm-{guide['id']}"):
+                        # Same "stop iterating a list just mutated mid-loop" reasoning as every
+                        # other per-item Remove button in this file (see _render_layer_stack).
+                        guides.pop(idx)
+                        _request_rerun()
+                        break
+
         # Main Image Canvas
         if compare_mode:
             # Split View: a draggable before/after slider (see _before_after_html) rather than a
@@ -2282,9 +3032,12 @@ with st.container(key="workspace-split"):
         else:
             st.markdown('<div class="canvas-container">', unsafe_allow_html=True)
             if show_original:
-                st.image(preview_image(source), caption="Original Untouched", use_container_width=True)
+                canvas_display, canvas_caption = preview_image(source), "Original Untouched"
             else:
-                st.image(zoom_preview(edited_image, zoom_level, (pan_x, pan_y)), caption="Current Edited Image", use_container_width=True)
+                canvas_display, canvas_caption = zoom_preview(edited_image, zoom_level, (pan_x, pan_y)), "Current Edited Image"
+            if grid_type != "None" or guides:
+                canvas_display = draw_guides_and_grid(canvas_display, grid_type, guides)
+            st.image(canvas_display, caption=canvas_caption, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
         # Histogram -- always reflects edited_image (the backend-processed result), not whichever
@@ -2335,6 +3088,28 @@ with st.container(key="workspace-split"):
                 key="exp-download-btn",
             )
         st.markdown('</div>', unsafe_allow_html=True)
+
+        # Export Multiple Sizes -- "Export As" for several named EXPORT_PROFILES (Web/Social/Print/
+        # Archive) at once, distinct from the single-format download button above and from the
+        # Batch Processor's "one recipe, many photos" (this is one photo, many output variants --
+        # the more common design-student need: the same poster at a web size, a social-post size,
+        # and a print-ready size, in one click). Reuses export_multiple()/EXPORT_PROFILES so the
+        # actual per-size format/quality/max-size values are never a second copy of the single-
+        # format export's own list above.
+        with st.expander("📦 Export Multiple Sizes"):
+            selected_profiles = st.multiselect("Sizes to include", list(EXPORT_PROFILES), default=["Web", "Social"], key="exp-multi-profiles")
+            if st.button("Prepare ZIP", key="exp-multi-btn", disabled=not selected_profiles):
+                zip_bytes = export_multiple(edited_image, selected_profiles, Path(upload_name).stem)
+                st.session_state["_exp_multi_zip"] = zip_bytes
+                _request_rerun()
+            if st.session_state.get("_exp_multi_zip"):
+                st.download_button(
+                    "⬇️ Download ZIP",
+                    st.session_state["_exp_multi_zip"],
+                    file_name=f"{Path(upload_name).stem}-exports.zip",
+                    mime="application/zip",
+                    key="exp-multi-dl-btn",
+                )
 
 # A tab body or canvas_col control above may have called _request_rerun() instead of st.rerun()
 # directly (adding/removing a mask selection, Auto Enhance, committing the curve editor, importing

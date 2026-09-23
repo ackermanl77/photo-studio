@@ -4,11 +4,69 @@ import base64
 import io
 import json
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from app.major_features import Layer, LayerStack
+
+# A short, well-known list of TrueType fonts likely to already be installed, checked in order --
+# deliberately not a bundled font file (this app avoids adding binary assets/new dependencies
+# elsewhere too, e.g. no bundled lens/ICC profile database) and not a font picker; Text layers get
+# whatever real TrueType font this machine happens to have, falling back to Pillow's own built-in
+# bitmap font (PIL.ImageFont.load_default()) when none of these exist -- legible but not scalable
+# the way a real font is, and the one realistic gap this leaves (see docs/PROJECT_STATUS.md's
+# "Known Issues"). Covers Windows, common Linux distros, and macOS.
+_FONT_CANDIDATES = (
+    "C:/Windows/Fonts/arial.ttf",
+    "C:/Windows/Fonts/Arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+)
+
+
+def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    size = max(1, int(size))
+    for candidate in _FONT_CANDIDATES:
+        if Path(candidate).exists():
+            try:
+                return ImageFont.truetype(candidate, size)
+            except OSError:
+                continue
+    try:
+        return ImageFont.load_default(size=size)  # Pillow >= 10.1 -- a scalable fallback
+    except TypeError:
+        return ImageFont.load_default()  # older Pillow: a small, fixed-size bitmap font
+
+
+def render_text_layer(
+    canvas_size: tuple[int, int],
+    text: str,
+    font_size: float = 48,
+    color: tuple[int, int, int, int] = (255, 255, 255, 255),
+    align: str = "left",
+    x_pct: float = 50.0,
+    y_pct: float = 50.0,
+) -> Image.Image:
+    """Render a text layer's transparent RGBA image at the source photo's actual pixel size --
+    kept parametric (text/font_size/color/align/position) in the Layers tab's own session_state
+    rather than only ever existing as a baked bitmap, the same "definitions stay editable, only
+    rasterize on demand" approach app.advanced_masks.MaskLayer's parametric selections already use.
+    `x_pct`/`y_pct` place the text block's own center (not its top-left corner) at that fraction of
+    the canvas -- simpler to reason about when centering a title than tracking the block's size."""
+    image = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
+    if not text:
+        return image
+    draw = ImageDraw.Draw(image)
+    font = _load_font(font_size)
+    x = canvas_size[0] * max(0.0, min(100.0, x_pct)) / 100.0
+    y = canvas_size[1] * max(0.0, min(100.0, y_pct)) / 100.0
+    draw.multiline_text((x, y), text, font=font, fill=tuple(color), align=align, anchor="mm")
+    return image
 
 
 @dataclass
@@ -19,6 +77,44 @@ class WorkspaceLayer:
     blend_mode: str = "normal"
     visible: bool = True
     mask: Image.Image | None = None
+
+
+def _layer_to_dict(layer: WorkspaceLayer) -> dict:
+    image_buffer = io.BytesIO()
+    layer.image.save(image_buffer, format="PNG")
+    mask = None
+    if layer.mask:
+        mask_buffer = io.BytesIO()
+        layer.mask.save(mask_buffer, format="PNG")
+        mask = base64.b64encode(mask_buffer.getvalue()).decode("ascii")
+    return {
+        "name": layer.name,
+        "image": base64.b64encode(image_buffer.getvalue()).decode("ascii"),
+        "opacity": layer.opacity,
+        "blend_mode": layer.blend_mode,
+        "visible": layer.visible,
+        "mask": mask,
+    }
+
+
+def _layer_from_dict(data: dict) -> WorkspaceLayer:
+    image = Image.open(io.BytesIO(base64.b64decode(data["image"]))).convert("RGBA")
+    mask = Image.open(io.BytesIO(base64.b64decode(data["mask"]))).convert("L") if data.get("mask") else None
+    return WorkspaceLayer(data["name"], image, data.get("opacity", 1.0), data.get("blend_mode", "normal"), data.get("visible", True), mask)
+
+
+def layers_to_json(layers: list[WorkspaceLayer]) -> str:
+    """Serialize a plain list of overlay layers (no mandatory "Background" entry) -- the wire
+    format app/backend_client.py sends to app/backend.py's /process endpoint for the Layers tab's
+    now-multi-layer stack. Uses the exact same per-layer shape as LayerWorkspace.to_json() (see
+    _layer_to_dict/_layer_from_dict above) so a saved .photoproject's layer_workspace field and a
+    live edit's request body are never two different formats to maintain."""
+    return json.dumps({"version": 1, "layers": [_layer_to_dict(layer) for layer in layers]}, sort_keys=True)
+
+
+def layers_from_json(content: str | bytes) -> list[WorkspaceLayer]:
+    payload = json.loads(content)
+    return [_layer_from_dict(data) for data in payload.get("layers", [])]
 
 
 class LayerWorkspace:
@@ -58,16 +154,7 @@ class LayerWorkspace:
         return stack.composite()
 
     def to_json(self) -> str:
-        payload = {"version": 1, "size": self.size, "layers": []}
-        for layer in self.layers:
-            image_buffer = io.BytesIO()
-            layer.image.save(image_buffer, format="PNG")
-            mask = None
-            if layer.mask:
-                mask_buffer = io.BytesIO()
-                layer.mask.save(mask_buffer, format="PNG")
-                mask = base64.b64encode(mask_buffer.getvalue()).decode("ascii")
-            payload["layers"].append({"name": layer.name, "image": base64.b64encode(image_buffer.getvalue()).decode("ascii"), "opacity": layer.opacity, "blend_mode": layer.blend_mode, "visible": layer.visible, "mask": mask})
+        payload = {"version": 1, "size": self.size, "layers": [_layer_to_dict(layer) for layer in self.layers]}
         return json.dumps(payload, sort_keys=True)
 
     @classmethod
@@ -75,11 +162,7 @@ class LayerWorkspace:
         payload = json.loads(content)
         if payload.get("version") != 1 or not payload.get("layers"):
             raise ValueError("Invalid layer workspace")
-        layers = []
-        for data in payload["layers"]:
-            image = Image.open(io.BytesIO(base64.b64decode(data["image"]))).convert("RGBA")
-            mask = Image.open(io.BytesIO(base64.b64decode(data["mask"]))).convert("L") if data.get("mask") else None
-            layers.append(WorkspaceLayer(data["name"], image, data.get("opacity", 1.0), data.get("blend_mode", "normal"), data.get("visible", True), mask))
+        layers = [_layer_from_dict(data) for data in payload["layers"]]
         workspace = cls(layers[0].image)
         workspace.layers = layers
         workspace.size = tuple(payload.get("size", workspace.size))
