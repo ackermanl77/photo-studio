@@ -6,8 +6,11 @@ from PIL import Image
 from app.professional_tools import (
     EXPORT_PROFILES,
     GRID_PRESETS,
+    WATERMARK_POSITIONS,
     apply_mask_overlay,
+    apply_watermark,
     compute_histogram,
+    compute_waveform,
     draw_guides_and_grid,
     export_profile,
     grid_line_fractions,
@@ -98,3 +101,89 @@ def test_draw_guides_and_grid_draws_a_custom_guide_at_its_own_position():
     pixels = np.asarray(result)
     assert not np.array_equal(pixels[:, 50], np.full_like(pixels[:, 50], 20))  # x=50 is 25% of width=200
     assert np.array_equal(pixels[:, 150], np.full_like(pixels[:, 150], 20))  # elsewhere: untouched
+
+
+def test_compute_waveform_returns_an_image_sized_to_source_width_and_requested_height():
+    image = Image.new("RGB", (50, 20), (128, 128, 128))
+    result = compute_waveform(image, mode="Luma", height=100)
+    assert result.size == (50, 100)
+    assert result.mode == "RGB"
+
+
+def test_compute_waveform_unknown_mode_falls_back_to_luma_instead_of_raising():
+    image = Image.new("RGB", (10, 10), (128, 128, 128))
+    result = compute_waveform(image, mode="Not A Real Mode", height=64)
+    assert result.size == (10, 64)
+
+
+def test_compute_waveform_luma_places_a_solid_colors_full_density_at_its_expected_row():
+    bins = 256
+    image = Image.new("RGB", (10, 10), (128, 128, 128))  # every pixel has luma 128
+    pixels = np.asarray(compute_waveform(image, mode="Luma", height=bins))
+
+    expected_row = round((255 - 128) / 255 * (bins - 1))
+    # Every column's entire pixel count lands in this one row -- it's this channel's own peak,
+    # so it normalizes to full brightness (235, the fixed Luma trace color) across every column.
+    assert np.all(pixels[expected_row] == 235)
+    assert np.all(pixels[0] == 0)
+    assert np.all(pixels[bins - 1] == 0)
+
+
+def test_compute_waveform_rgb_mode_combines_equal_channels_additively_to_white():
+    bins = 256
+    image = Image.new("RGB", (6, 6), (128, 128, 128))  # R == G == B: all three traces coincide
+    pixels = np.asarray(compute_waveform(image, mode="RGB", height=bins))
+
+    expected_row = round((255 - 128) / 255 * (bins - 1))
+    assert np.all(pixels[expected_row] == (255, 255, 255))
+    assert np.all(pixels[0] == 0)
+
+
+def test_watermark_positions_lists_the_five_named_presets():
+    assert set(WATERMARK_POSITIONS) == {"Top Left", "Top Right", "Bottom Left", "Bottom Right", "Center"}
+
+
+def test_apply_watermark_with_blank_text_is_a_no_op():
+    image = Image.new("RGB", (100, 60), (10, 20, 30))
+    result = apply_watermark(image, "   ")
+    assert np.array_equal(np.asarray(result), np.asarray(image.convert("RGB")))
+
+
+def test_apply_watermark_draws_near_the_requested_corner_and_leaves_the_opposite_corner_untouched():
+    image = Image.new("RGB", (200, 120), (10, 10, 10))
+    result = apply_watermark(image, "HELLO", position="Top Left", opacity=100, font_size=24)
+    pixels = np.asarray(result)
+
+    top_left_region = pixels[:30, :80]
+    bottom_right_region = pixels[-10:, -10:]
+    assert not np.array_equal(top_left_region, np.full_like(top_left_region, 10))
+    assert np.array_equal(bottom_right_region, np.full_like(bottom_right_region, 10))
+
+
+def test_apply_watermark_different_positions_produce_different_images():
+    image = Image.new("RGB", (200, 120), (10, 10, 10))
+    top_left = np.asarray(apply_watermark(image, "X", position="Top Left", opacity=100, font_size=24))
+    bottom_right = np.asarray(apply_watermark(image, "X", position="Bottom Right", opacity=100, font_size=24))
+    assert not np.array_equal(top_left, bottom_right)
+
+
+def test_apply_watermark_low_opacity_blends_more_subtly_than_high_opacity():
+    image = Image.new("RGB", (200, 120), (10, 10, 10))
+    faint = np.asarray(apply_watermark(image, "X", opacity=10, font_size=40, color=(255, 255, 255))).astype(int)
+    strong = np.asarray(apply_watermark(image, "X", opacity=100, font_size=40, color=(255, 255, 255))).astype(int)
+    background = np.full_like(faint, 10)
+    assert 0 < np.abs(faint - background).sum() < np.abs(strong - background).sum()
+
+
+def test_export_profile_applies_watermark_when_text_given():
+    image = Image.new("RGB", (400, 300), (10, 10, 10))
+    plain_bytes, _, _ = export_profile(image, "Web")
+    watermarked_bytes, _, _ = export_profile(image, "Web", watermark_text="Copyright", watermark_opacity=100)
+    assert plain_bytes != watermarked_bytes
+
+
+def test_export_profile_ignores_blank_watermark_text():
+    image = Image.new("RGB", (100, 80), (50, 60, 70))
+    plain_bytes, _, _ = export_profile(image, "Archive")
+    blank_watermark_bytes, _, _ = export_profile(image, "Archive", watermark_text="   ")
+    assert plain_bytes == blank_watermark_bytes

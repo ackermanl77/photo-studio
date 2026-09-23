@@ -130,6 +130,66 @@ def test_no_image_shows_upload_prompt_and_stops():
     assert len(at.tabs) == 0
 
 
+def test_empty_state_offers_a_sample_photo_button_next_to_the_uploader():
+    """A prior UI review found the empty state was a single st.info() line plus a bare
+    file_uploader, with no guided first-import option (unlike Lightroom's/Capture One's sample
+    onboarding screens). "Try a sample photo" should be visible right there."""
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.button(key="sample-photo-btn") is not None
+
+
+def test_sample_photo_button_loads_a_valid_image_through_the_normal_upload_path():
+    """Clicking "Try a sample photo" should open the full editing workspace -- the same
+    restored_source_bytes/restored_source_name fallback a reopened .photoproject already uses,
+    which every downstream step (PhotoProcessor.from_bytes, the tab tree, canvas_col) already
+    treats identically to a real upload."""
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+
+    at.button(key="sample-photo-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert len(at.tabs) == 11
+    assert canvas_hash(at)
+
+
+def test_sample_photo_button_is_hidden_once_a_real_image_is_loaded():
+    """Once a photo is loaded (real upload or a reopened project), the button should no longer
+    be offered -- clicking it after the fact would silently swap out the user's own photo."""
+    at = run_with_uploaded_image()
+
+    assert not at.exception
+    assert not any(b.key == "sample-photo-btn" for b in at.button)
+
+
+def test_new_tooltips_render_without_breaking_the_app():
+    """Spot-checks a representative sample of the help= tooltips added across Tone, Detail,
+    Masks, and Layer Styles -- confirms they're present and that adding them didn't disturb the
+    widgets' own values/behavior."""
+    at = run_with_uploaded_image()
+
+    assert at.slider(key="t-exp").help
+    assert at.slider(key="d-text").help
+    assert at.slider(key="m-texp").help
+    assert at.checkbox(key="d-sharp").help
+
+    at.radio(key="l-new-kind").set_value("Text")
+    at.run(timeout=30)
+    at.button(key="l-add-text-btn").click()
+    at.run(timeout=30)
+    layer_id = at.session_state["image_layers"][0]["id"]
+    at.checkbox(key=f"l-ds-en-{layer_id}").set_value(True)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.checkbox(key=f"l-ds-en-{layer_id}").help
+    assert at.slider(key=f"l-ds-ox-{layer_id}").help
+
+
 def test_two_stage_cache_skips_detail_stage_when_only_a_later_option_changes(monkeypatch):
     """The whole point of the two-stage cache split (_cached_process_through_detail /
     _cached_process_from_repair_onward, see docs/PROJECT_STATUS.md's Known Issues): a Mask-only
@@ -2034,3 +2094,204 @@ def test_library_next_button_does_not_reset_canvas_view_settings(monkeypatch, tm
     assert not at.exception
     assert any("2 / 2" in c.value for c in at.caption)
     assert at.selectbox(key="cv-zoom").value == 2.0
+
+
+# --- Named Snapshots -------------------------------------------------------------------------
+
+def test_save_snapshot_without_a_name_shows_a_warning_toast():
+    """Same safe-to-click empty-name guard as "Save Current Look as Preset" -- nothing is
+    written to history.named_snapshots."""
+    at = run_with_uploaded_image()
+
+    at.button(key="snap-save-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("name" in t.value.lower() for t in at.toast)
+    assert at.session_state["edit_history"].snapshot_names == []
+
+
+def test_save_and_restore_named_snapshot_recovers_the_saved_control_value():
+    at = run_with_uploaded_image()
+    at.slider(key="t-exp").set_value(1.3)
+    at.run(timeout=30)
+
+    at.text_input(key="snap-name-in").set_value("My Look")
+    at.run(timeout=30)
+    at.button(key="snap-save-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any("My Look" in t.value for t in at.toast)
+    assert "My Look" in at.session_state["edit_history"].snapshot_names
+
+    at.slider(key="t-exp").set_value(1.0)
+    at.run(timeout=30)
+    assert at.slider(key="t-exp").value == 1.0
+
+    at.button(key="snap-restore-My Look").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="t-exp").value == 1.3
+
+
+def test_restoring_a_snapshot_does_not_remove_it_and_undo_still_reaches_the_step_before_the_restore():
+    """A snapshot is a bookmark, not a one-time jump (see app/edit_history.py's
+    restore_snapshot() docstring): restoring it must not delete it from the saved list, and must
+    not disturb the separate linear Undo/Redo step list beyond acting like any other new edit --
+    Undo right after a restore goes back to the value just before the restore, the same as it
+    would after applying a preset."""
+    at = run_with_uploaded_image()
+    at.slider(key="t-exp").set_value(1.3)
+    at.run(timeout=30)
+    at.text_input(key="snap-name-in").set_value("Bookmark")
+    at.run(timeout=30)
+    at.button(key="snap-save-btn").click()
+    at.run(timeout=30)
+
+    at.slider(key="t-exp").set_value(1.0)
+    at.run(timeout=30)
+
+    at.button(key="snap-restore-Bookmark").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="t-exp").value == 1.3
+    assert "Bookmark" in at.session_state["edit_history"].snapshot_names  # still there, not consumed
+
+    at.button(key="hist-undo-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.slider(key="t-exp").value == 1.0
+
+
+def test_delete_snapshot_removes_it_from_the_saved_list():
+    at = run_with_uploaded_image()
+    at.text_input(key="snap-name-in").set_value("Temp")
+    at.run(timeout=30)
+    at.button(key="snap-save-btn").click()
+    at.run(timeout=30)
+    assert "Temp" in at.session_state["edit_history"].snapshot_names
+
+    at.button(key="snap-delete-Temp").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert "Temp" not in at.session_state["edit_history"].snapshot_names
+
+
+def test_named_snapshots_live_in_the_canvas_header_popover_not_the_presets_tab():
+    """A prior UI review found Snapshots buried at the bottom of the Presets tab (10th of 11
+    tabs), below preset import/export -- Undo/Redo/Reset were already moved to the canvas header
+    to fix this exact "buried in Presets" problem (see docs/PROJECT_STATUS.md's history), but
+    Snapshots wasn't, until now. This asserts the "**Named Snapshots**" heading and its
+    save/restore/delete widgets render exactly once, and that the Presets tab now only points at
+    the canvas header instead of duplicating the whole panel."""
+    at = run_with_uploaded_image()
+
+    named_snapshot_headings = [m.value for m in at.markdown if m.value == "**Named Snapshots**"]
+    assert len(named_snapshot_headings) == 1
+
+    # The save control (text input + button) still exists and still works -- it just isn't
+    # inside tab_presets's own body anymore, it's reachable via the canvas header popover.
+    assert at.text_input(key="snap-name-in") is not None
+    assert at.button(key="snap-save-btn") is not None
+
+    # The Presets tab keeps a short pointer instead of duplicating the whole panel.
+    pointer_captions = [c.value for c in at.caption if "Named Snapshots are always available" in c.value]
+    assert pointer_captions, "expected the Presets tab to point at the relocated Snapshots panel"
+
+
+# --- Waveform monitor --------------------------------------------------------------------------
+
+def test_waveform_monitor_is_hidden_until_toggled_on_and_reflects_the_selected_channel_mode():
+    at = run_with_uploaded_image()
+    assert not any(img.captions and img.captions[0].startswith("Waveform") for img in at.image)
+
+    at.checkbox(key="waveform-toggle").set_value(True)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any(img.captions and img.captions[0] == "Waveform (Luma)" for img in at.image)
+
+    at.radio(key="waveform-mode").set_value("RGB")
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any(img.captions and img.captions[0] == "Waveform (RGB)" for img in at.image)
+
+
+def test_waveform_mode_choice_survives_toggling_the_panel_off_and_back_on():
+    """The channel-mode radio is always instantiated (even while the panel is hidden) precisely
+    so toggling the panel off and back on doesn't silently reset it to its default -- the
+    conditional-widget-loses-state class of bug CLAUDE.md documents for this codebase."""
+    at = run_with_uploaded_image()
+    at.checkbox(key="waveform-toggle").set_value(True)
+    at.run(timeout=30)
+    at.radio(key="waveform-mode").set_value("RGB")
+    at.run(timeout=30)
+    at.checkbox(key="waveform-toggle").set_value(False)
+    at.run(timeout=30)
+    at.checkbox(key="waveform-toggle").set_value(True)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.radio(key="waveform-mode").value == "RGB"
+    assert any(img.captions and img.captions[0] == "Waveform (RGB)" for img in at.image)
+
+
+def test_waveform_monitor_has_a_visible_caption_not_just_a_hover_tooltip():
+    """The waveform toggle's help= tooltip already explained it well, but a prior UI review
+    found it easy to miss since nothing was visible without hovering. A short st.caption right
+    above the checkbox row should now say so up front."""
+    at = run_with_uploaded_image()
+
+    assert any("Waveform monitor" in c.value for c in at.caption)
+    assert at.checkbox(key="waveform-toggle").help
+
+
+# --- Export watermarking ------------------------------------------------------------------------
+
+def test_watermark_controls_render_and_setting_text_does_not_break_the_single_format_export():
+    """AppTest can't read a download_button's actual file bytes back out (it only exposes
+    whether it was clicked), so this -- like the Split View regression guard above -- is a
+    "building the export doesn't raise" guard; app/professional_tools.py's own unit tests
+    (test_apply_watermark_*, test_export_profile_applies_watermark_when_text_given) cover the
+    actual pixel-level watermarking behavior."""
+    at = run_with_uploaded_image()
+
+    at.text_input(key="wm-text-in").set_value("© Test Photographer")
+    at.run(timeout=30)
+    at.selectbox(key="wm-pos-sel").set_value("Center")
+    at.run(timeout=30)
+    at.slider(key="wm-opacity-sl").set_value(80)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any(db.label == "💾 Save JPEG" for db in at.download_button)
+
+
+def test_export_multiple_sizes_zip_builds_without_error_when_a_watermark_is_set():
+    at = run_with_uploaded_image()
+    at.text_input(key="wm-text-in").set_value("Preview")
+    at.run(timeout=30)
+
+    at.multiselect(key="exp-multi-profiles").set_value(["Web"])
+    at.run(timeout=30)
+    at.button(key="exp-multi-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any(db.label == "⬇️ Download ZIP" for db in at.download_button)
+
+
+def test_blank_watermark_text_leaves_export_controls_working_as_before():
+    """Blank text (the default) must not change the single-format export's behavior at all --
+    the watermark feature is fully opt-in."""
+    at = run_with_uploaded_image()
+
+    assert at.text_input(key="wm-text-in").value == ""
+    assert not at.exception
+    assert any(db.label == "💾 Save JPEG" for db in at.download_button)
