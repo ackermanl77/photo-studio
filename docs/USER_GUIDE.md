@@ -76,7 +76,9 @@ Standard zoom, Telephoto, Fisheye), which you fine-tune from there.
 - **Aspect Ratio** — "Original" (no crop), "Free-form", or a named ratio (Square, 4:5, 5:4, 3:2,
   16:9, 9:16).
 - **Free-form** shows a draggable rectangle directly on the photo — drag a corner to resize, drag
-  the body to move it. A named ratio center-crops automatically.
+  the body to move it. A named ratio center-crops automatically. If a grid or guide is active (see
+  [Guides & Grid](#canvas-controls) below), the corners snap to those lines as you drag them close —
+  moving the whole rectangle doesn't snap, only resizing from a corner does.
 
 Crop is applied last in the pipeline (after every other tab), but sits early in the tab order so
 you frame the shot before fine-tuning color — the same workflow most photo editors use.
@@ -133,11 +135,63 @@ nearby texture (inpainting).
 
 ## 9. Layers
 
-- **Layer File** — upload a PNG/JPG/WEBP to composite on top of your photo.
-- **Opacity** and **Blend Mode** (Normal / Multiply / Screen) — once a layer is attached.
+Build a stack of any number of layers — images, text, vector shapes, and freeform paths — each
+with its own opacity, blend mode, and optional effects, composited on the processing backend when
+the image renders.
 
-The layer composites on the processing backend when the image renders — there's no local preview
-of the raw layer file itself before that.
+**Adding a layer** — "➕ Add a layer" offers four types:
+
+| Type | What you get |
+|---|---|
+| **Image** | Upload a PNG/JPG/WEBP to composite on top of your photo. |
+| **Text** | Type content, then set font size, color, alignment (left/center/right), and position (as a % of the photo, placing the text block's own center). |
+| **Shape** | A vector Rectangle, Ellipse, Line, Polygon, or Star — position, size, and rotation (except Ellipse, which doesn't rotate), plus its own fill color/opacity and outline color/width. Polygon and Star also get a Sides/Points count; Star gets an Inner Radius controlling how sharp its points are. |
+| **Pen** | Click points directly on the photo below to trace a freeform path, then **➕ Add Path Layer**. See [The Pen Tool](#the-pen-tool) below. |
+
+**The layer stack** — each layer's own expander (click its name to open it) splits into three
+sub-tabs:
+
+- **🎨 Content** — the kind-specific fields (Text's content/font/color/position, Shape's
+  type/size/rotation/fill/outline, the Pen editor, or an Image layer's thumbnail), plus a live
+  preview for Text/Shape/Pen layers.
+- **✨ Styles** — **Layer Styles**: Drop Shadow, Outer Glow, Stroke, and Color Overlay, any
+  combination, on *any* layer type. Each is independent of the others (widening the Stroke doesn't
+  change where the Glow falls, for example) and computed from that layer's own shape, so they only
+  show up where the layer actually has transparent edges — a photo used as a full-canvas background
+  layer has no "outside its own shape" for a shadow or glow to occupy, the same way Photoshop's own
+  layer effects work.
+- **⚙️ Settings** — **Name**, **Visible**, **Opacity**, and **Blend Mode** (26 blend modes in
+  total: Normal; the Darken group: Darken/Multiply/Color Burn/Linear Burn/Darker Color; the Lighten
+  group: Lighten/Screen/Color Dodge/Linear Dodge/Lighter Color; the Contrast group: Overlay/Soft
+  Light/Hard Light/Vivid Light/Linear Light/Pin Light/Hard Mix; the Comparative group:
+  Difference/Exclusion/Subtract/Divide; and Hue/Saturation/Color/Luminosity — the same set
+  Photoshop's own Layers panel offers), plus **⬆️ Up** / **⬇️ Down** to reorder the stack (the last
+  layer listed sits on top), **📄 Duplicate**, and **🗑️ Remove**.
+
+### The Pen Tool
+
+A true Bezier-curve path, not just straight-line shapes:
+
+- **Click** an empty spot on the photo to add a new point.
+- **Drag a point** to move it.
+- **Drag its amber handle** to curve the path through that point — the handle sets one shared
+  tangent direction used on both sides of the point (a "smooth point," in vector-editor terms).
+  Leave a point's handle at zero length for a plain straight corner instead.
+- **Double-click a point** to remove it.
+- **Closed Path** — connects the last point back to the first, and unlocks **Fill** (color +
+  opacity) in addition to **Stroke**. An open path can only be stroked — there's no well-defined
+  "inside" to fill without a closed boundary.
+- **🗑️ Clear Points** — starts over.
+
+One handle per point means a curve's direction can't change abruptly on one side versus the
+other the way Photoshop's Alt-drag "corner point" allows — see
+[Known Limitations](#known-limitations).
+
+**A note on Text/Shape/Path layers and Save Project:** these three layer types stay fully editable
+while you're working, but **Save Project flattens them into a plain image** — reopening a
+`.photoproject` later shows them as an ordinary Image layer, not editable text/shape/path anymore.
+An Image layer (an uploaded photo) doesn't have this limitation, since it was already a plain image
+to begin with.
 
 ## 10. Masks (local adjustments)
 
@@ -245,23 +299,39 @@ Always visible above/below the preview, on every tab:
 - **⇄ Split View** — a draggable before/after comparison slider over the same zoomed/panned view.
 - **👁️ Original** — shows the untouched source image instead of your edit (disabled while Split
   View is active, since that already shows both).
+- **🧭 Guides & Grid** — a composition aid, purely visual: it's never sent through the processing
+  backend and never appears in an exported file.
+  - **Grid overlay** — None, Rule of Thirds, Grid 4x4, or Golden Ratio.
+  - **Custom guides** — add any number of horizontal or vertical guide lines at a chosen position
+    (%), each removable individually.
+  - The free-form Crop rectangle's corner handles (see [Crop](#5-crop)) snap to whichever grid
+    lines/guides are active.
 - **Histogram** — a live per-channel (Red/Green/Blue) chart of the current edited image.
 - **⚠️ Show clipping** — highlights blocked shadows (blue) and blown highlights (red) directly on
   the canvas.
 - **Export Format / Quality / Save** — choose JPEG, PNG, WEBP, or TIFF (Quality only applies to
   JPEG/WEBP), then download the edited result.
+- **📦 Export Multiple Sizes** — check any combination of the named export profiles (Web, Social,
+  Print, Archive) and click **Prepare ZIP**, then **⬇️ Download ZIP** — gets you the current photo
+  at several sizes/formats in one click, instead of downloading each one separately. This is
+  different from the Batch Processor (below): this is *one photo, several output variants*; Batch
+  is *one recipe, many photos*.
 
 ---
 
 ## Projects
 
-Save everything — the source photo, every adjustment, any attached layer, and your mask/removal
+Save everything — the source photo, every adjustment, your full layer stack, and your mask/removal
 selections — into one `.photoproject` file you can reopen later:
 
 - **💾 Save Project** (Presets tab) packages the current state and gives you a download button.
 - **📁 Open a saved project** (top of the app, above the uploader) restores a `.photoproject` back
-  into the workspace exactly as you left it, including the layer overlay if one was attached. A
-  corrupted or hand-edited file shows a clear error instead of crashing the app.
+  into the workspace exactly as you left it. A corrupted or hand-edited file shows a clear error
+  instead of crashing the app.
+- **Text, Shape, and Pen path layers are flattened into plain images when saved** — reopening the
+  project shows them as ordinary Image layers, no longer editable as text/shapes/paths. Everything
+  else (every layer's position in the stack, opacity, blend mode, and any Layer Styles) round-trips
+  correctly.
 
 ---
 
@@ -283,5 +353,16 @@ selections — into one `.photoproject` file you can reopen later:
 This app is CPU-first and offline by design — no cloud processing, no GPU dependency. That means a
 few things are deliberately simpler than a cloud/AI-powered tool: lens and denoise are classical
 algorithms (not neural networks), color proofing checks against this app's own working space (not
-a specific printer profile), and there's no automatic subject/sky detection. See
-[`PROJECT_STATUS.md`](PROJECT_STATUS.md)'s "Known Issues" section for the full, current list.
+a specific printer profile), and there's no automatic subject/sky detection.
+
+A few more specific to Layers:
+
+- **Text layers use whatever font is installed on the machine running the app** — there's no font
+  picker or custom font upload, so the same project can render with a different typeface on a
+  different computer.
+- **The Pen tool's curve handles are symmetric** — one handle per point, shared by both directions
+  the curve travels through it. There's no independent, non-mirrored handle pair for a curve that
+  changes direction sharply on one side (a plain straight corner is still fully supported).
+- **Ellipse shapes don't rotate.**
+
+See [`PROJECT_STATUS.md`](PROJECT_STATUS.md)'s "Known Issues" section for the full, current list.

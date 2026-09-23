@@ -10,7 +10,7 @@ from PIL import Image
 
 from app.config import MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES, BACKEND_HOST, BACKEND_PORT
 from app.image_processor import PhotoProcessor
-from app.layer_workspace import LayerWorkspace, WorkspaceLayer
+from app.layer_workspace import LayerWorkspace, layers_from_json
 from app.observability import ProcessingAudit, configure_json_logger, log_audit
 from app.portrait_tools import smooth_skin
 from app.presets import PRESETS, apply_preset
@@ -52,7 +52,7 @@ def _image_mask(file_storage, size: tuple[int, int]) -> Image.Image:
     return mask
 
 
-def process_image(image_file, options: dict, removal_mask=None, local_mask=None, layer_file=None) -> Image.Image:
+def process_image(image_file, options: dict, removal_mask=None, local_mask=None, layers_file=None) -> Image.Image:
     """Mirrors the exact step order of the unified UI's tabs (Lens -> Tone -> Color -> Detail ->
     Layers -> Masks -> Portrait -> Crop -> Effects) so that routing the frontend's edits through
     this endpoint produces the same image as applying them in-process. Keeping this order in sync
@@ -179,11 +179,14 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     if removal_mask:
         processor.remove_objects(_image_mask(removal_mask, processor.image.size), radius=_number(options, "removal_radius", 3.0))
 
-    # Layers
-    if layer_file:
-        overlay = Image.open(layer_file.stream).convert("RGBA")
-        overlay_layer = WorkspaceLayer("Overlay", overlay, _number(options, "layer_opacity", 1.0), options.get("layer_blend", "normal"))
-        processor.image = LayerWorkspace(processor.image).add(overlay_layer).composite().convert("RGB")
+    # Layers -- layers_file is a JSON payload (app.layer_workspace.layers_to_json()'s format, a
+    # plain list with no mandatory "Background" entry) describing every layer in the Layers tab's
+    # stack, in bottom-to-top order; each is composited onto processor.image in turn.
+    if layers_file:
+        workspace = LayerWorkspace(processor.image)
+        for layer in layers_from_json(layers_file.read()):
+            workspace.add(layer)
+        processor.image = workspace.composite().convert("RGB")
 
     # Masks
     if local_mask:
@@ -242,7 +245,7 @@ def process():
             options,
             request.files.get("removal_mask"),
             request.files.get("local_mask"),
-            request.files.get("layer"),
+            request.files.get("layers"),
         )
         output_format = options.get("output_format", "PNG")
         mime = "image/jpeg" if output_format == "JPEG" else "image/png"

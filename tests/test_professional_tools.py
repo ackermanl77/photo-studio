@@ -3,7 +3,18 @@ import io
 import numpy as np
 from PIL import Image
 
-from app.professional_tools import EXPORT_PROFILES, apply_mask_overlay, compute_histogram, export_profile, normalize_mask, validate_project_bytes, zoom_preview
+from app.professional_tools import (
+    EXPORT_PROFILES,
+    GRID_PRESETS,
+    apply_mask_overlay,
+    compute_histogram,
+    draw_guides_and_grid,
+    export_profile,
+    grid_line_fractions,
+    normalize_mask,
+    validate_project_bytes,
+    zoom_preview,
+)
 
 
 def test_zoom_preview_crops_and_preserves_valid_image():
@@ -50,3 +61,40 @@ def test_compute_histogram_bins_each_channel_and_counts_every_pixel():
     # should hold all 40 pixels, and the (near-zero) Blue channel should peak in the first bin.
     assert histogram["Red"].argmax() * (256 / 32) <= 10 + (256 / 32)
     assert histogram["Blue"][0] == 40
+
+
+def test_grid_line_fractions_returns_the_expected_positions_for_each_named_style():
+    assert grid_line_fractions("None") == ()
+    assert grid_line_fractions("Rule of Thirds") == (1 / 3, 2 / 3)
+    assert grid_line_fractions("Not A Real Style") == ()  # unknown style is a no-op, not an error
+    assert set(GRID_PRESETS) == {"None", "Rule of Thirds", "Grid 4x4", "Golden Ratio"}
+
+
+def test_draw_guides_and_grid_is_a_no_op_with_no_grid_and_no_guides():
+    image = Image.new("RGB", (100, 60), (50, 50, 50))
+
+    result = draw_guides_and_grid(image, grid_type="None", guides=[])
+
+    assert np.array_equal(np.asarray(result), np.asarray(image.convert("RGB")))
+
+
+def test_draw_guides_and_grid_draws_rule_of_thirds_lines_at_the_expected_position():
+    image = Image.new("RGB", (300, 300), (50, 50, 50))
+
+    result = draw_guides_and_grid(image, grid_type="Rule of Thirds", guides=[])
+
+    pixels = np.asarray(result)
+    assert not np.array_equal(pixels[100], np.full_like(pixels[100], 50))  # a horizontal line crosses y=100 (300/3)
+    assert not np.array_equal(pixels[:, 100], np.full_like(pixels[:, 100], 50))  # and a vertical line crosses x=100
+    assert tuple(pixels[10, 10]) == (50, 50, 50)  # far from either grid line: untouched
+
+
+def test_draw_guides_and_grid_draws_a_custom_guide_at_its_own_position():
+    image = Image.new("RGB", (200, 100), (20, 20, 20))
+    guides = [{"orientation": "vertical", "position_pct": 25.0}]
+
+    result = draw_guides_and_grid(image, grid_type="None", guides=guides)
+
+    pixels = np.asarray(result)
+    assert not np.array_equal(pixels[:, 50], np.full_like(pixels[:, 50], 20))  # x=50 is 25% of width=200
+    assert np.array_equal(pixels[:, 150], np.full_like(pixels[:, 150], 20))  # elsewhere: untouched

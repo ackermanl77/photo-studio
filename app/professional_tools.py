@@ -5,7 +5,57 @@ import json
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
+
+# Fractional (0..1) line positions each named grid style draws on BOTH axes -- shared between
+# draw_guides_and_grid()'s display overlay and the free-form crop editor's on-canvas snapping (see
+# app/frontend_unified_app.py), so the two can never disagree about where a grid line actually sits.
+GRID_PRESETS: dict[str, tuple[float, ...]] = {
+    "None": (),
+    "Rule of Thirds": (1 / 3, 2 / 3),
+    "Grid 4x4": (0.25, 0.5, 0.75),
+    "Golden Ratio": (0.381966, 0.618034),
+}
+
+
+def grid_line_fractions(grid_type: str) -> tuple[float, ...]:
+    return GRID_PRESETS.get(grid_type, ())
+
+
+def draw_guides_and_grid(
+    image: Image.Image,
+    grid_type: str = "None",
+    guides: list[dict] | None = None,
+    grid_color: tuple[int, int, int] = (255, 255, 255),
+    guide_color: tuple[int, int, int] = (0, 220, 255),
+) -> Image.Image:
+    """A view-only composition aid -- grid lines (Rule of Thirds/4x4/Golden Ratio) plus any number
+    of user-placed horizontal/vertical guides, drawn semi-transparent over the image. Purely a
+    display overlay: never sent through app/backend.py's pipeline and never part of an exported
+    file, the same "computed locally, canvas-only" pattern as the Masks tab's selection preview and
+    the ICC gamut/clipping warning overlays. Each guide is a dict with "orientation"
+    ("horizontal"/"vertical") and "position_pct" (0-100, that axis's own fraction of the frame)."""
+    base = image.convert("RGBA")
+    width, height = base.size
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    for fraction in grid_line_fractions(grid_type):
+        x, y = int(round(fraction * width)), int(round(fraction * height))
+        draw.line([(x, 0), (x, height)], fill=(*grid_color, 110), width=1)
+        draw.line([(0, y), (width, y)], fill=(*grid_color, 110), width=1)
+
+    for guide in guides or []:
+        position = max(0.0, min(100.0, float(guide.get("position_pct", 50.0)))) / 100.0
+        if guide.get("orientation") == "horizontal":
+            y = int(round(position * height))
+            draw.line([(0, y), (width, y)], fill=(*guide_color, 200), width=1)
+        else:
+            x = int(round(position * width))
+            draw.line([(x, 0), (x, height)], fill=(*guide_color, 200), width=1)
+
+    return Image.alpha_composite(base, overlay).convert("RGB")
+
 
 def preview_image(image: Image.Image, max_size: tuple[int, int] = (1600, 1600)) -> Image.Image:
     """Return a bounded copy for responsive UI previews."""

@@ -10,6 +10,7 @@ import pytest
 from PIL import Image
 
 from app import backend_client
+from app.layer_workspace import WorkspaceLayer, layers_to_json
 
 
 def _png_bytes(color=(90, 120, 160), size=(16, 16)) -> bytes:
@@ -106,14 +107,14 @@ def test_process_via_backend_returns_processed_image(live_backend):
 
 def test_process_via_backend_sends_mask_and_layer_files(live_backend):
     base = _png_bytes((40, 40, 40), (12, 12))
-    layer = _png_bytes((220, 30, 30), (12, 12))
+    layers_payload = layers_to_json([WorkspaceLayer("Overlay", Image.new("RGBA", (12, 12), (220, 30, 30, 255)))]).encode("utf-8")
     mask_buffer = io.BytesIO()
     Image.new("L", (12, 12), 255).save(mask_buffer, format="PNG")
 
     baseline = backend_client.process_via_backend(base, "input.png", {})
     with_extras = backend_client.process_via_backend(
-        base, "input.png", {"layer_opacity": 1.0, "layer_blend": "normal", "mask_exposure": 0.5},
-        local_mask_bytes=mask_buffer.getvalue(), layer_bytes=layer,
+        base, "input.png", {"mask_exposure": 0.5},
+        local_mask_bytes=mask_buffer.getvalue(), layers_bytes=layers_payload,
     )
 
     assert with_extras.size == (12, 12)

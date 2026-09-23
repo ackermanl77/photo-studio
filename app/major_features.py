@@ -20,10 +20,151 @@ class Layer:
     visible: bool = True
 
 
+# Every function below takes two float arrays in [0, 1] -- base (the composite so far) and source
+# (the layer being blended in) -- and returns the blended result, unclipped; composite() clips
+# once at the end. Formulas match the W3C Compositing and Blending spec, which is also what every
+# modern browser's CSS mix-blend-mode uses and what Photoshop's own separable/non-separable blend
+# modes are defined by, so these match Photoshop's own rendering rather than an approximation of it.
+def _multiply(b, s): return b * s
+def _screen(b, s): return 1.0 - (1.0 - b) * (1.0 - s)
+def _darken(b, s): return np.minimum(b, s)
+def _lighten(b, s): return np.maximum(b, s)
+def _linear_dodge(b, s): return np.minimum(1.0, b + s)
+def _linear_burn(b, s): return np.maximum(0.0, b + s - 1.0)
+def _difference(b, s): return np.abs(b - s)
+def _exclusion(b, s): return b + s - 2.0 * b * s
+def _subtract(b, s): return np.maximum(0.0, b - s)
+
+
+def _color_dodge(b, s):
+    return np.where(s >= 1.0, 1.0, np.minimum(1.0, b / np.maximum(1.0 - s, 1e-6)))
+
+
+def _color_burn(b, s):
+    return np.where(s <= 0.0, 0.0, 1.0 - np.minimum(1.0, (1.0 - b) / np.maximum(s, 1e-6)))
+
+
+def _divide(b, s):
+    return np.where(s <= 0.0, 1.0, np.minimum(1.0, b / np.maximum(s, 1e-6)))
+
+
+def _overlay(b, s):
+    return np.where(b <= 0.5, 2.0 * b * s, 1.0 - 2.0 * (1.0 - b) * (1.0 - s))
+
+
+def _hard_light(b, s):
+    return _overlay(s, b)
+
+
+def _soft_light(b, s):
+    d = np.where(b <= 0.25, ((16.0 * b - 12.0) * b + 4.0) * b, np.sqrt(b))
+    return np.where(s <= 0.5, b - (1.0 - 2.0 * s) * b * (1.0 - b), b + (2.0 * s - 1.0) * (d - b))
+
+
+def _vivid_light(b, s):
+    return np.where(s <= 0.5, _color_burn(b, 2.0 * s), _color_dodge(b, 2.0 * (s - 0.5)))
+
+
+def _linear_light(b, s):
+    return np.where(s <= 0.5, _linear_burn(b, 2.0 * s), _linear_dodge(b, 2.0 * (s - 0.5)))
+
+
+def _pin_light(b, s):
+    return np.where(s <= 0.5, _darken(b, 2.0 * s), _lighten(b, 2.0 * (s - 0.5)))
+
+
+def _hard_mix(b, s):
+    return np.where(_vivid_light(b, s) < 0.5, 0.0, 1.0)
+
+
+def _darker_color(b, s):
+    pick_base = (_lum(b) <= _lum(s))[..., None]
+    return np.where(pick_base, b, s)
+
+
+def _lighter_color(b, s):
+    pick_base = (_lum(b) >= _lum(s))[..., None]
+    return np.where(pick_base, b, s)
+
+
+# Non-separable modes (Hue/Saturation/Color/Luminosity) can't blend each channel independently --
+# they need a per-pixel luminosity/saturation computed across all three channels first. Same
+# algorithm the W3C Compositing spec defines (SetLum/SetSat/ClipColor), simplified to plain numpy
+# array ops since it turns out to be linear per-channel once you don't insist on the spec's
+# min/mid/max case split.
+def _lum(c):
+    return 0.3 * c[..., 0] + 0.59 * c[..., 1] + 0.11 * c[..., 2]
+
+
+def _clip_color(c):
+    lum = _lum(c)[..., None]
+    minimum = c.min(axis=-1, keepdims=True)
+    maximum = c.max(axis=-1, keepdims=True)
+    c = np.where(minimum < 0.0, lum + (c - lum) * lum / np.maximum(lum - minimum, 1e-6), c)
+    c = np.where(maximum > 1.0, lum + (c - lum) * (1.0 - lum) / np.maximum(maximum - lum, 1e-6), c)
+    return c
+
+
+def _set_lum(c, target_lum):
+    return _clip_color(c + (target_lum - _lum(c))[..., None])
+
+
+def _sat(c):
+    return c.max(axis=-1) - c.min(axis=-1)
+
+
+def _set_sat(c, target_sat):
+    minimum = c.min(axis=-1, keepdims=True)
+    maximum = c.max(axis=-1, keepdims=True)
+    spread = maximum - minimum
+    scale = np.where(spread > 1e-6, target_sat[..., None] / spread, 0.0)
+    return (c - minimum) * scale
+
+
+def _hue_mode(b, s): return _set_lum(_set_sat(s, _sat(b)), _lum(b))
+def _saturation_mode(b, s): return _set_lum(_set_sat(b, _sat(s)), _lum(b))
+def _color_mode(b, s): return _set_lum(s, _lum(b))
+def _luminosity_mode(b, s): return _set_lum(b, _lum(s))
+
+
+# Per-channel (separable) blend modes: each output channel only depends on that same channel of
+# base and source. "normal" is handled separately in composite() since it just returns source.
+_SEPARABLE_BLEND_MODES = {
+    "darken": _darken, "multiply": _multiply, "color_burn": _color_burn, "linear_burn": _linear_burn,
+    "darker_color": _darker_color,
+    "lighten": _lighten, "screen": _screen, "color_dodge": _color_dodge, "linear_dodge": _linear_dodge,
+    "lighter_color": _lighter_color,
+    "overlay": _overlay, "soft_light": _soft_light, "hard_light": _hard_light,
+    "vivid_light": _vivid_light, "linear_light": _linear_light, "pin_light": _pin_light, "hard_mix": _hard_mix,
+    "difference": _difference, "exclusion": _exclusion, "subtract": _subtract, "divide": _divide,
+}
+
+# Non-separable (whole-pixel) blend modes: each output channel depends on all three of the
+# pixel's channels (via a shared luminosity/saturation), not just its own.
+_NON_SEPARABLE_BLEND_MODES = {
+    "hue": _hue_mode, "saturation": _saturation_mode, "color": _color_mode, "luminosity": _luminosity_mode,
+}
+
+# Human-readable labels for the modes above, in the same grouped order Photoshop's own Blend Mode
+# dropdown uses -- shared with the frontend so the UI never hand-maintains its own copy of "which
+# modes exist" separately from what composite() actually implements.
+BLEND_MODE_LABELS = {
+    "normal": "Normal",
+    "darken": "Darken", "multiply": "Multiply", "color_burn": "Color Burn", "linear_burn": "Linear Burn",
+    "darker_color": "Darker Color",
+    "lighten": "Lighten", "screen": "Screen", "color_dodge": "Color Dodge", "linear_dodge": "Linear Dodge (Add)",
+    "lighter_color": "Lighter Color",
+    "overlay": "Overlay", "soft_light": "Soft Light", "hard_light": "Hard Light",
+    "vivid_light": "Vivid Light", "linear_light": "Linear Light", "pin_light": "Pin Light", "hard_mix": "Hard Mix",
+    "difference": "Difference", "exclusion": "Exclusion", "subtract": "Subtract", "divide": "Divide",
+    "hue": "Hue", "saturation": "Saturation", "color": "Color", "luminosity": "Luminosity",
+}
+
+
 class LayerStack:
     """Float-based compositing stack for non-destructive layer edits."""
 
-    MODES = {"normal", "multiply", "screen"}
+    MODES = {"normal", *_SEPARABLE_BLEND_MODES, *_NON_SEPARABLE_BLEND_MODES}
 
     def __init__(self, base: Image.Image):
         self.layers = [Layer("Background", base.convert("RGBA"))]
@@ -47,12 +188,13 @@ class LayerStack:
                 alpha *= np.asarray(layer.mask.convert("L"), dtype=np.float32) / 255.0
             base_rgb = result[:, :, :3]
             source_rgb = source[:, :, :3]
-            if layer.blend_mode == "multiply":
-                blended = base_rgb * source_rgb
-            elif layer.blend_mode == "screen":
-                blended = 1.0 - (1.0 - base_rgb) * (1.0 - source_rgb)
-            else:
+            if layer.blend_mode == "normal":
                 blended = source_rgb
+            elif layer.blend_mode in _SEPARABLE_BLEND_MODES:
+                blended = _SEPARABLE_BLEND_MODES[layer.blend_mode](base_rgb, source_rgb)
+            else:
+                blended = _NON_SEPARABLE_BLEND_MODES[layer.blend_mode](base_rgb, source_rgb)
+            blended = np.clip(blended, 0.0, 1.0)
             result[:, :, :3] = base_rgb * (1.0 - alpha[:, :, None]) + blended * alpha[:, :, None]
         return Image.fromarray(np.clip(result * 255.0, 0, 255).astype(np.uint8), mode="RGBA")
 

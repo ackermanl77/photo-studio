@@ -4,7 +4,9 @@ import io
 
 from PIL import Image
 
-from app.batch_release import FileLike, make_zip, process_files, render_name
+import pytest
+
+from app.batch_release import FileLike, export_multiple, make_zip, process_files, render_name
 
 
 def test_batch_release_reports_success_and_errors(tmp_path):
@@ -27,6 +29,25 @@ def test_batch_zip_contains_rendered_files(tmp_path):
     archive = zipfile.ZipFile(io.BytesIO(make_zip(outputs)))
 
     assert archive.namelist() == ["one-edited.jpg"]
+
+
+def test_export_multiple_bundles_every_selected_profile_into_one_zip():
+    image = Image.new("RGB", (3000, 2000), (100, 120, 140))
+
+    zip_bytes = export_multiple(image, ["Web", "Social"], "poster")
+
+    archive = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    assert set(archive.namelist()) == {"poster-web.jpg", "poster-social.jpg"}
+    # Each entry actually decodes and respects its own profile's max_size.
+    with Image.open(io.BytesIO(archive.read("poster-web.jpg"))) as web_output:
+        assert web_output.width <= 2048
+    with Image.open(io.BytesIO(archive.read("poster-social.jpg"))) as social_output:
+        assert social_output.width <= 1080
+
+
+def test_export_multiple_requires_at_least_one_profile():
+    with pytest.raises(ValueError):
+        export_multiple(Image.new("RGB", (10, 10)), [], "poster")
 
 
 def test_process_files_applies_a_saved_recipe_across_every_photo(tmp_path):

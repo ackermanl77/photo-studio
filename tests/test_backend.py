@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw
 from app.backend import app
 from app.config import MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES
 from app.image_processor import PhotoProcessor
+from app.layer_workspace import WorkspaceLayer, layers_to_json
 from app.project import PhotoProject
 from app.raw_import import is_raw_path
 
@@ -16,6 +17,16 @@ def image_bytes(color=(100, 110, 120), size=(12, 12), format="PNG"):
     stream = io.BytesIO()
     Image.new("RGB", size, color=color).save(stream, format=format)
     return stream.getvalue()
+
+
+def layer_stack_bytes(*layers: tuple[tuple[int, int, int], float, str]) -> bytes:
+    """Build a /process-ready `layers` JSON payload from (color, opacity, blend_mode) tuples,
+    the same wire format app/frontend_unified_app.py's Layers tab now sends for its whole stack."""
+    workspace_layers = [
+        WorkspaceLayer(f"Layer {index}", Image.new("RGBA", (20, 20), (*color, 255)), opacity, blend_mode)
+        for index, (color, opacity, blend_mode) in enumerate(layers)
+    ]
+    return layers_to_json(workspace_layers).encode("utf-8")
 
 
 def test_health_endpoint():
@@ -419,8 +430,7 @@ def test_process_endpoint_rejects_unknown_preset():
 
 def test_process_endpoint_composites_layer():
     client = app.test_client()
-    base = image_bytes((40, 40, 40))
-    overlay = image_bytes((220, 30, 30))
+    base = image_bytes((40, 40, 40), size=(20, 20))
 
     baseline = client.post(
         "/process",
@@ -431,8 +441,8 @@ def test_process_endpoint_composites_layer():
         "/process",
         data={
             "image": (io.BytesIO(base), "input.png"),
-            "layer": (io.BytesIO(overlay), "layer.png"),
-            "options": json.dumps({"layer_opacity": 1.0, "layer_blend": "normal"}),
+            "layers": (io.BytesIO(layer_stack_bytes(((220, 30, 30), 1.0, "normal"))), "layers.json"),
+            "options": json.dumps({}),
         },
         content_type="multipart/form-data",
     )
@@ -442,13 +452,58 @@ def test_process_endpoint_composites_layer():
     assert baseline.data != with_layer.data
 
 
+def test_process_endpoint_composites_multiple_layers_in_order():
+    """Two stacked layers must both reach the final image, applied bottom-to-top in the same
+    order they were serialized -- the multi-layer replacement for the old single-`layer_file`
+    API, which could only ever composite exactly one overlay."""
+    client = app.test_client()
+    base = image_bytes((0, 0, 0), size=(20, 20))
+    # A half-opacity red layer, then a fully-opaque blue layer on top -- the blue layer should
+    # completely hide the red one, since it's later in the stack and fully opaque.
+    payload = layer_stack_bytes(((255, 0, 0), 0.5, "normal"), ((0, 0, 255), 1.0, "normal"))
+
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(base), "input.png"),
+            "layers": (io.BytesIO(payload), "layers.json"),
+            "options": json.dumps({}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    result = np.array(Image.open(io.BytesIO(response.data)).convert("RGB"))
+    assert tuple(int(v) for v in result[10, 10]) == (0, 0, 255)
+
+
+def test_process_endpoint_applies_a_non_default_blend_mode_from_the_layer_payload():
+    client = app.test_client()
+    base = image_bytes((100, 100, 100), size=(20, 20))
+    multiply_payload = layer_stack_bytes(((200, 200, 200), 1.0, "multiply"))
+
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(base), "input.png"),
+            "layers": (io.BytesIO(multiply_payload), "layers.json"),
+            "options": json.dumps({}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    result = np.array(Image.open(io.BytesIO(response.data)).convert("RGB"))
+    # multiply(100/255, 200/255) * 255 ~= 78
+    assert 65 <= int(result[10, 10, 0]) <= 90
+
+
 def test_process_endpoint_masks_apply_after_layer_composite():
     """The combined mask must see the image AFTER the layer is composited (matching the
     unified UI's Layers -> Masks tab order) -- otherwise a masked adjustment could miss pixels
     the layer just changed. This is the ordering bug class documented under "Recently Fixed"
     in docs/PROJECT_STATUS.md, reproduced here for the backend's own pipeline."""
     base = image_bytes((40, 40, 40), size=(20, 20))
-    overlay = image_bytes((250, 250, 250), size=(20, 20))
     mask_buffer = io.BytesIO()
     Image.new("L", (20, 20), 255).save(mask_buffer, format="PNG")
 
@@ -457,9 +512,9 @@ def test_process_endpoint_masks_apply_after_layer_composite():
         "/process",
         data={
             "image": (io.BytesIO(base), "input.png"),
-            "layer": (io.BytesIO(overlay), "layer.png"),
+            "layers": (io.BytesIO(layer_stack_bytes(((250, 250, 250), 1.0, "normal"))), "layers.json"),
             "local_mask": (io.BytesIO(mask_buffer.getvalue()), "mask.png"),
-            "options": json.dumps({"layer_opacity": 1.0, "layer_blend": "normal", "mask_exposure": 0.5}),
+            "options": json.dumps({"mask_exposure": 0.5}),
         },
         content_type="multipart/form-data",
     )

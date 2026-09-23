@@ -68,15 +68,15 @@ class _FakeFileStorage:
         return self.stream.read()
 
 
-def _fake_process_via_backend(image_bytes_, filename, options, local_mask_bytes=None, layer_bytes=None, removal_mask_bytes=None):
+def _fake_process_via_backend(image_bytes_, filename, options, local_mask_bytes=None, layers_bytes=None, removal_mask_bytes=None):
     request_options = dict(options)
     request_options["output_format"] = "PNG"
     image_file = _FakeFileStorage(filename, image_bytes_)
     local_mask = _FakeFileStorage("mask.png", local_mask_bytes) if local_mask_bytes else None
-    layer_file = _FakeFileStorage("layer.png", layer_bytes) if layer_bytes else None
+    layers_file = _FakeFileStorage("layers.json", layers_bytes) if layers_bytes else None
     removal_mask = _FakeFileStorage("removal_mask.png", removal_mask_bytes) if removal_mask_bytes else None
     try:
-        return process_image(image_file, request_options, removal_mask=removal_mask, local_mask=local_mask, layer_file=layer_file)
+        return process_image(image_file, request_options, removal_mask=removal_mask, local_mask=local_mask, layers_file=layers_file)
     except (KeyError, ValueError, OSError, RuntimeError, json.JSONDecodeError, cv2.error) as error:
         # Mirrors app/backend.py's /process route, which catches exactly this tuple and returns
         # a 400 JSON error -- process_via_backend() (the real HTTP client) then turns a non-OK
@@ -197,11 +197,360 @@ def test_layer_composite_is_reflected_in_final_image():
     at = run_with_uploaded_image(color=(80, 80, 80))
     baseline = canvas_hash(at)
 
-    at.get_by_key("l-file").set_value(("overlay.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
+    at.get_by_key("l-new-file").set_value(("overlay.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
     at.run(timeout=30)
 
     assert not at.exception
     assert canvas_hash(at) != baseline
+
+
+def test_layers_tab_supports_stacking_more_than_one_layer():
+    """The Layers tab used to accept exactly one overlay via a single file_uploader; the
+    LayerWorkspace compositing engine underneath always supported an arbitrary stack, so this
+    checks the panel now actually exposes that -- two uploads must both land in the stack, in
+    the order they were added, each with its own default opacity/blend mode."""
+    at = run_with_uploaded_image(color=(10, 10, 10))
+
+    at.get_by_key("l-new-file").set_value(("first.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
+    at.run(timeout=30)
+    at.get_by_key("l-new-file").set_value(("second.png", image_bytes((0, 255, 0), (40, 30)), "image/png"))
+    at.run(timeout=30)
+
+    assert not at.exception
+    layers = at.session_state["image_layers"]
+    assert [layer["name"] for layer in layers] == ["first", "second"]
+    assert all(layer["opacity"] == 1.0 and layer["blend_mode"] == "normal" and layer["visible"] for layer in layers)
+
+
+def test_removing_a_layer_takes_it_out_of_the_stack_and_the_final_image():
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.get_by_key("l-new-file").set_value(("overlay.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
+    at.run(timeout=30)
+    with_layer_hash = canvas_hash(at)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    at.button(key=f"l-rm-{layer_id}").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["image_layers"] == []
+    assert canvas_hash(at) != with_layer_hash
+
+
+def test_reordering_layers_changes_which_one_is_on_top():
+    """Moving the bottom layer above the top one must change the composite -- if a fully-opaque
+    layer ends up on top, it should now be what's visible instead of the layer that used to be
+    above it."""
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.get_by_key("l-new-file").set_value(("red.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
+    at.run(timeout=30)
+    at.get_by_key("l-new-file").set_value(("blue.png", image_bytes((0, 0, 255), (40, 30)), "image/png"))
+    at.run(timeout=30)
+    bottom_layer_id = at.session_state["image_layers"][0]["id"]  # "red", currently underneath "blue"
+
+    at.button(key=f"l-up-{bottom_layer_id}").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert [layer["name"] for layer in at.session_state["image_layers"]] == ["blue", "red"]
+
+
+def test_changing_a_layers_blend_mode_changes_the_final_image():
+    at = run_with_uploaded_image(color=(100, 100, 100))
+    at.get_by_key("l-new-file").set_value(("overlay.png", image_bytes((200, 200, 200), (40, 30)), "image/png"))
+    at.run(timeout=30)
+    normal_hash = canvas_hash(at)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    at.selectbox(key=f"l-blend-{layer_id}").set_value("multiply")
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["image_layers"][0]["blend_mode"] == "multiply"
+    assert canvas_hash(at) != normal_hash
+
+
+def test_enabling_a_layer_style_changes_the_final_image_and_persists_its_settings():
+    # A Text layer, not an uploaded Image layer: Layer Styles only produce a visible difference
+    # where a layer has genuinely transparent surrounding pixels for a shadow/glow/stroke to
+    # occupy -- an opaque, canvas-filling uploaded rectangle has no "outside its own shape" area
+    # within the canvas for any of these effects to appear in, the same real limitation Photoshop's
+    # own layer styles have on a fully opaque background-filling layer.
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Text")
+    at.run(timeout=30)
+    at.button(key="l-add-text-btn").click()
+    at.run(timeout=30)
+    without_style_hash = canvas_hash(at)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    at.checkbox(key=f"l-st-en-{layer_id}").set_value(True)
+    at.run(timeout=30)
+    at.color_picker(key=f"l-st-col-{layer_id}").set_value("#0000FF")
+    at.slider(key=f"l-st-w-{layer_id}").set_value(10)
+    at.run(timeout=30)
+
+    assert not at.exception
+    styles = at.session_state["image_layers"][0]["styles"]
+    assert styles["stroke_enabled"] is True
+    assert styles["stroke_color"] == "#0000FF"
+    assert styles["stroke_width"] == 10
+    assert canvas_hash(at) != without_style_hash
+
+
+def test_disabling_a_layer_style_does_not_affect_other_styles_on_the_same_layer():
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Text")
+    at.run(timeout=30)
+    at.button(key="l-add-text-btn").click()
+    at.run(timeout=30)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    at.checkbox(key=f"l-ds-en-{layer_id}").set_value(True)
+    at.checkbox(key=f"l-co-en-{layer_id}").set_value(True)
+    at.run(timeout=30)
+
+    assert not at.exception
+    styles = at.session_state["image_layers"][0]["styles"]
+    assert styles["drop_shadow_enabled"] is True
+    assert styles["color_overlay_enabled"] is True
+    assert styles["stroke_enabled"] is False
+    assert styles["outer_glow_enabled"] is False
+
+
+def test_adding_a_text_layer_renders_text_onto_the_final_image():
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    baseline = canvas_hash(at)
+
+    at.radio(key="l-new-kind").set_value("Text")
+    at.run(timeout=30)
+    at.button(key="l-add-text-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    layers = at.session_state["image_layers"]
+    assert len(layers) == 1
+    assert layers[0]["kind"] == "text"
+    assert canvas_hash(at) != baseline
+
+
+def test_editing_a_text_layers_content_color_and_position_changes_the_final_image():
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Text")
+    at.run(timeout=30)
+    at.button(key="l-add-text-btn").click()
+    at.run(timeout=30)
+    default_text_hash = canvas_hash(at)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    at.text_area(key=f"l-text-{layer_id}").set_value("Poster Title")
+    at.color_picker(key=f"l-fcolor-{layer_id}").set_value("#FF0000")
+    at.slider(key=f"l-fx-{layer_id}").set_value(20.0)
+    at.run(timeout=30)
+
+    assert not at.exception
+    updated_layer = at.session_state["image_layers"][0]
+    assert updated_layer["text"] == "Poster Title"
+    assert updated_layer["color"] == "#FF0000"
+    assert updated_layer["x_pct"] == 20.0
+    assert canvas_hash(at) != default_text_hash
+
+
+def test_a_text_layer_can_be_reordered_and_removed_like_an_image_layer():
+    """Text layers share the generic opacity/blend/visible/up/down/duplicate/remove controls with
+    Image layers -- this exercises that shared code path for the "text" kind specifically, since
+    the earlier reorder/remove tests only ever used Image layers."""
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Text")
+    at.run(timeout=30)
+    at.button(key="l-add-text-btn").click()
+    at.run(timeout=30)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    at.button(key=f"l-rm-{layer_id}").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["image_layers"] == []
+
+
+def test_adding_a_shape_layer_renders_it_onto_the_final_image():
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    baseline = canvas_hash(at)
+
+    at.radio(key="l-new-kind").set_value("Shape")
+    at.run(timeout=30)
+    at.selectbox(key="l-new-shape-type").set_value("Ellipse")
+    at.button(key="l-add-shape-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    layers = at.session_state["image_layers"]
+    assert len(layers) == 1
+    assert layers[0]["kind"] == "shape"
+    assert layers[0]["shape_type"] == "Ellipse"
+    assert canvas_hash(at) != baseline
+
+
+def test_a_layers_expander_splits_into_content_styles_and_settings_sub_tabs():
+    """Regression test for splitting each layer's expander into sub-tabs (Content/Styles/Settings)
+    to declutter what had become a long scroll once a layer could be four kinds each with several
+    controls, plus Layer Styles' own four effects. Nesting st.tabs() inside st.expander() is legal
+    in Streamlit (unlike nesting a second st.expander()), and -- like every other tab in this file --
+    every sub-tab's body still executes on every rerun regardless of which is visually selected, so
+    a widget from the LAST sub-tab (Settings' "Visible" checkbox) must still be directly reachable
+    and functional without ever "clicking into" that tab first."""
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Text")
+    at.run(timeout=30)
+    at.button(key="l-add-text-btn").click()
+    at.run(timeout=30)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    sub_tab_labels = {tab.label for tab in at.tabs if tab.label in {"🎨 Content", "✨ Styles", "⚙️ Settings"}}
+    assert sub_tab_labels == {"🎨 Content", "✨ Styles", "⚙️ Settings"}
+
+    at.checkbox(key=f"l-vis-{layer_id}").set_value(False)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["image_layers"][0]["visible"] is False
+
+
+def test_editing_a_shape_layers_size_position_and_fill_changes_the_final_image():
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Shape")
+    at.run(timeout=30)
+    at.button(key="l-add-shape-btn").click()  # default shape type: Rectangle
+    at.run(timeout=30)
+    default_hash = canvas_hash(at)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    at.color_picker(key=f"l-shp-fcolor-{layer_id}").set_value("#00FF00")
+    at.slider(key=f"l-shp-w-{layer_id}").set_value(60.0)
+    at.slider(key=f"l-shp-rot-{layer_id}").set_value(45.0)
+    at.run(timeout=30)
+
+    assert not at.exception
+    updated = at.session_state["image_layers"][0]
+    assert updated["fill_color"] == "#00FF00"
+    assert updated["width_pct"] == 60.0
+    assert updated["rotation_deg"] == 45.0
+    assert canvas_hash(at) != default_hash
+
+
+def test_a_shape_layer_can_be_reordered_and_removed_like_an_image_layer():
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Shape")
+    at.run(timeout=30)
+    at.button(key="l-add-shape-btn").click()
+    at.run(timeout=30)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    at.button(key=f"l-rm-{layer_id}").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["image_layers"] == []
+
+
+def _triangle_path_points():
+    return [{"x_pct": 20, "y_pct": 20, "handle_dx_pct": 0, "handle_dy_pct": 0},
+            {"x_pct": 80, "y_pct": 20, "handle_dx_pct": 0, "handle_dy_pct": 0},
+            {"x_pct": 50, "y_pct": 80, "handle_dx_pct": 0, "handle_dy_pct": 0}]
+
+
+def test_adding_a_pen_path_layer_via_the_hidden_commit_field_renders_onto_the_final_image():
+    """The Pen tool's actual click/drag interaction lives inside a components.html() iframe, which
+    streamlit.testing.v1.AppTest cannot exercise (see CLAUDE.md's Testing conventions) -- this
+    drives the same hidden text_area the real JS commits into on each click, exactly like the
+    existing crop-editor/wand-picker tests do for their own on-canvas editors."""
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    baseline = canvas_hash(at)
+
+    at.radio(key="l-new-kind").set_value("Pen")
+    at.run(timeout=30)
+    at.text_area(key="l-path-draft-data").set_value(json.dumps(_triangle_path_points()))
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["l-path-draft-points"] == _triangle_path_points()
+
+    at.button(key="l-add-path-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    layers = at.session_state["image_layers"]
+    assert len(layers) == 1
+    assert layers[0]["kind"] == "path"
+    assert layers[0]["points"] == _triangle_path_points()
+    assert at.session_state["l-path-draft-points"] == []  # draft cleared after adding
+    assert canvas_hash(at) != baseline
+
+
+def test_closing_a_pen_path_and_enabling_fill_changes_the_final_image():
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Pen")
+    at.run(timeout=30)
+    at.text_area(key="l-path-draft-data").set_value(json.dumps(_triangle_path_points()))
+    at.run(timeout=30)
+    at.button(key="l-add-path-btn").click()
+    at.run(timeout=30)
+    open_stroke_hash = canvas_hash(at)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    at.checkbox(key=f"l-path-{layer_id}-closed").set_value(True)
+    at.run(timeout=30)
+    at.checkbox(key=f"l-path-fen-{layer_id}").set_value(True)
+    at.run(timeout=30)
+    at.color_picker(key=f"l-path-fcolor-{layer_id}").set_value("#00FF00")
+    at.run(timeout=30)
+
+    assert not at.exception
+    updated = at.session_state["image_layers"][0]
+    assert updated["closed"] is True
+    assert updated["fill_enabled"] is True
+    assert updated["fill_color"] == "#00FF00"
+    assert canvas_hash(at) != open_stroke_hash
+
+
+def test_editing_an_existing_pen_path_layers_points_changes_the_final_image():
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Pen")
+    at.run(timeout=30)
+    at.text_area(key="l-path-draft-data").set_value(json.dumps(_triangle_path_points()))
+    at.run(timeout=30)
+    at.button(key="l-add-path-btn").click()
+    at.run(timeout=30)
+    original_hash = canvas_hash(at)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    moved_points = [{"x_pct": 10, "y_pct": 10, "handle_dx_pct": 0, "handle_dy_pct": 0},
+                     {"x_pct": 90, "y_pct": 10, "handle_dx_pct": 0, "handle_dy_pct": 0},
+                     {"x_pct": 50, "y_pct": 90, "handle_dx_pct": 0, "handle_dy_pct": 0}]
+    at.text_area(key=f"l-path-{layer_id}-data").set_value(json.dumps(moved_points))
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["image_layers"][0]["points"] == moved_points
+    assert canvas_hash(at) != original_hash
+
+
+def test_a_pen_path_layer_can_be_reordered_and_removed_like_an_image_layer():
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Pen")
+    at.run(timeout=30)
+    at.text_area(key="l-path-draft-data").set_value(json.dumps(_triangle_path_points()))
+    at.run(timeout=30)
+    at.button(key="l-add-path-btn").click()
+    at.run(timeout=30)
+    layer_id = at.session_state["image_layers"][0]["id"]
+
+    at.button(key=f"l-rm-{layer_id}").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["image_layers"] == []
 
 
 def test_mask_stack_target_adjustment_is_reflected_in_final_image():
@@ -379,6 +728,67 @@ def test_crop_tab_changes_output_dimensions():
     assert canvas_dims(at) == (30, 30)
 
 
+def test_selecting_a_grid_overlay_changes_the_canvas_image():
+    """Grid/guides are view-only (see app.professional_tools.draw_guides_and_grid's docstring) --
+    this confirms the toggle actually reaches the rendered canvas, the same regression shape as the
+    "Show clipping" overlay checkbox, without asserting on exact pixel positions (covered directly
+    in tests/test_professional_tools.py)."""
+    at = run_with_uploaded_image(color=(80, 80, 80))
+    baseline = canvas_hash(at)
+
+    at.selectbox(key="grid-type").set_value("Rule of Thirds")
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_hash(at) != baseline
+
+
+def test_adding_and_removing_a_guide_changes_the_canvas_image_and_its_own_state():
+    at = run_with_uploaded_image(color=(80, 80, 80))
+    baseline = canvas_hash(at)
+
+    at.selectbox(key="guide-new-orientation").set_value("Vertical")
+    at.slider(key="guide-new-position").set_value(25.0)
+    at.button(key="guide-add-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    guides = at.session_state["guides"]
+    assert len(guides) == 1
+    assert guides[0]["orientation"] == "vertical"
+    assert guides[0]["position_pct"] == 25.0
+    with_guide_hash = canvas_hash(at)
+    assert with_guide_hash != baseline
+
+    at.button(key=f"guide-rm-{guides[0]['id']}").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["guides"] == []
+    assert canvas_hash(at) == baseline
+
+
+def test_export_multiple_sizes_prepares_a_downloadable_zip():
+    at = run_with_uploaded_image(size=(400, 300))
+
+    at.multiselect(key="exp-multi-profiles").set_value(["Web", "Social"])
+    at.run(timeout=30)
+    at.button(key="exp-multi-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert any(db.label == "⬇️ Download ZIP" for db in at.download_button)
+
+
+def test_export_multiple_sizes_button_disabled_with_no_sizes_selected():
+    at = run_with_uploaded_image(size=(400, 300))
+
+    at.multiselect(key="exp-multi-profiles").set_value([])
+    at.run(timeout=30)
+
+    assert at.button(key="exp-multi-btn").disabled
+
+
 def test_mask_target_sliders_disabled_until_an_enabled_mask_layer_exists():
     at = run_with_uploaded_image()
 
@@ -492,7 +902,7 @@ def test_reset_button_restores_defaults_without_touching_the_layer():
     """Reset restores the same recipe fields Undo/Redo operate on (see _build_recipe) -- it must
     not silently drop an uploaded layer, since that's a separate, deliberate user action."""
     at = run_with_uploaded_image(color=(80, 80, 80))
-    at.get_by_key("l-file").set_value(("overlay.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
+    at.get_by_key("l-new-file").set_value(("overlay.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
     at.run(timeout=30)
     with_layer_hash = canvas_hash(at)
 
@@ -653,7 +1063,7 @@ def test_batch_processor_preset_dropdown_lists_saved_custom_presets(monkeypatch,
     presets_path.write_text(json.dumps({"My Look": {"exposure": 1.2}}), encoding="utf-8")
 
     at = run_with_uploaded_image()
-    at.radio[0].set_value("Batch Processor")
+    at.radio(key="more-mode").set_value("Batch Processor")
     at.run(timeout=30)
 
     assert not at.exception
@@ -759,11 +1169,12 @@ def test_undo_restores_previous_control_value():
 
 
 def test_save_project_button_builds_a_bundle_with_the_layer_without_erroring():
-    """Regression guard for the Save Project button's ProjectBundle wiring (layer_bytes/opacity/
-    blend -> LayerWorkspace -> ProjectBundle) -- a mismatch with LayerWorkspace's API would raise
-    here rather than only being caught by decoding the downloaded bytes, which AppTest can't do."""
+    """Regression guard for the Save Project button's ProjectBundle wiring (image_layers's
+    opacity/blend_mode -> LayerWorkspace -> ProjectBundle) -- a mismatch with LayerWorkspace's API
+    would raise here rather than only being caught by decoding the downloaded bytes, which AppTest
+    can't do."""
     at = run_with_uploaded_image()
-    at.get_by_key("l-file").set_value(("overlay.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
+    at.get_by_key("l-new-file").set_value(("overlay.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
     at.run(timeout=30)
 
     at.button(key="proj-save-btn").click()
@@ -773,34 +1184,28 @@ def test_save_project_button_builds_a_bundle_with_the_layer_without_erroring():
     assert any(db.label == "⬇️ Download .photoproject" for db in at.download_button)
 
 
-def test_save_project_with_a_corrupted_layer_shows_an_error_instead_of_crashing():
-    """Same bug class as test_uploading_a_corrupted_image_shows_an_error_instead_of_crashing,
-    for the second unguarded Image.open() found in review: Save Project opens the layer bytes
-    locally to build a LayerWorkspace, which previously had no error handling of its own. In
-    practice a corrupted layer is already caught earlier too, by the same backend round-trip
-    every rerun already goes through (compare test_uploading_a_corrupted_image_... above) -- this
-    confirms clicking Save Project on top of that still doesn't crash, and gets its own clearer,
-    layer-specific message rather than relying only on the generic backend error."""
+def test_adding_a_corrupted_layer_image_shows_an_error_instead_of_crashing():
+    """Layer images are decoded and validated as soon as they're added in the Layers tab
+    (_render_layer_stack), not deferred until Save Project -- a corrupted upload must show a
+    friendly error right there and never make it into the layer stack, the same "don't leak a raw
+    traceback for user-controlled bytes" convention as the main image uploader."""
     valid_png = image_bytes((255, 0, 0), (40, 30))
     truncated = valid_png[: len(valid_png) // 2]
 
     at = run_with_uploaded_image()
-    at.get_by_key("l-file").set_value(("overlay.png", truncated, "image/png"))
-    at.run(timeout=30)
-
-    at.button(key="proj-save-btn").click()
+    at.get_by_key("l-new-file").set_value(("overlay.png", truncated, "image/png"))
     at.run(timeout=30)
 
     assert not at.exception
     assert any("layer image" in message.value.lower() for message in at.error)
-    assert not any(db.label == "⬇️ Download .photoproject" for db in at.download_button)
+    assert at.session_state["image_layers"] == []
 
 
-def test_load_project_restores_recipe_and_layer_from_a_project_bundle():
-    """Regression test for the migration off PhotoProject to ProjectBundle: the overlay layer now
+def test_load_project_restores_recipe_and_layers_from_a_project_bundle():
+    """Regression test for the migration off PhotoProject to ProjectBundle: the overlay layer
     lives in ProjectBundle's structured `layer_workspace` field instead of being base64-embedded in
-    the recipe, so the Load handler has to translate it back into the recipe["layer"] shape
-    _restore_recipe_to_state() expects."""
+    the recipe, so the Load handler has to translate it back into the recipe["layers"] shape
+    _restore_recipe_to_state() expects (a list, even for this old-format file's single layer)."""
     source = Image.new("RGB", (40, 30), (80, 80, 80))
     overlay = Image.new("RGBA", (40, 30), (255, 0, 0, 255))
     workspace = LayerWorkspace(source).add(WorkspaceLayer("Overlay", overlay, 0.7, "multiply"))
@@ -820,9 +1225,11 @@ def test_load_project_restores_recipe_and_layer_from_a_project_bundle():
     assert not at.exception
     assert at.session_state["restored_source_name"] == "saved.png"
     assert at.slider(key="t-exp").value == 1.3
-    assert at.slider(key="l-opac").value == 0.7
-    assert at.selectbox(key="l-blend").value == "multiply"
-    restored_overlay = Image.open(io.BytesIO(at.session_state["restored_layer_bytes"]))
+    restored_layers = at.session_state["image_layers"]
+    assert len(restored_layers) == 1
+    assert restored_layers[0]["opacity"] == 0.7
+    assert restored_layers[0]["blend_mode"] == "multiply"
+    restored_overlay = Image.open(io.BytesIO(base64.b64decode(restored_layers[0]["image_b64"])))
     assert restored_overlay.size == (40, 30)
 
 
@@ -1196,7 +1603,7 @@ def test_batch_processor_shows_a_thumbnail_preview_for_a_selected_custom_preset(
     presets_path.write_text(json.dumps({"My Look": {"exposure": 1.2}}), encoding="utf-8")
 
     at = run_with_uploaded_image()
-    at.radio[0].set_value("Batch Processor")
+    at.radio(key="more-mode").set_value("Batch Processor")
     at.run(timeout=30)
     images_before = len(at.image)
 
@@ -1214,7 +1621,7 @@ def test_run_batch_shows_progress_and_a_done_summary(monkeypatch, tmp_path):
     status reaches a final "Done" summary and the results table + download button render."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     at = run_with_uploaded_image()
-    at.radio[0].set_value("Batch Processor")
+    at.radio(key="more-mode").set_value("Batch Processor")
     at.run(timeout=30)
 
     at.get_by_key("b-up").set_value([("one.jpg", image_bytes(), "image/jpeg"), ("two.jpg", image_bytes(), "image/jpeg")])
@@ -1543,7 +1950,7 @@ def test_library_rating_buttons_write_to_the_catalog(monkeypatch, tmp_path):
     catalog.sqlite instead of the real ~/.photo-studio/ on whatever machine runs the suite."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     at = run_with_uploaded_image()
-    at.radio[0].set_value("Library Catalog")
+    at.radio(key="more-mode").set_value("Library Catalog")
     at.session_state["records"] = [
         {"path": "photo-a.jpg", "name": "photo-a.jpg", "width": 10, "height": 10, "format": "JPEG", "bytes": 100},
         {"path": "photo-b.jpg", "name": "photo-b.jpg", "width": 10, "height": 10, "format": "JPEG", "bytes": 100},
@@ -1563,7 +1970,7 @@ def test_library_rating_buttons_write_to_the_catalog(monkeypatch, tmp_path):
 def test_library_reject_toggles_a_tag_without_changing_rating(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     at = run_with_uploaded_image()
-    at.radio[0].set_value("Library Catalog")
+    at.radio(key="more-mode").set_value("Library Catalog")
     at.session_state["records"] = [{"path": "photo-a.jpg", "name": "photo-a.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1}]
     at.run(timeout=30)
 
@@ -1586,7 +1993,7 @@ def test_library_reject_toggles_a_tag_without_changing_rating(monkeypatch, tmp_p
 def test_library_next_and_prev_cycle_through_records(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     at = run_with_uploaded_image()
-    at.radio[0].set_value("Library Catalog")
+    at.radio(key="more-mode").set_value("Library Catalog")
     at.session_state["records"] = [
         {"path": "a.jpg", "name": "a.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1},
         {"path": "b.jpg", "name": "b.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1},
@@ -1614,7 +2021,7 @@ def test_library_next_button_does_not_reset_canvas_view_settings(monkeypatch, tm
     at.run(timeout=30)
     assert at.selectbox(key="cv-zoom").value == 2.0
 
-    at.radio[0].set_value("Library Catalog")
+    at.radio(key="more-mode").set_value("Library Catalog")
     at.session_state["records"] = [
         {"path": "a.jpg", "name": "a.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1},
         {"path": "b.jpg", "name": "b.jpg", "width": 1, "height": 1, "format": "JPEG", "bytes": 1},
