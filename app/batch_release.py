@@ -126,16 +126,34 @@ def make_zip(outputs: list[tuple[str, bytes]]) -> bytes:
     return archive.getvalue()
 
 
-def export_multiple(image: Image.Image, profile_names: list[str], base_filename: str) -> bytes:
+def export_multiple(
+    image: Image.Image,
+    profile_names: list[str],
+    base_filename: str,
+    watermark_text: str | None = None,
+    watermark_position: str = "Bottom Right",
+    watermark_opacity: int = 50,
+    watermark_font_size: int = 32,
+) -> bytes:
     """One photo, several export variants (Web/Social/Print/Archive -- see EXPORT_PROFILES) in a
     single ZIP -- the "Export As" multi-size workflow every major editor offers, distinct from
     process_files()'s "one recipe, many photos" batch above. Reuses export_profile() (already the
     single source of truth for what each named profile's format/quality/max_size/metadata-stripping
-    actually is) and make_zip(), rather than a third copy of either."""
+    -- and now watermarking -- actually is) and make_zip(), rather than a third copy of either.
+    The watermark_* args are optional passthroughs to export_profile()/apply_watermark(): a blank
+    or omitted watermark_text leaves every variant unwatermarked, exactly as before this arg
+    existed."""
     if not profile_names:
         raise ValueError("Select at least one export size")
     outputs = []
     for name in profile_names:
-        content, extension, _mime = export_profile(image, name)
+        content, extension, _mime = export_profile(
+            image,
+            name,
+            watermark_text=watermark_text,
+            watermark_position=watermark_position,
+            watermark_opacity=watermark_opacity,
+            watermark_font_size=watermark_font_size,
+        )
         outputs.append((f"{base_filename}-{name.lower()}{extension}", content))
     return make_zip(outputs)

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 # Fractional (0..1) line positions each named grid style draws on BOTH axes -- shared between
 # draw_guides_and_grid()'s display overlay and the free-form crop editor's on-canvas snapping (see
@@ -98,6 +98,54 @@ def compute_histogram(image: Image.Image, bins: int = 64) -> dict[str, np.ndarra
     }
 
 
+WAVEFORM_MODES: tuple[str, ...] = ("Luma", "RGB")
+
+
+def compute_waveform(image: Image.Image, mode: str = "Luma", height: int = 256) -> Image.Image:
+    """A video-style waveform monitor: horizontal pixel position (x) against the distribution of
+    luminance ("Luma") or per-channel ("RGB") intensity found in that column, the same concept as
+    a real waveform scope used for exposure/levels analysis. Unlike compute_histogram() (one
+    aggregate count per value bin across the whole image), this keeps the x-axis so a gradient,
+    a blown-out sky, or a clipped column stands out at the position it actually occupies in the
+    frame.
+
+    Returns a ready-to-display RGB image sized (image.width, height) -- row 0 is the brightest
+    value (255) and the bottom row is the darkest (0), matching how a real waveform monitor
+    plots white at the top. Computed entirely with NumPy (one vectorized 2D-histogram-style
+    scatter per channel via `np.add.at`, no per-column Python loop) since this can run on every
+    canvas rerun just like compute_histogram(). Each channel's own column-independent pixel
+    counts are normalized against that channel's single brightest bin (not each column
+    separately) and gamma-compressed (`sqrt`) for display, then combined across channels with a
+    per-pixel maximum (a "screen"-like combine) rather than a sum, so a bright trace in one
+    channel doesn't wash out or clip against another's."""
+    if mode not in WAVEFORM_MODES:
+        mode = "Luma"
+    rgb = np.asarray(image.convert("RGB")).astype(np.float64)
+    src_height, width = rgb.shape[0], rgb.shape[1]
+    bins = max(1, int(height))
+
+    if mode == "Luma":
+        channels = {"Luma": rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114}
+        colors = {"Luma": (235.0, 235.0, 235.0)}
+    else:
+        channels = {"Red": rgb[..., 0], "Green": rgb[..., 1], "Blue": rgb[..., 2]}
+        colors = {"Red": (255.0, 70.0, 70.0), "Green": (70.0, 255.0, 70.0), "Blue": (70.0, 130.0, 255.0)}
+
+    canvas = np.zeros((bins, width, 3), dtype=np.float64)
+    col_indices = np.broadcast_to(np.arange(width), (src_height, width))
+
+    for name, values in channels.items():
+        rows = np.clip(np.round((255.0 - values) / 255.0 * (bins - 1)).astype(np.int64), 0, bins - 1)
+        counts = np.zeros((bins, width), dtype=np.float64)
+        np.add.at(counts, (rows.ravel(), col_indices.ravel()), 1.0)
+        peak = counts.max()
+        normalized = np.sqrt(counts / peak) if peak > 0 else counts
+        color = np.array(colors[name], dtype=np.float64)
+        canvas = np.maximum(canvas, normalized[..., None] * color[None, None, :])
+
+    return Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), mode="RGB")
+
+
 def normalize_mask(mask: Image.Image | np.ndarray, size: tuple[int, int], invert: bool = False, feather: int = 0) -> Image.Image:
     result = mask if isinstance(mask, Image.Image) else Image.fromarray(np.asarray(mask).astype(np.uint8), mode="L")
     result = result.convert("L").resize(size, Image.Resampling.NEAREST)
@@ -116,13 +164,72 @@ def apply_mask_overlay(image: Image.Image, mask: Image.Image, color: tuple[int, 
     return Image.alpha_composite(base, overlay).convert("RGB")
 
 
-def export_profile(image: Image.Image, profile_name: str = "Web") -> tuple[bytes, str, str]:
+WATERMARK_POSITIONS: tuple[str, ...] = ("Top Left", "Top Right", "Bottom Left", "Bottom Right", "Center")
+
+
+def apply_watermark(
+    image: Image.Image,
+    text: str,
+    position: str = "Bottom Right",
+    opacity: int = 50,
+    font_size: int = 32,
+    color: tuple[int, int, int] = (255, 255, 255),
+) -> Image.Image:
+    """Stamp semi-transparent text onto a copy of `image` -- a lightweight branding/proofing
+    mark for exports, not a tamper-resistant signature. A blank/whitespace-only `text` is a
+    no-op (returns an unmodified copy), so callers can wire this straight to an optional export
+    control without a separate "watermark enabled" checkbox. Drawn on its own full-size RGBA
+    layer and alpha-composited once, the same approach apply_mask_overlay() already uses, so the
+    text's own antialiasing blends correctly at any opacity instead of each glyph's edge pixels
+    being individually thresholded. `opacity` is 0-100 (a percentage, matching a UI slider
+    labeled "Opacity %"), unlike apply_mask_overlay()'s own `opacity`, which is a direct 0-255
+    alpha value -- the two aren't meant to share a caller."""
+    if not text or not text.strip():
+        return image.copy()
+    base = image.convert("RGBA")
+    width, height = base.size
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    size = max(1, int(font_size))
+    try:
+        font = ImageFont.load_default(size=size)
+    except TypeError:
+        # Pillow versions older than 10.1 don't accept a `size=` argument to load_default().
+        font = ImageFont.load_default()
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    margin = max(4, int(size * 0.4))
+    positions = {
+        "Top Left": (margin, margin),
+        "Top Right": (max(margin, width - text_width - margin), margin),
+        "Bottom Left": (margin, max(margin, height - text_height - margin)),
+        "Bottom Right": (max(margin, width - text_width - margin), max(margin, height - text_height - margin)),
+        "Center": (max(0, (width - text_width) // 2), max(0, (height - text_height) // 2)),
+    }
+    x, y = positions.get(position, positions["Bottom Right"])
+    alpha = max(0, min(255, int(round(opacity / 100.0 * 255))))
+    draw.text((x - bbox[0], y - bbox[1]), text, font=font, fill=(*color, alpha))
+    return Image.alpha_composite(base, overlay).convert("RGB")
+
+
+def export_profile(
+    image: Image.Image,
+    profile_name: str = "Web",
+    watermark_text: str | None = None,
+    watermark_position: str = "Bottom Right",
+    watermark_opacity: int = 50,
+    watermark_font_size: int = 32,
+) -> tuple[bytes, str, str]:
     if profile_name not in EXPORT_PROFILES:
         raise ValueError(f"Unknown export profile: {profile_name}")
     profile = EXPORT_PROFILES[profile_name]
     result = image.copy()
     if profile["max_size"]:
         result.thumbnail(profile["max_size"], Image.Resampling.LANCZOS)
+    if watermark_text and watermark_text.strip():
+        # Applied after the resize above (not before) so position/margin/font-size are relative
+        # to the actual exported pixel dimensions of each profile, not the source's.
+        result = apply_watermark(result, watermark_text, watermark_position, watermark_opacity, watermark_font_size)
     output = io.BytesIO()
     format_name = profile["format"]
     save_kwargs = {"format": format_name}

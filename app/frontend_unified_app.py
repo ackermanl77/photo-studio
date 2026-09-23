@@ -30,9 +30,16 @@ from app.preset_exchange import export_presets, import_presets
 from app.portrait_tools import detect_faces
 from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS, clipping_warning_overlay, estimate_white_balance, gamut_warning_overlay
 from app.lens_corrections import LENS_PROFILES, apply_lens_corrections
-from app.professional_tools import EXPORT_PROFILES, GRID_PRESETS, apply_mask_overlay, compute_histogram, draw_guides_and_grid, export_profile, grid_line_fractions, preview_image, zoom_preview
+from app.professional_tools import EXPORT_PROFILES, GRID_PRESETS, WATERMARK_POSITIONS, apply_mask_overlay, apply_watermark, compute_histogram, compute_waveform, draw_guides_and_grid, export_profile, grid_line_fractions, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
 from app.recipe_options import ASPECT_RATIOS, merge_curve_points, recipe_to_options
+
+# A small bundled placeholder image (generated via PIL -- gradient background plus a few flat
+# shapes, not a real photo) so a first-time visitor can explore every tool without needing to
+# supply their own file first. "Try a sample photo" below loads it through the exact same
+# restored_source_bytes/restored_source_name fallback path a reopened .photoproject uses.
+SAMPLE_PHOTO_PATH = Path(__file__).resolve().parent / "assets" / "sample_photo.jpg"
+SAMPLE_PHOTO_NAME = "sample_photo.jpg"
 
 # Maps a JSON-serializable recipe key to the session_state key of the widget that reads/writes it.
 # Shared by Undo/Redo (EditHistory snapshots) and Save/Load Project (ProjectBundle.recipe) so both
@@ -393,46 +400,58 @@ def _render_layer_styles(layer: dict, layer_id: str) -> None:
     styles = layer["styles"]
     st.markdown("**Layer Styles**")
 
-    styles["drop_shadow_enabled"] = st.checkbox("Drop Shadow", styles.get("drop_shadow_enabled", False), key=f"l-ds-en-{layer_id}")
+    styles["drop_shadow_enabled"] = st.checkbox(
+        "Drop Shadow", styles.get("drop_shadow_enabled", False), key=f"l-ds-en-{layer_id}",
+        help="Casts a soft shadow behind this layer's own silhouette, offset and blurred below.",
+    )
     if styles["drop_shadow_enabled"]:
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            styles["drop_shadow_offset_x"] = st.slider("Offset X", -50, 50, int(styles.get("drop_shadow_offset_x", 8)), key=f"l-ds-ox-{layer_id}")
+            styles["drop_shadow_offset_x"] = st.slider("Offset X", -50, 50, int(styles.get("drop_shadow_offset_x", 8)), key=f"l-ds-ox-{layer_id}", help="Horizontal shadow displacement in pixels -- negative shifts it left, positive right.")
         with c2:
-            styles["drop_shadow_offset_y"] = st.slider("Offset Y", -50, 50, int(styles.get("drop_shadow_offset_y", 8)), key=f"l-ds-oy-{layer_id}")
+            styles["drop_shadow_offset_y"] = st.slider("Offset Y", -50, 50, int(styles.get("drop_shadow_offset_y", 8)), key=f"l-ds-oy-{layer_id}", help="Vertical shadow displacement in pixels -- negative shifts it up, positive down.")
         with c3:
-            styles["drop_shadow_blur"] = st.slider("Blur", 0, 40, int(styles.get("drop_shadow_blur", 6)), key=f"l-ds-bl-{layer_id}")
+            styles["drop_shadow_blur"] = st.slider("Blur", 0, 40, int(styles.get("drop_shadow_blur", 6)), key=f"l-ds-bl-{layer_id}", help="How soft the shadow's edge is -- 0 is a hard-edged silhouette, higher spreads it into a soft blur.")
         with c4:
             styles["drop_shadow_color"] = st.color_picker("Color", styles.get("drop_shadow_color", "#000000"), key=f"l-ds-col-{layer_id}")
-        styles["drop_shadow_opacity"] = st.slider("Shadow Opacity", 0.0, 1.0, float(styles.get("drop_shadow_opacity", 0.6)), 0.01, key=f"l-ds-op-{layer_id}")
+        styles["drop_shadow_opacity"] = st.slider("Shadow Opacity", 0.0, 1.0, float(styles.get("drop_shadow_opacity", 0.6)), 0.01, key=f"l-ds-op-{layer_id}", help="How dark/visible the shadow is, independent of the layer's own opacity.")
 
-    styles["outer_glow_enabled"] = st.checkbox("Outer Glow", styles.get("outer_glow_enabled", False), key=f"l-og-en-{layer_id}")
+    styles["outer_glow_enabled"] = st.checkbox(
+        "Outer Glow", styles.get("outer_glow_enabled", False), key=f"l-og-en-{layer_id}",
+        help="Adds a soft halo of color radiating outward from this layer's silhouette.",
+    )
     if styles["outer_glow_enabled"]:
         c1, c2, c3 = st.columns(3)
         with c1:
-            styles["outer_glow_blur"] = st.slider("Blur", 0, 60, int(styles.get("outer_glow_blur", 10)), key=f"l-og-bl-{layer_id}")
+            styles["outer_glow_blur"] = st.slider("Blur", 0, 60, int(styles.get("outer_glow_blur", 10)), key=f"l-og-bl-{layer_id}", help="How far the glow spreads outward from the layer's edge.")
         with c2:
             styles["outer_glow_color"] = st.color_picker("Color", styles.get("outer_glow_color", "#FFDC78"), key=f"l-og-col-{layer_id}")
         with c3:
-            styles["outer_glow_opacity"] = st.slider("Glow Opacity", 0.0, 1.0, float(styles.get("outer_glow_opacity", 0.75)), 0.01, key=f"l-og-op-{layer_id}")
+            styles["outer_glow_opacity"] = st.slider("Glow Opacity", 0.0, 1.0, float(styles.get("outer_glow_opacity", 0.75)), 0.01, key=f"l-og-op-{layer_id}", help="How strong/visible the glow is.")
 
-    styles["stroke_enabled"] = st.checkbox("Stroke", styles.get("stroke_enabled", False), key=f"l-st-en-{layer_id}")
+    styles["stroke_enabled"] = st.checkbox(
+        "Stroke", styles.get("stroke_enabled", False), key=f"l-st-en-{layer_id}",
+        help="Outlines this layer's silhouette with a solid-color border.",
+    )
     if styles["stroke_enabled"]:
         c1, c2, c3 = st.columns(3)
         with c1:
-            styles["stroke_width"] = st.slider("Width", 1, 40, int(styles.get("stroke_width", 4)), key=f"l-st-w-{layer_id}")
+            styles["stroke_width"] = st.slider("Width", 1, 40, int(styles.get("stroke_width", 4)), key=f"l-st-w-{layer_id}", help="Border thickness in pixels.")
         with c2:
             styles["stroke_color"] = st.color_picker("Color", styles.get("stroke_color", "#FFFFFF"), key=f"l-st-col-{layer_id}")
         with c3:
-            styles["stroke_opacity"] = st.slider("Stroke Opacity", 0.0, 1.0, float(styles.get("stroke_opacity", 1.0)), 0.01, key=f"l-st-op-{layer_id}")
+            styles["stroke_opacity"] = st.slider("Stroke Opacity", 0.0, 1.0, float(styles.get("stroke_opacity", 1.0)), 0.01, key=f"l-st-op-{layer_id}", help="How solid/visible the outline is.")
 
-    styles["color_overlay_enabled"] = st.checkbox("Color Overlay", styles.get("color_overlay_enabled", False), key=f"l-co-en-{layer_id}")
+    styles["color_overlay_enabled"] = st.checkbox(
+        "Color Overlay", styles.get("color_overlay_enabled", False), key=f"l-co-en-{layer_id}",
+        help="Tints this layer's visible pixels with a flat color, blended by the opacity below.",
+    )
     if styles["color_overlay_enabled"]:
         c1, c2 = st.columns(2)
         with c1:
             styles["color_overlay_color"] = st.color_picker("Color", styles.get("color_overlay_color", "#FF0000"), key=f"l-co-col-{layer_id}")
         with c2:
-            styles["color_overlay_opacity"] = st.slider("Overlay Opacity", 0.0, 1.0, float(styles.get("color_overlay_opacity", 0.6)), 0.01, key=f"l-co-op-{layer_id}")
+            styles["color_overlay_opacity"] = st.slider("Overlay Opacity", 0.0, 1.0, float(styles.get("color_overlay_opacity", 0.6)), 0.01, key=f"l-co-op-{layer_id}", help="How strongly the color tints the layer -- 0 has no effect, 1 fully replaces its color.")
 
 
 def _render_pen_path_editor(source: Image.Image, key_prefix: str, points: list[dict], closed: bool) -> tuple[list[dict], bool]:
@@ -2138,6 +2157,19 @@ with upload_col1:
     )
 with upload_col2:
     st.caption("📂 Open any JPG, PNG, WEBP, TIFF, or camera RAW file.")
+    # Only offered while the workspace is still empty -- once a real photo (or a reopened
+    # project) is loaded, clicking this would silently swap it out for the placeholder, which
+    # would be surprising rather than helpful.
+    if not uploaded and "restored_source_bytes" not in st.session_state:
+        if st.button(
+            "🖼️ Try a sample photo",
+            key="sample-photo-btn",
+            use_container_width=True,
+            help="No photo of your own handy? Load a small bundled placeholder image so you can explore every tool right away.",
+        ):
+            st.session_state["restored_source_bytes"] = SAMPLE_PHOTO_PATH.read_bytes()
+            st.session_state["restored_source_name"] = SAMPLE_PHOTO_NAME
+            st.rerun()
 
 with st.expander("📁 Open a saved project (.photoproject)"):
     project_upload = st.file_uploader("Project file", type=["photoproject", "zip"], key="proj-upload")
@@ -2182,7 +2214,7 @@ with st.expander("📁 Open a saved project (.photoproject)"):
             st.rerun()
 
 if not uploaded and "restored_source_bytes" not in st.session_state:
-    st.info("👆 Upload an image above (or load a saved project) to open the editing workspace.")
+    st.info("👆 Upload an image above, load a saved project, or click \"Try a sample photo\" to open the editing workspace.")
     st.stop()
 
 # A freshly uploaded file always takes priority; otherwise fall back to the image bundled inside a
@@ -2274,10 +2306,10 @@ with st.container(key="workspace-split"):
                     st.image(preset_thumbs[name], use_container_width=True)
                     st.caption(name)
             preset_choice = st.selectbox("Preset Look", preset_names, key="tone-preset")
-            exp_val = st.slider("Exposure", 0.5, 1.5, 1.0, 0.01, key="t-exp")
-            cont_val = st.slider("Contrast", 0.5, 1.5, 1.0, 0.01, key="t-cont")
-            high_val = st.slider("Highlights", -100, 100, 0, key="t-high")
-            shad_val = st.slider("Shadows", -100, 100, 0, key="t-shad")
+            exp_val = st.slider("Exposure", 0.5, 1.5, 1.0, 0.01, key="t-exp", help="Overall brightness multiplier -- below 1.0 darkens the image, above 1.0 brightens it.")
+            cont_val = st.slider("Contrast", 0.5, 1.5, 1.0, 0.01, key="t-cont", help="Spreads tones apart around midtone gray -- higher makes shadows darker and highlights brighter.")
+            high_val = st.slider("Highlights", -100, 100, 0, key="t-high", help="Recovers or boosts the brightest parts of the image -- negative pulls blown highlights back, positive brightens them further.")
+            shad_val = st.slider("Shadows", -100, 100, 0, key="t-shad", help="Lifts or deepens the darkest parts of the image -- positive opens up shadow detail, negative deepens shadows.")
 
         # TAB: LENS CORRECTIONS
         with tab_lens:
@@ -2400,9 +2432,9 @@ with st.container(key="workspace-split"):
 
         # TAB 2: COLOR & CURVES
         with tab_color:
-            temp_val = st.slider("Temperature (Cool/Warm)", -100, 100, 0, key="c-temp")
-            tint_val = st.slider("Tint (Green/Magenta)", -100, 100, 0, key="c-tint")
-            sat_val = st.slider("Saturation", 0.0, 2.0, 1.0, 0.01, key="c-sat")
+            temp_val = st.slider("Temperature (Cool/Warm)", -100, 100, 0, key="c-temp", help="Shifts the overall white balance -- negative cools the image toward blue, positive warms it toward orange.")
+            tint_val = st.slider("Tint (Green/Magenta)", -100, 100, 0, key="c-tint", help="Corrects a color cast along the green/magenta axis, independent of Temperature.")
+            sat_val = st.slider("Saturation", 0.0, 2.0, 1.0, 0.01, key="c-sat", help="Uniformly boosts or reduces color intensity across the whole image -- 0 is grayscale, 1.0 is unchanged.")
             vib_val = st.slider(
                 "Vibrance", -100, 100, 0, key="c-vib",
                 help="A smarter saturation boost -- protects skin tones and already-saturated colors, pushing washed-out ones harder instead.",
@@ -2525,18 +2557,18 @@ with st.container(key="workspace-split"):
 
         # TAB 3: DETAIL & SHARPNESS
         with tab_detail:
-            text_val = st.slider("Texture", -100, 100, 0, key="d-text")
-            clar_val = st.slider("Clarity", -100, 100, 0, key="d-clar")
+            text_val = st.slider("Texture", -100, 100, 0, key="d-text", help="Enhances or softens fine surface detail (skin pores, fabric, foliage) without affecting large tonal shapes.")
+            clar_val = st.slider("Clarity", -100, 100, 0, key="d-clar", help="Boosts or reduces midtone contrast at a larger scale than Texture -- adds a sense of punch/depth; negative gives a soft, dreamy look.")
             haze_val = st.slider(
                 "Dehaze", 0, 100, 0, key="d-haze",
                 help="Reduces atmospheric haze (Dark Channel Prior, a classical algorithm -- not AI). Pushed too high, it can crush shadows or halo around strong edges.",
             )
-            denoise_val = st.slider("Denoise", 0, 9, 0, step=2, key="d-den")
+            denoise_val = st.slider("Denoise", 0, 9, 0, step=2, key="d-den", help="Smooths luminance noise/grain -- higher removes more noise but can soften fine detail.")
             denoise_color_val = st.slider(
                 "Color Noise", 0, 9, 0, step=2, key="d-den-color", disabled=denoise_val == 0,
                 help="Independent chroma (color speckle) denoising strength, on top of Denoise's luminance/detail smoothing -- push higher than Denoise to clean up color blotches without softening detail as much. Has no effect while Denoise is 0.",
             )
-            sharp_en = st.checkbox("Sharpen (Unsharp Mask)", value=False, key="d-sharp")
+            sharp_en = st.checkbox("Sharpen (Unsharp Mask)", value=False, key="d-sharp", help="Increases edge contrast to make the image look crisper -- applied last in the Detail group, after Texture/Clarity/Denoise.")
 
             with st.expander("✨ Effects", expanded=False):
                 st.caption("Creative finishing touches applied to the final, already-cropped frame -- separate from the Lens tab's corrective vignette, which runs before Crop.")
@@ -2602,9 +2634,9 @@ with st.container(key="workspace-split"):
                 st.image(apply_mask_overlay(mask_source, combined_mask), caption="Red = selected by the combined mask", use_container_width=True)
 
             mask_inert = not any(layer["enabled"] for layer in st.session_state.mask_layers)
-            m_exp = st.slider("Target Exposure", 0.5, 1.5, 1.0, 0.01, key="m-texp", disabled=mask_inert)
-            m_cont = st.slider("Target Contrast", 0.5, 1.5, 1.0, 0.01, key="m-tcont", disabled=mask_inert)
-            m_sat = st.slider("Target Saturation", 0.0, 2.0, 1.0, 0.01, key="m-tsat", disabled=mask_inert)
+            m_exp = st.slider("Target Exposure", 0.5, 1.5, 1.0, 0.01, key="m-texp", disabled=mask_inert, help="Exposure adjustment applied only inside the combined mask's selected area.")
+            m_cont = st.slider("Target Contrast", 0.5, 1.5, 1.0, 0.01, key="m-tcont", disabled=mask_inert, help="Contrast adjustment applied only inside the combined mask's selected area.")
+            m_sat = st.slider("Target Saturation", 0.0, 2.0, 1.0, 0.01, key="m-tsat", disabled=mask_inert, help="Saturation adjustment applied only inside the combined mask's selected area.")
 
         # TAB 6: PORTRAIT RETOUCHING
         with tab_portrait:
@@ -2693,7 +2725,10 @@ with st.container(key="workspace-split"):
                 st.session_state.edit_history = EditHistory()
             history = st.session_state.edit_history
             history.record(_build_recipe())
-            st.caption("↶ Undo / ↷ Redo are always available in the bar above the canvas, not just here.")
+            st.caption(
+                "↶ Undo / ↷ Redo and 📌 Named Snapshots are always available in the bar above the "
+                "canvas, not just here."
+            )
 
             st.markdown("---")
             st.markdown("**Project File**")
@@ -2941,7 +2976,9 @@ with st.container(key="workspace-split"):
 
     with canvas_col:
         # Canvas Header Bar
-        top_c1, top_undo, top_redo, top_reset, top_c2, top_c3 = st.columns([0.95, 0.18, 0.18, 0.18, 0.75, 0.95], gap="small")
+        top_c1, top_undo, top_redo, top_reset, top_snap, top_c2, top_c3 = st.columns(
+            [0.85, 0.18, 0.18, 0.18, 0.22, 0.65, 0.95], gap="small"
+        )
         with top_c1:
             # html.escape() here: upload_name is the uploaded file's own filename (user-controlled),
             # interpolated into both an HTML attribute (title=) and element text below via
@@ -2966,6 +3003,56 @@ with st.container(key="workspace-split"):
             if st.button("↺", key="hist-reset-btn", help="Reset all adjustments to defaults", use_container_width=True):
                 st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": []}
                 _request_rerun()
+        with top_snap:
+            # Named Snapshots used to live buried at the bottom of the Presets tab (10th of 11
+            # tabs), below preset import/export -- Undo/Redo/Reset were already moved up here for
+            # exactly this "buried in Presets" reason (see docs/PROJECT_STATUS.md's history), but
+            # Snapshots wasn't, until now. `history` (and its .record() call for this rerun) is
+            # still created inside tab_presets above, which -- like every other tab body -- runs
+            # earlier in the same script pass than canvas_col, so it's already populated by the
+            # time this popover reads history.snapshot_names below.
+            with st.popover(
+                "📌", use_container_width=True,
+                help="Named Snapshots -- bookmark the current look under a name and jump back to it any time without losing Undo/Redo history",
+            ):
+                st.markdown("**Named Snapshots**")
+                st.caption(
+                    "Bookmark the current look under a name and jump back to it any time -- unlike "
+                    "Undo/Redo, restoring a snapshot never discards it (or any other saved snapshot)."
+                )
+                snap_new_name = st.text_input(
+                    "Snapshot name", key="snap-name-in", label_visibility="collapsed", placeholder="Snapshot name",
+                    help="Name for the bookmark you're about to save.",
+                )
+                if st.button("📌 Save Snapshot", key="snap-save-btn", use_container_width=True):
+                    if snap_new_name.strip():
+                        history.save_snapshot(snap_new_name.strip(), _build_recipe())
+                        st.toast(f"Snapshot '{snap_new_name.strip()}' saved", icon="📌")
+                        _request_rerun()
+                    else:
+                        st.toast("Type a name before saving a snapshot", icon="⚠️")
+                if history.snapshot_names:
+                    # Keyed by the snapshot's own name (stable), not list position -- the same
+                    # UUID-keyed-list convention CLAUDE.md documents for mask/image layers, so a
+                    # Restore/Delete here never risks the "later item rendered twice under a shifted
+                    # index" StreamlitDuplicateElementKey bug a positionally-keyed list could hit.
+                    # Still `break` right after either mutation, matching this codebase's established
+                    # per-item-list-widget convention exactly rather than relying only on that
+                    # argument.
+                    for snap_name in history.snapshot_names:
+                        snap_row1, snap_row2, snap_row3 = st.columns([2, 1, 0.6])
+                        snap_row1.caption(snap_name)
+                        if snap_row2.button("↩️ Restore", key=f"snap-restore-{snap_name}", use_container_width=True, help=f"Restore snapshot '{snap_name}'"):
+                            st.session_state["_pending_restore"] = history.restore_snapshot(snap_name) or {}
+                            st.toast(f"Restored snapshot '{snap_name}'", icon="↩️")
+                            _request_rerun()
+                            break
+                        if snap_row3.button("🗑️", key=f"snap-delete-{snap_name}", use_container_width=True, help=f"Delete snapshot '{snap_name}'"):
+                            history.delete_snapshot(snap_name)
+                            _request_rerun()
+                            break
+                else:
+                    st.caption("No snapshots saved yet.")
         components.html(_UNDO_REDO_KEYBOARD_SHORTCUTS_HTML, height=0)
         with top_c2:
             zoom_level = st.selectbox("Zoom View", [1.0, 0.5, 1.5, 2.0, 4.0], format_func=lambda z: f"🔍 {int(z*100)}%" if z>=1 else f"🔍 {int(z*100)}% (Fit)", key="cv-zoom", label_visibility="collapsed")
@@ -3051,6 +3138,36 @@ with st.container(key="workspace-split"):
         histogram["Pixel Value"] = [round(255 * (i + 0.5) / histogram_bins) for i in range(histogram_bins)]
         st.line_chart(histogram, x="Pixel Value", y=["Red", "Green", "Blue"], height=90, color=["#f87171", "#4ade80", "#60a5fa"])
 
+        # Waveform monitor -- a horizontal-position vs. luminance/RGB-intensity scope (the same
+        # concept as a video editor's waveform), complementing the histogram above (which plots
+        # value distribution with no position information at all). Off by default so it doesn't
+        # clutter the canvas -- both widgets are still always instantiated every rerun (not just
+        # the toggle) so toggling it off and back on doesn't lose the channel-mode choice the way
+        # a widget only rendered inside the `if` block below would (see CLAUDE.md's "every tab
+        # runs every rerun" / conditional-widget-loses-state note); only the image itself (not a
+        # stateful widget) is skipped when off. Reflects edited_image, same as the histogram.
+        # A short visible caption (not just the checkbox's own help= tooltip on hover) so a
+        # first-time user notices this exists at all -- easy to miss otherwise as a plain
+        # checkbox below the histogram.
+        st.caption("〰️ **Waveform monitor**: an extra scope for checking exposure across the frame, next to the histogram above.")
+        waveform_toggle_col, waveform_mode_col = st.columns([1, 1])
+        with waveform_toggle_col:
+            show_waveform = st.checkbox(
+                "〰️ Show waveform monitor", key="waveform-toggle",
+                help="Horizontal position vs. luminance/RGB intensity, like a video editor's waveform scope.",
+            )
+        with waveform_mode_col:
+            waveform_mode = st.radio(
+                "Waveform channels", ["Luma", "RGB"], key="waveform-mode", horizontal=True,
+                label_visibility="collapsed", disabled=not show_waveform,
+            )
+        if show_waveform:
+            st.image(
+                compute_waveform(edited_image, mode=waveform_mode),
+                caption=f"Waveform ({waveform_mode})",
+                use_container_width=True,
+            )
+
         # Clipping warning -- the same idea as Lightroom's blown-highlight/blocked-shadow
         # triangles on the histogram, shown as a full preview overlay instead (matching this app's
         # existing overlay-checkbox pattern -- the Masks/Repair preview checkboxes, and the Soft
@@ -3062,6 +3179,22 @@ with st.container(key="workspace-split"):
                 use_container_width=True,
             )
 
+        # Watermark -- an optional text stamp applied only to exported files (single-format Save
+        # below, and Export Multiple Sizes further down), never to the canvas preview or histogram
+        # above. Defined ahead of the Export Footer Bar so its values (wm_text/wm_position/
+        # wm_opacity/wm_font_size) are already in hand by the time that bar builds out_img, rather
+        # than re-reading them back out of session_state after the fact.
+        with st.expander("🏷️ Watermark"):
+            st.caption("Optional text stamp applied only to exported files, not the canvas preview above.")
+            wm_text = st.text_input("Watermark text (blank = none)", key="wm-text-in")
+            wm_pos_col, wm_op_col, wm_size_col = st.columns(3)
+            with wm_pos_col:
+                wm_position = st.selectbox("Position", list(WATERMARK_POSITIONS), index=3, key="wm-pos-sel")
+            with wm_op_col:
+                wm_opacity = st.slider("Opacity %", 5, 100, 50, key="wm-opacity-sl")
+            with wm_size_col:
+                wm_font_size = st.slider("Font size", 12, 120, 32, key="wm-size-sl")
+
         # Export Footer Bar
         st.markdown('<div class="export-panel">', unsafe_allow_html=True)
         exp_c1, exp_c2, exp_c3 = st.columns([1, 1, 1.2], gap="small")
@@ -3072,7 +3205,8 @@ with st.container(key="workspace-split"):
         with exp_c3:
             buf = io.BytesIO()
             f_name = {"JPEG": "JPEG", "PNG": "PNG", "WEBP": "WEBP", "TIFF": "TIFF"}[out_format]
-            out_img = edited_image.convert("RGB") if f_name in ["JPEG", "WEBP"] else edited_image
+            export_source = apply_watermark(edited_image, wm_text, wm_position, wm_opacity, wm_font_size) if wm_text.strip() else edited_image
+            out_img = export_source.convert("RGB") if f_name in ["JPEG", "WEBP"] else export_source
             opts = {"format": f_name}
             if f_name in ["JPEG", "WEBP"]:
                 opts["quality"] = out_quality
@@ -3099,7 +3233,13 @@ with st.container(key="workspace-split"):
         with st.expander("📦 Export Multiple Sizes"):
             selected_profiles = st.multiselect("Sizes to include", list(EXPORT_PROFILES), default=["Web", "Social"], key="exp-multi-profiles")
             if st.button("Prepare ZIP", key="exp-multi-btn", disabled=not selected_profiles):
-                zip_bytes = export_multiple(edited_image, selected_profiles, Path(upload_name).stem)
+                zip_bytes = export_multiple(
+                    edited_image, selected_profiles, Path(upload_name).stem,
+                    watermark_text=wm_text if wm_text.strip() else None,
+                    watermark_position=wm_position,
+                    watermark_opacity=wm_opacity,
+                    watermark_font_size=wm_font_size,
+                )
                 st.session_state["_exp_multi_zip"] = zip_bytes
                 _request_rerun()
             if st.session_state.get("_exp_multi_zip"):
