@@ -36,11 +36,12 @@ Earlier development iterations used additional per-feature Streamlit entry point
 ## Release
 
 ```text
-PhotoStudio-0.1.0-Windows/PhotoStudio.exe
-PhotoStudio-0.1.0-Windows/WebView2Runtime/   -- bundled Fixed Version WebView2 Runtime, see "Recently Fixed"
+release/PhotoStudio.exe
+release/WebView2Runtime/   -- bundled Fixed Version WebView2 Runtime, see "Recently Fixed"
+PhotoStudio-0.1.0-Windows.7z (+ .sha256)   -- the distributable, built from release/
 ```
 
-Generated build and distribution folders are cleaned after release work. Rebuild with `scripts/build_release.ps1`. Older release notes under `docs/workflows/desktop-exe/` (`current-all-features.md`, `latest-release.md`, `all-features-release.md`, `global-release.md`) reference earlier `dist-*` folder names and test counts from previous builds — they are historical and do not describe the current `PhotoStudio-0.1.0-Windows` release.
+`scripts/build_release.ps1` cleans up after itself: PyInstaller's output is moved into `release/` (no second version-named copy anymore), and `build-release/`/`dist-release/` are deleted after a successful build (`-KeepBuildFiles` keeps them). Rebuild with `scripts/build_release.ps1`. Older release notes under `docs/workflows/desktop-exe/` (`current-all-features.md`, `latest-release.md`, `all-features-release.md`, `global-release.md`) reference earlier `dist-*` folder names and test counts from previous builds — they are historical and do not describe the current release.
 
 ## Verification
 

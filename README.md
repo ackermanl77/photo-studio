@@ -7,7 +7,7 @@ A CPU-first Python photo editor with a Streamlit interface, Windows desktop pack
 ## Current Status
 
 - Global Python: `C:/Users/MELEJ/AppData/Local/Python/pythoncore-3.14-64/python.exe`.
-- Current packaged release: `PhotoStudio-0.1.0-Windows/`.
+- Current packaged release: `release\PhotoStudio.exe` (distributed as `PhotoStudio-0.1.0-Windows.7z`).
 - Designed for computers without a dedicated GPU.
 - `docs/PROJECT_STATUS.md` is the authoritative reference for entry points, architecture, and known issues — this README only covers day-to-day commands.
 - New to the app itself? [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) walks through every tab and feature in the unified workspace.
@@ -34,7 +34,7 @@ The unified workspace includes Tone, Color, Detail, Layers, Masks, Portrait, and
 
 ## Desktop App
 
-**The built app always lands in `release\PhotoStudio.exe`** — a fixed-name folder `build_release.ps1` overwrites with the latest build on every run, so you don't need to know or look up the current version number to find it. (The version-suffixed `PhotoStudio-<version>-Windows\` folder next to it, and its `.7z`, still exist too — that's what actually gets distributed/attached to a release.)
+**The built app always lands in `release\PhotoStudio.exe`** — a fixed-name folder `build_release.ps1` overwrites with the latest build on every run, so you don't need to know or look up the current version number to find it. It's the only unpacked copy: PyInstaller's output is moved (not copied) into `release\`, and `build-release\` / `dist-release\` are deleted after a successful build (pass `-KeepBuildFiles` to keep PyInstaller's cache for a faster rebuild; a failed build always keeps them for debugging). The distributable is `PhotoStudio-<version>-Windows.7z` + `.sha256`, built from `release\` — `-SkipArchive` skips it and removes a stale one from an earlier build.
 
 ```text
 release\PhotoStudio.exe
@@ -51,7 +51,7 @@ The release script prefers global Python, supports one-file and one-folder PyIns
 
 **Or let CI build it for you**: pushing a tag like `v0.1.0` triggers `.github/workflows/release.yml`, which runs this exact same script on a `windows-latest` runner and attaches `PhotoStudio-<version>-Windows.7z` + its `.sha256` to a new GitHub Release, plus keeps them as a build artifact on the workflow run either way. It can also be run on demand (Actions tab → "Release Build" → "Run workflow", enter a version) without needing a tag push or a real release at all, which just builds and uploads the artifact.
 
-**The native window needs Microsoft Edge WebView2 Runtime, and it's bundled — nothing to install on the target machine.** Confirmed missing on a second PC when the app was first tested there, so `build_release.ps1` now downloads a pinned "Fixed Version" copy of the WebView2 Runtime (cached under `vendor/webview2-cache/`, gitignored — first build needs internet access for this one-time ~300MB download) and copies it into the release folder as `WebView2Runtime`, a sibling of `PhotoStudio.exe`. `app/desktop.py` points pywebview at it via `webview.settings["WEBVIEW2_RUNTIME_PATH"]`, so the packaged app never depends on WebView2 being installed system-wide. Copy the whole `PhotoStudio-<version>-Windows` folder (or its `.7z`) to another machine — extract and run, no installer, no Python. The one trade-off: a bundled Fixed Version copy doesn't auto-update with Chromium security patches the way a system install does, so `$WebView2Version` in `build_release.ps1` should be bumped deliberately every so often (see the comment above it for how to get a new version's download URL).
+**The native window needs Microsoft Edge WebView2 Runtime, and it's bundled — nothing to install on the target machine.** Confirmed missing on a second PC when the app was first tested there, so `build_release.ps1` now downloads a pinned "Fixed Version" copy of the WebView2 Runtime (cached under `vendor/webview2-cache/`, gitignored — first build needs internet access for this one-time ~300MB download) and copies it into the release folder as `WebView2Runtime`, a sibling of `PhotoStudio.exe`. `app/desktop.py` points pywebview at it via `webview.settings["WEBVIEW2_RUNTIME_PATH"]`, so the packaged app never depends on WebView2 being installed system-wide. Copy the whole `release` folder (or the `PhotoStudio-<version>-Windows.7z`) to another machine — extract and run, no installer, no Python. The one trade-off: a bundled Fixed Version copy doesn't auto-update with Chromium security patches the way a system install does, so `$WebView2Version` in `build_release.ps1` should be bumped deliberately every so often (see the comment above it for how to get a new version's download URL).
 
 `app/desktop.py` starts both the Streamlit frontend (`frontend_unified_app.py`) and the Flask processing backend (`app/backend.py`, `127.0.0.1:8502`) — the frontend sends its edit pipeline to the backend over HTTP rather than processing in-process. Running the frontend standalone (`streamlit run app/frontend_unified_app.py`, below) also works without `desktop.py`: the frontend starts the backend on demand the first time it's needed. See "Architecture" in `docs/PROJECT_STATUS.md` for the request flow and the latency trade-off that comes with it.
 

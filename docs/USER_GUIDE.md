@@ -11,8 +11,8 @@ recently and known limitations, see [`PROJECT_STATUS.md`](PROJECT_STATUS.md).
 
 ## 1. Getting Started
 
-**Desktop app (recommended):** run `release\PhotoStudio.exe` (or the version-named
-`PhotoStudio-<version>-Windows\PhotoStudio.exe` folder) — a native window, nothing to install.
+**Desktop app (recommended):** run `release\PhotoStudio.exe` (or `PhotoStudio.exe` from an
+extracted `PhotoStudio-<version>-Windows.7z`) — a native window, nothing to install.
 
 **From source:** `streamlit run app/frontend_unified_app.py` opens it in your browser instead. Both
 give you the exact same workspace.
