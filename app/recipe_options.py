@@ -21,13 +21,24 @@ _DIRECT_PASSTHROUGH_KEYS = (
     "texture", "clarity", "denoise", "denoise_color", "sharpen", "dehaze",
     "effects_vignette_amount", "effects_vignette_midpoint", "effects_grain_amount",
     "portrait_smoothing", "removal_radius",
-    "ai_upscale", "ai_upscale_factor",
     "cg_shadows_hue", "cg_shadows_intensity",
     "cg_midtones_hue", "cg_midtones_intensity",
     "cg_highlights_hue", "cg_highlights_intensity", "cg_balance",
     "lens_distortion", "lens_vignette_amount", "lens_vignette_midpoint", "lens_chromatic_aberration",
     "lens_perspective_v", "lens_perspective_h",
 )
+
+# Recipe keys that belong to one photo's export, never to a reusable look: AI Upscale is an
+# expensive (Real-ESRGAN, seconds to minutes per photo) change of output resolution, not a style --
+# carried through a preset it silently ran on every preset thumbnail render and every photo of a
+# batch. Deliberately absent from _DIRECT_PASSTHROUGH_KEYS above, and stripped from a recipe before
+# it's saved as, or applied from, a custom preset (without_per_photo_only_keys()).
+PER_PHOTO_ONLY_KEYS = ("ai_upscale", "ai_upscale_factor")
+
+
+def without_per_photo_only_keys(recipe: dict) -> dict:
+    return {key: value for key, value in recipe.items() if key not in PER_PHOTO_ONLY_KEYS}
+
 
 # recipe key -> differently-named options key.
 _RENAMED_KEYS = {
