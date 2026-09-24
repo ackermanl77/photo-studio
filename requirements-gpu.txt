@@ -1,0 +1,45 @@
+-r requirements.txt
+# Optional: enables the "AI Upscale" feature (app/ai_upscale.py) -- Real-ESRGAN neural
+# super-resolution, the one deliberate exception to this app's otherwise CPU-only, classical-
+# algorithms design (see "Known Issues" in docs/PROJECT_STATUS.md). Never installed by CI or by
+# requirements.txt/requirements-raw.txt/requirements-desktop.txt -- the app works exactly as
+# before if these aren't installed; the AI Upscale control simply won't be shown
+# (app.ai_upscale.ai_upscale_available() reports False).
+#
+# torch must be a CUDA build for GPU acceleration -- pip's default resolution of a bare `torch`
+# pin installs the CPU-only wheel. Install the CUDA build FIRST, from PyTorch's own index for your
+# CUDA version (https://pytorch.org/get-started/locally/), e.g. for CUDA 13.0:
+#   pip install torch==2.14.0 torchvision --index-url https://download.pytorch.org/whl/cu130
+# then install the rest of this file. This exact combination (torch==2.14.0+cu130,
+# torchvision==0.29.0+cu130) is confirmed working end-to-end (a real RealESRGAN_x4plus GPU
+# inference call, not just import checks) against an RTX 5080. CPU-only inference still works with
+# the default (non-CUDA) torch wheel -- just slower -- and on an older RTX 40-series card or no GPU
+# at all, app.ai_upscale falls back to CPU automatically via torch.cuda.is_available().
+#
+# `basicsr` (a realesrgan dependency) is an unmaintained package with two real, currently-open
+# compatibility bugs against recent Python/torchvision -- confirmed hit on this exact combination
+# (Python 3.14, torchvision 0.29), not hypothetical. `pip install basicsr` alone WILL fail or
+# import-error; fix both before/via that install:
+#   1. Its setup.py's get_version() relies on a bare `exec(code)` inside a function implicitly
+#      populating that function's locals(), which stopped being reliable in Python 3.13+ (PEP 667)
+#      -- pip install basicsr fails outright with "KeyError: '__version__'" during the build step.
+#   2. basicsr/data/degradations.py imports `rgb_to_grayscale` from the removed
+#      `torchvision.transforms.functional_tensor` module (moved to `torchvision.transforms.functional`
+#      several torchvision releases ago) -- this one only surfaces at import time (`import realesrgan`
+#      /`import basicsr`), as `ModuleNotFoundError: No module named 'torchvision.transforms.functional_tensor'`.
+# Fix: download basicsr's sdist directly (NOT via `pip download`, which runs the same broken
+# setup.py build step and fails the same way), patch both spots, install from the patched source --
+#   curl -L -o basicsr-1.4.2.tar.gz https://files.pythonhosted.org/packages/86/41/00a6b000f222f0fa4c6d9e1d6dcc9811a374cabb8abb9d408b77de39648c/basicsr-1.4.2.tar.gz
+#   tar xzf basicsr-1.4.2.tar.gz
+#   # in basicsr-1.4.2/setup.py, get_version(): exec into an explicit dict instead of locals():
+#   #   with open(version_file, 'r') as f:
+#   #       ns = {}
+#   #       exec(compile(f.read(), version_file, 'exec'), ns)
+#   #   return ns['__version__']
+#   # in basicsr-1.4.2/basicsr/data/degradations.py, fix the import line:
+#   #   from torchvision.transforms.functional import rgb_to_grayscale
+#   pip install ./basicsr-1.4.2
+# realesrgan (below) then installs normally against the patched basicsr already in the environment.
+torch==2.14.0
+basicsr>=1.4.2
+realesrgan>=0.3.0

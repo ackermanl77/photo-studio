@@ -21,6 +21,7 @@ _DIRECT_PASSTHROUGH_KEYS = (
     "texture", "clarity", "denoise", "denoise_color", "sharpen", "dehaze",
     "effects_vignette_amount", "effects_vignette_midpoint", "effects_grain_amount",
     "portrait_smoothing", "removal_radius",
+    "ai_upscale", "ai_upscale_factor",
     "cg_shadows_hue", "cg_shadows_intensity",
     "cg_midtones_hue", "cg_midtones_intensity",
     "cg_highlights_hue", "cg_highlights_intensity", "cg_balance",

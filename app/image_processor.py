@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 from PIL import Image, ImageEnhance, ImageFilter
 
+from app.ai_upscale import upscale as ai_upscale
 from app.dehaze import apply_dehaze
 from app.effects import apply_film_grain
 from app.lens_corrections import apply_lens_corrections, correct_vignette
@@ -261,6 +262,18 @@ class PhotoProcessor:
 
     def apply_film_grain(self, amount: float = 0.0) -> "PhotoProcessor":
         self.image = apply_film_grain(self.image, amount)
+        return self
+
+    def apply_ai_upscale(self, factor: int = 2) -> "PhotoProcessor":
+        """Real-ESRGAN neural super-resolution -- the one deliberate exception to this app's
+        CPU-first, no-ML-dependency design (see "Known Issues" in docs/PROJECT_STATUS.md). A thin
+        delegating wrapper into app.ai_upscale.upscale(), same pattern as every other apply_*
+        method here that delegates into a feature module. Requires the optional
+        requirements-gpu.txt packages (torch, realesrgan) -- raises RuntimeError via
+        app.ai_upscale.upscale() if they aren't installed; callers should check
+        app.ai_upscale.ai_upscale_available() first (both app.backend.process_image() and the
+        frontend's control already do)."""
+        self.image = ai_upscale(self.image, factor)
         return self
 
     def auto_enhance(self) -> "PhotoProcessor":

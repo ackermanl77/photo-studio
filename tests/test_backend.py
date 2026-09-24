@@ -158,6 +158,79 @@ def test_process_endpoint_applies_film_grain():
     assert baseline.data != grainy.data
 
 
+def test_process_endpoint_applies_ai_upscale_last_when_enabled(monkeypatch):
+    """AI Upscale is the one deliberate exception to this app's CPU-first design (see "Known
+    Issues" in docs/PROJECT_STATUS.md) -- confirms process_image() calls
+    PhotoProcessor.apply_ai_upscale with the requested factor when options["ai_upscale"] is set,
+    and that it runs after Effects (the already-vignetted/grained image is what gets "upscaled").
+    Mocks the actual Real-ESRGAN inference (apply_ai_upscale itself) so this doesn't need the
+    optional torch/realesrgan packages or a real GPU -- app.ai_upscale.ai_upscale_available is
+    also mocked True so the gate in process_image() doesn't short-circuit before reaching it."""
+    calls = []
+
+    def fake_apply_ai_upscale(self, factor=2):
+        calls.append(factor)
+        self.image = self.image.resize((self.image.width * factor, self.image.height * factor))
+        return self
+
+    monkeypatch.setattr(PhotoProcessor, "apply_ai_upscale", fake_apply_ai_upscale)
+    monkeypatch.setattr("app.ai_upscale.ai_upscale_available", lambda: True)
+
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes(size=(10, 10))), "input.png"),
+            "options": json.dumps({"ai_upscale": True, "ai_upscale_factor": 4}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert calls == [4]
+    result = Image.open(io.BytesIO(response.data))
+    assert result.size == (40, 40)
+
+
+def test_process_endpoint_skips_ai_upscale_when_not_requested(monkeypatch):
+    """Off by default -- an expensive, optional operation -- so a plain options dict (or
+    ai_upscale explicitly False) must never call apply_ai_upscale at all."""
+
+    def fail_if_called(self, factor=2):
+        raise AssertionError("apply_ai_upscale should not run when the ai_upscale option is falsy")
+
+    monkeypatch.setattr(PhotoProcessor, "apply_ai_upscale", fail_if_called)
+
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={"image": (io.BytesIO(image_bytes()), "input.png"), "options": json.dumps({})},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+
+
+def test_process_endpoint_returns_a_clean_error_when_ai_upscale_requested_but_unavailable(monkeypatch):
+    """On a machine without requirements-gpu.txt installed, requesting ai_upscale must fail with
+    the same clean JSON 400 error every other bad-input case gets (RuntimeError is already in the
+    /process route's except tuple), not an ImportError/AttributeError deep inside PhotoProcessor."""
+    monkeypatch.setattr("app.ai_upscale.ai_upscale_available", lambda: False)
+
+    client = app.test_client()
+    response = client.post(
+        "/process",
+        data={
+            "image": (io.BytesIO(image_bytes()), "input.png"),
+            "options": json.dumps({"ai_upscale": True}),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    assert response.is_json
+    assert "requirements-gpu.txt" in response.get_json()["error"]
+
+
 def test_process_endpoint_stop_after_detail_skips_repair_onward_steps():
     """options["stop_after"] == "detail" should return right after the Detail section, before
     Repair/Layers/Masks/Portrait/Crop/Effects -- confirmed by requesting a crop that would

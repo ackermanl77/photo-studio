@@ -13,6 +13,7 @@ _BASE_RECIPE = {
     "curve_enabled": False, "curve_black": 0, "curve_shadows": 64, "curve_mid": 128, "curve_highlights": 192, "curve_white": 255,
     "curve_extra_points": [],
     "texture": 0, "clarity": 0, "denoise": 0, "denoise_color": 0, "sharpen": False, "dehaze": 0,
+    "ai_upscale": False, "ai_upscale_factor": 2,
     "effects_vignette_amount": 0, "effects_vignette_midpoint": 50, "effects_grain_amount": 0,
     "portrait_smoothing": 0.0,
     "mask_target_exposure": 1.0, "mask_target_contrast": 1.0, "mask_target_saturation": 1.0,
@@ -48,6 +49,14 @@ def test_recipe_to_options_passes_through_plain_fields():
     assert options["vibrance"] == 40
     assert options["dehaze"] == 30
     assert options["lens_perspective_v"] == 25
+
+
+def test_recipe_to_options_passes_through_ai_upscale_fields():
+    recipe = _full_recipe(ai_upscale=True, ai_upscale_factor=4)
+    options = recipe_to_options(recipe)
+
+    assert options["ai_upscale"] is True
+    assert options["ai_upscale_factor"] == 4
 
 
 def test_recipe_to_options_renames_mask_target_fields():

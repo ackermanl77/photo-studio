@@ -54,7 +54,7 @@ def _image_mask(file_storage, size: tuple[int, int]) -> Image.Image:
 
 def process_image(image_file, options: dict, removal_mask=None, local_mask=None, layers_file=None) -> Image.Image:
     """Mirrors the exact step order of the unified UI's tabs (Lens -> Tone -> Color -> Detail ->
-    Layers -> Masks -> Portrait -> Crop -> Effects) so that routing the frontend's edits through
+    Layers -> Masks -> Portrait -> Crop -> Effects -> AI Upscale) so that routing the frontend's edits through
     this endpoint produces the same image as applying them in-process. Keeping this order in sync
     with app/frontend_unified_app.py matters: a mismatched order is exactly the class of bug
     documented under "Recently Fixed" in docs/PROJECT_STATUS.md (layers/masks silently producing a
@@ -222,6 +222,24 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     )
     if options.get("effects_grain_amount", 0):
         processor.apply_film_grain(_number(options, "effects_grain_amount", 0.0))
+
+    # AI Upscale -- the one deliberate exception to this app's CPU-first, no-ML-dependency design
+    # (see "Known Issues" in docs/PROJECT_STATUS.md). Deliberately LAST, after Effects: it upscales
+    # the final composited/edited result, so it isn't undone or re-blurred by a later step (e.g. a
+    # crop or vignette) operating at the original resolution, and every earlier step runs on the
+    # smaller source image, which is both cheaper and matches the resolution every other adjustment
+    # was tuned against. Optional (requirements-gpu.txt) -- ai_upscale_available() is checked here
+    # too (not just by the frontend control) so a stray option on a machine without the optional
+    # deps installed fails with a clear error instead of an ImportError deep inside PhotoProcessor.
+    if options.get("ai_upscale", False):
+        from app.ai_upscale import ai_upscale_available
+
+        if not ai_upscale_available():
+            raise RuntimeError(
+                "AI Upscale requires the optional 'torch' and 'realesrgan' packages -- "
+                "install requirements-gpu.txt to enable this feature."
+            )
+        processor.apply_ai_upscale(int(options.get("ai_upscale_factor", 2)))
 
     if source_exif and not options.get("strip_metadata", False):
         processor.image.info["exif"] = source_exif

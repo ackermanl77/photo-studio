@@ -131,6 +131,33 @@ def test_apply_post_crop_vignette_delegates_to_lens_corrections_module(tmp_path)
     assert pixels[:4, :4].mean() < pixels[28:32, 28:32].mean() - 20  # corners darkened
 
 
+def test_apply_ai_upscale_delegates_to_ai_upscale_module(tmp_path, monkeypatch):
+    """Mocks app.image_processor's own `ai_upscale` name (the module-level `from app.ai_upscale
+    import upscale as ai_upscale` alias apply_ai_upscale() delegates into) rather than calling the
+    real Real-ESRGAN inference -- this test doesn't need the optional torch/realesrgan packages or
+    a GPU, matching every other delegation test in this file (e.g. apply_dehaze), just with a fake
+    implementation standing in since the real one is an optional dependency."""
+    from app import image_processor as image_processor_module
+
+    calls = []
+
+    def fake_ai_upscale(image, factor):
+        calls.append(factor)
+        return image.resize((image.width * factor, image.height * factor))
+
+    monkeypatch.setattr(image_processor_module, "ai_upscale", fake_ai_upscale)
+
+    source = tmp_path / "small.png"
+    Image.new("RGB", (10, 8), color=(50, 60, 70)).save(source)
+    processor = PhotoProcessor(source)
+
+    result = processor.apply_ai_upscale(2)
+
+    assert result is processor
+    assert calls == [2]
+    assert processor.image.size == (20, 16)
+
+
 def test_apply_film_grain_delegates_to_effects_module(tmp_path):
     source = tmp_path / "flat.png"
     Image.new("RGB", (40, 40), color=(120, 120, 120)).save(source)
