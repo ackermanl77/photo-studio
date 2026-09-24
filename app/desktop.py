@@ -31,6 +31,30 @@ def _webview2_runtime_folder() -> Path:
     return base / "WebView2Runtime"
 
 
+def _log_path(name: str) -> Path:
+    """Child-process logs go to the per-user data folder (app.config.user_data_dir()), not next to
+    PhotoStudio.exe: an installed build lives under Program Files, which a normal user can't write
+    to, so opening a log there raised PermissionError and the app never started."""
+    from app.config import user_data_dir
+
+    folder = user_data_dir() / "logs"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / name
+
+
+def _child_cwd() -> Path:
+    """Working directory for both child processes. Dev mode needs the project root so
+    `python -m app.backend` / the relative frontend path resolve. A frozen build doesn't (its
+    children import from the bundle), and must not use the install folder: app/backend.py's audit
+    log (app.observability.configure_json_logger()'s default) is a path *relative to the working
+    directory*, which under Program Files is unwritable -- the backend child crashed on import."""
+    if getattr(sys, "frozen", False):
+        from app.config import user_data_dir
+
+        return user_data_dir()
+    return _project_root()
+
+
 def _run_streamlit_child() -> None:
     from streamlit.web.cli import main
 
@@ -77,11 +101,11 @@ def _wait_for_frontend(process: subprocess.Popen) -> None:
 
 def _start_backend() -> subprocess.Popen:
     command = [sys.executable, "--backend-child"] if getattr(sys, "frozen", False) else [sys.executable, "-m", "app.backend"]
-    log_path = Path(sys.executable).resolve().parent / "backend-child.log"
+    log_path = _log_path("backend-child.log")
     log_file = log_path.open("w", encoding="utf-8")
     process = subprocess.Popen(
         command,
-        cwd=str(_project_root()),
+        cwd=str(_child_cwd()),
         stdout=log_file,
         stderr=subprocess.STDOUT,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -135,11 +159,11 @@ def _start_frontend() -> subprocess.Popen:
             "none",
         ]
     )
-    log_path = Path(sys.executable).resolve().parent / "desktop-child.log"
+    log_path = _log_path("desktop-child.log")
     log_file = log_path.open("w", encoding="utf-8")
     process = subprocess.Popen(
         command,
-        cwd=str(_project_root()),
+        cwd=str(_child_cwd()),
         stdout=log_file,
         stderr=subprocess.STDOUT,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
