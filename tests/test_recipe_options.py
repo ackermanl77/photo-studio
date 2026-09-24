@@ -1,5 +1,5 @@
 from app.professional_color import HSL_BAND_ORDER
-from app.recipe_options import ASPECT_RATIOS, merge_curve_points, recipe_to_options
+from app.recipe_options import ASPECT_RATIOS, merge_curve_points, recipe_to_options, without_per_photo_only_keys
 
 # Mirrors app.frontend_unified_app.RECIPE_DEFAULTS's shape (not imported directly: that module is a
 # Streamlit script with top-level st.* calls meant to run under AppTest/`streamlit run`, not to be
@@ -51,12 +51,24 @@ def test_recipe_to_options_passes_through_plain_fields():
     assert options["lens_perspective_v"] == 25
 
 
-def test_recipe_to_options_passes_through_ai_upscale_fields():
+def test_recipe_to_options_never_carries_ai_upscale_into_a_preset_or_batch():
+    """Regression: AI Upscale used to pass straight through, so a custom preset saved with it on
+    ran Real-ESRGAN on every preset thumbnail render and on every photo of a batch -- it's a
+    per-photo output-resolution choice, not part of a reusable look."""
     recipe = _full_recipe(ai_upscale=True, ai_upscale_factor=4)
     options = recipe_to_options(recipe)
 
-    assert options["ai_upscale"] is True
-    assert options["ai_upscale_factor"] == 4
+    assert "ai_upscale" not in options
+    assert "ai_upscale_factor" not in options
+
+
+def test_without_per_photo_only_keys_strips_ai_upscale_but_keeps_the_look():
+    recipe = _full_recipe(ai_upscale=True, ai_upscale_factor=4, exposure=1.3)
+    stripped = without_per_photo_only_keys(recipe)
+
+    assert "ai_upscale" not in stripped and "ai_upscale_factor" not in stripped
+    assert stripped["exposure"] == 1.3
+    assert recipe["ai_upscale"] is True  # the caller's own dict is left untouched
 
 
 def test_recipe_to_options_renames_mask_target_fields():

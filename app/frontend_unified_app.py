@@ -14,7 +14,7 @@ from PIL import Image
 import cv2
 
 from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, magic_wand_mask, radial_mask, soften_mask
-from app.ai_upscale import ai_upscale_available
+from app.ai_upscale import ai_upscale_installed
 from app.backend import process_image
 from app.backend_client import ensure_backend_running, process_via_backend
 from app.batch_release import FileLike, export_multiple, make_zip, process_files
@@ -33,7 +33,7 @@ from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS, clippin
 from app.lens_corrections import LENS_PROFILES, apply_lens_corrections
 from app.professional_tools import EXPORT_PROFILES, GRID_PRESETS, WATERMARK_POSITIONS, apply_mask_overlay, apply_watermark, compute_histogram, compute_waveform, draw_guides_and_grid, export_profile, grid_line_fractions, preview_image, zoom_preview
 from app.project_bundle import ProjectBundle
-from app.recipe_options import ASPECT_RATIOS, merge_curve_points, recipe_to_options
+from app.recipe_options import ASPECT_RATIOS, merge_curve_points, recipe_to_options, without_per_photo_only_keys
 
 # A small bundled placeholder image (generated via PIL -- gradient background plus a few flat
 # shapes, not a real photo) so a first-time visitor can explore every tool without needing to
@@ -1676,7 +1676,17 @@ def _pen_editor_html(background: Image.Image, key_prefix: str, points: list[dict
     """, display_h + 60
 
 
-@st.cache_data(show_spinner=False)
+# Every st.cache_data below has max_entries: without it Streamlit keeps every distinct input's
+# result for the life of the server process, and each value a slider passes through becomes a new
+# key -- for the full-resolution caches that's a whole decoded/processed photo (~70+ MB on a large
+# one) per slider position, which grew without bound over an editing session. The full-resolution
+# ones keep only a few recent entries (enough for Undo/Redo or nudging a slider back to hit the
+# cache); the thumbnail-sized ones can afford more.
+_FULL_RES_CACHE_ENTRIES = 4
+_THUMBNAIL_CACHE_ENTRIES = 16
+
+
+@st.cache_data(show_spinner=False, max_entries=_THUMBNAIL_CACHE_ENTRIES)
 def _preset_thumbnails(image_bytes: bytes, filename: str) -> dict[str, bytes]:
     """Small local preview renders for the Preset Look dropdown, so a user can see what each
     preset looks like before picking one instead of guessing from its name. Decorative only --
@@ -1697,7 +1707,7 @@ def _preset_thumbnails(image_bytes: bytes, filename: str) -> dict[str, bytes]:
     return encoded
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=_THUMBNAIL_CACHE_ENTRIES)
 def _custom_preset_thumbnail(image_bytes: bytes, filename: str, recipe: dict) -> bytes:
     """A live preview render for one saved custom preset -- the "Load a Preset" dropdown's and the
     Batch Processor's counterpart to `_preset_thumbnails()`'s built-in-look row above. Unlike a
@@ -1831,7 +1841,7 @@ _DETAIL_STAGE_OPTION_KEYS = (
 )
 
 
-@st.cache_data(show_spinner="🎨 Applying edits (tone/color/detail)…")
+@st.cache_data(show_spinner="🎨 Applying edits (tone/color/detail)…", max_entries=_FULL_RES_CACHE_ENTRIES)
 def _cached_process_through_detail(image_bytes: bytes, filename: str, detail_options: dict) -> bytes:
     """Stage 1 of 2 of the edit pipeline (Lens -> Tone -> Color -> Detail -- see
     app.backend.process_image()'s own docstring for the full order and the `stop_after`/
@@ -1846,14 +1856,16 @@ def _cached_process_through_detail(image_bytes: bytes, filename: str, detail_opt
     options["stop_after"] = "detail"
     result = process_via_backend(image_bytes, filename, options)
     buffer = io.BytesIO()
-    save_kwargs = {"format": "PNG"}
+    # compress_level=1: this PNG is an internal hand-off, re-uploaded as Stage 2's input on every
+    # edit -- PIL's default level 6 costs noticeably more time on a large photo for little saving.
+    save_kwargs = {"format": "PNG", "compress_level": 1}
     if result.info.get("icc_profile"):
         save_kwargs["icc_profile"] = result.info["icc_profile"]
     result.save(buffer, **save_kwargs)
     return buffer.getvalue()
 
 
-@st.cache_data(show_spinner="🎨 Applying edits…")
+@st.cache_data(show_spinner="🎨 Applying edits…", max_entries=_FULL_RES_CACHE_ENTRIES)
 def _cached_process_from_repair_onward(
     stage_a_png_bytes: bytes, remaining_options: dict,
     local_mask_bytes: bytes | None, layers_bytes: bytes | None, removal_mask_bytes: bytes | None = None,
@@ -1871,7 +1883,7 @@ def _cached_process_from_repair_onward(
     return process_via_backend(stage_a_png_bytes, "stage_a.png", options, local_mask_bytes, layers_bytes, removal_mask_bytes)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=_FULL_RES_CACHE_ENTRIES)
 def _lens_corrected_source(image_bytes: bytes, filename: str, distortion: float, vignette_amount: float, vignette_midpoint: float, chromatic_aberration: float, perspective_vertical: float = 0.0, perspective_horizontal: float = 0.0) -> Image.Image:
     """The base image the Crop preview and the Masks/Repair on-canvas selection tools paint
     against. app/backend.py::process_image() applies Lens corrections (a real cv2.undistort/remap
@@ -1887,7 +1899,7 @@ def _lens_corrected_source(image_bytes: bytes, filename: str, distortion: float,
     return apply_lens_corrections(image, distortion, vignette_amount, vignette_midpoint, chromatic_aberration, perspective_vertical, perspective_horizontal)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=_FULL_RES_CACHE_ENTRIES)
 def _cached_gamut_warning_overlay(image_bytes: bytes, filename: str, icc_bytes: bytes):
     """gamut_warning_overlay() runs two full-image littlecms conversions -- cached so it only
     recomputes when the photo or its embedded profile actually changes, not on every Streamlit
@@ -2152,11 +2164,19 @@ if "_pending_restore" in st.session_state:
 # File loading section
 upload_col1, upload_col2 = st.columns([2.5, 1], gap="small")
 with upload_col1:
+    # Keyed by a generation counter rather than a fixed key: Streamlit doesn't allow a
+    # file_uploader's value to be set (or cleared) through session_state at all, so the only way
+    # to empty it is to render it under a new key. Load Project bumps the counter -- otherwise a
+    # photo still sitting in this uploader kept taking priority over the project's own bundled
+    # source (see upload_bytes below), silently applying the loaded recipe to the wrong photo.
+    # Only ever bumped right before a st.rerun(), from a handler above every tab, so no other
+    # widget's state is at risk from the key change.
     uploaded = st.file_uploader(
         "Open Image",
         type=["jpg", "jpeg", "png", "webp", "tif", "tiff", "cr2", "cr3", "nef", "arw", "dng"],
         help="Open image (JPG, PNG, WEBP, TIFF, or Camera RAW). Original is never overwritten.",
         label_visibility="collapsed",
+        key=f"main-upload-{st.session_state.get('_main_upload_generation', 0)}",
     )
 with upload_col2:
     st.caption("📂 Open any JPG, PNG, WEBP, TIFF, or camera RAW file.")
@@ -2183,7 +2203,14 @@ with st.expander("📁 Open a saved project (.photoproject)"):
         # this file (RAW load, backend calls, curve JSON) already degrades to a friendly error.
         try:
             loaded_project = ProjectBundle.load(project_upload.getvalue())
-            pending_recipe = dict(loaded_project.recipe)
+            # Merged over RECIPE_DEFAULTS so any control the saved recipe doesn't mention (a
+            # project saved before that control existed, or a hand-trimmed one) is reset to its
+            # default, rather than silently keeping whatever the previous photo's edit had there
+            # (the same base the Reset button restores from).
+            pending_recipe = {
+                **RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": [],
+                **loaded_project.recipe,
+            }
             workspace = loaded_project.layer_workspace_object()
             restored_layers = []
             if workspace:
@@ -2212,6 +2239,9 @@ with st.expander("📁 Open a saved project (.photoproject)"):
         else:
             st.session_state["restored_source_bytes"] = loaded_project.source_bytes
             st.session_state["restored_source_name"] = loaded_project.source_name
+            # Empties the main "Open Image" uploader on the next run (see its key above) so the
+            # project's bundled source, not a previously opened photo, is what gets edited.
+            st.session_state["_main_upload_generation"] = st.session_state.get("_main_upload_generation", 0) + 1
             pending_recipe["layers"] = restored_layers
             st.session_state["_pending_restore"] = pending_recipe
             st.rerun()
@@ -2574,7 +2604,9 @@ with st.container(key="workspace-split"):
             sharp_en = st.checkbox("Sharpen (Unsharp Mask)", value=False, key="d-sharp", help="Increases edge contrast to make the image look crisper -- applied last in the Detail group, after Texture/Clarity/Denoise.")
 
             st.markdown("**AI Upscale**")
-            if ai_upscale_available():
+            # ai_upscale_installed(), not ai_upscale_available(): only checks the packages exist,
+            # without importing torch into this Streamlit process (see its docstring).
+            if ai_upscale_installed():
                 ai_upscale_en = st.checkbox(
                     "Enable AI Upscale (Real-ESRGAN)", value=False, key="d-ai-upscale-en",
                     help="Neural super-resolution -- the one deliberate exception to this app's otherwise classical, "
@@ -2693,7 +2725,9 @@ with st.container(key="workspace-split"):
                 )
                 p_load_col, p_delete_col = st.columns(2)
                 if p_load_col.button("📂 Apply", key="p-load-btn", use_container_width=True):
-                    st.session_state["_pending_restore"] = p_store.get(p_load_name)
+                    # without_per_photo_only_keys(): a preset saved before AI Upscale was excluded
+                    # from presets must not switch it on for this photo either.
+                    st.session_state["_pending_restore"] = without_per_photo_only_keys(p_store.get(p_load_name))
                     st.toast(f"Applied preset '{p_load_name}'", icon="📂")
                     _request_rerun()
                 if p_delete_col.button("🗑️ Delete", key="p-delete-btn", use_container_width=True):
@@ -2709,7 +2743,9 @@ with st.container(key="workspace-split"):
                     # lens correction used to silently drop all of that. Deliberately excludes the
                     # layer overlay image, same as Undo/Redo history (see _build_recipe's
                     # docstring): a preset is a reusable style, not tied to one photo's overlay.
-                    p_store.save(p_new_name.strip(), _build_recipe())
+                    # Also excludes AI Upscale (see without_per_photo_only_keys()): a look shouldn't
+                    # carry a minutes-long neural upscale into every photo it's applied to.
+                    p_store.save(p_new_name.strip(), without_per_photo_only_keys(_build_recipe()))
                     st.toast(f"Preset '{p_new_name.strip()}' saved", icon="💾")
                     _request_rerun()
                 else:

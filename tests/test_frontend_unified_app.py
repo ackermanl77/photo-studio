@@ -252,7 +252,7 @@ def test_uploading_image_renders_every_tab_without_errors():
 
 def test_ai_upscale_control_shows_an_install_caption_when_unavailable(monkeypatch):
     """Most environments only install requirements.txt (never requirements-gpu.txt, per
-    CLAUDE.md's Commands section and CI's own install list), so app.ai_upscale.ai_upscale_available()
+    CLAUDE.md's Commands section and CI's own install list), so app.ai_upscale.ai_upscale_installed()
     is normally False -- but a dev machine that DOES have requirements-gpu.txt installed (e.g. to
     verify the feature for real) must not make this test flaky, so the "not installed" case is
     forced via the same monkeypatch pattern the sibling "enabled" test below uses. Confirms the
@@ -261,7 +261,7 @@ def test_ai_upscale_control_shows_an_install_caption_when_unavailable(monkeypatc
     without error."""
     import app.ai_upscale as ai_upscale_module
 
-    monkeypatch.setattr(ai_upscale_module, "ai_upscale_available", lambda: False)
+    monkeypatch.setattr(ai_upscale_module, "ai_upscale_installed", lambda: False)
 
     at = run_with_uploaded_image()
 
@@ -271,8 +271,8 @@ def test_ai_upscale_control_shows_an_install_caption_when_unavailable(monkeypatc
 
 
 def test_enabling_ai_upscale_sends_the_selected_factor_through_to_the_backend(monkeypatch):
-    """Monkeypatches app.ai_upscale.ai_upscale_available (picked up by the frontend's own
-    top-level `from app.ai_upscale import ai_upscale_available` on every AppTest rerun, the same
+    """Monkeypatches app.ai_upscale.ai_upscale_installed (picked up by the frontend's own
+    top-level `from app.ai_upscale import ai_upscale_installed` on every AppTest rerun, the same
     mechanism _stub_backend above relies on for app.backend_client) to simulate a machine with
     requirements-gpu.txt installed, and PhotoProcessor.apply_ai_upscale (no real GPU/model
     needed) so this stays a fast offline unit test -- confirms the checkbox/selectbox actually
@@ -280,6 +280,7 @@ def test_enabling_ai_upscale_sends_the_selected_factor_through_to_the_backend(mo
     import app.ai_upscale as ai_upscale_module
     from app.image_processor import PhotoProcessor
 
+    monkeypatch.setattr(ai_upscale_module, "ai_upscale_installed", lambda: True)
     monkeypatch.setattr(ai_upscale_module, "ai_upscale_available", lambda: True)
     calls = []
 
@@ -2346,3 +2347,39 @@ def test_blank_watermark_text_leaves_export_controls_working_as_before():
     assert at.text_input(key="wm-text-in").value == ""
     assert not at.exception
     assert any(db.label == "💾 Save JPEG" for db in at.download_button)
+
+
+def test_load_project_replaces_an_already_open_photo_and_resets_unmentioned_controls():
+    """Regression: the main uploader had no key and always won over the project's bundled source,
+    so loading a .photoproject while a photo was open applied its recipe to the *open* photo; and
+    the recipe wasn't merged over RECIPE_DEFAULTS, so any control the project didn't mention kept
+    the previous photo's value."""
+    at = run_with_uploaded_image(size=(40, 30))
+    at.slider(key="t-cont").set_value(1.4)
+    at.run(timeout=30)
+    assert canvas_dims(at) == (40, 30)
+
+    source_buffer = io.BytesIO()
+    Image.new("RGB", (20, 10), (10, 200, 10)).save(source_buffer, format="PNG")
+    bundle_buffer = io.BytesIO()
+    ProjectBundle("project.png", source_buffer.getvalue(), {"exposure": 1.3}).save(bundle_buffer)
+
+    at.get_by_key("proj-upload").set_value(("p.photoproject", bundle_buffer.getvalue(), "application/zip"))
+    at.run(timeout=30)
+    at.button(key="proj-load-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert canvas_dims(at) == (20, 10)
+    assert not at.file_uploader[0].value
+    assert at.slider(key="t-exp").value == 1.3
+    assert at.slider(key="t-cont").value == 1.0
+
+
+def test_every_streamlit_data_cache_is_bounded():
+    """Regression: the st.cache_data caches had no max_entries, so every slider position kept a
+    full-resolution image alive for the life of the server process."""
+    source = APP_PATH.read_text(encoding="utf-8")
+    decorators = re.findall(r"@st\.cache_data\((.*?)\)\n", source)
+    assert decorators
+    assert all("max_entries" in args for args in decorators)
