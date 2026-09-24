@@ -16,6 +16,7 @@ a GPU that supports it; float32 is the safe, universally-supported fallback for 
 which Real-ESRGAN still supports, just much slower).
 """
 
+import importlib.util
 import logging
 from functools import lru_cache
 
@@ -28,6 +29,35 @@ _logger = logging.getLogger(__name__)
 # down to 2x rather than bundling a second model file -- see upscale() below.
 _MODEL_NAME = "RealESRGAN_x4plus"
 _NATIVE_SCALE = 4
+
+
+_REQUIRED_PACKAGES = ("torch", "realesrgan", "basicsr")
+
+
+@lru_cache(maxsize=1)
+def ai_upscale_installed() -> bool:
+    """Cheap "are the optional packages present at all" probe for UI gating (the Detail tab's AI
+    Upscale control) -- importlib.util.find_spec() only locates each package, it never imports it.
+    ai_upscale_available() below really imports torch, which costs seconds and hundreds of MB, and
+    the Streamlit process never runs inference itself (app/backend.py does), so gating the control
+    on that made every Streamlit server process pay for torch just to decide whether to draw a
+    checkbox. A broken-but-present install still shows the control here; the backend's own
+    ai_upscale_available() check then reports it as a clean error when the upscale is requested.
+    Never raises."""
+    try:
+        return all(importlib.util.find_spec(name) is not None for name in _REQUIRED_PACKAGES)
+    except (ImportError, ValueError):
+        return False
+
+
+def weights_dir():
+    """Where Real-ESRGAN's downloaded model weights live: the per-user app data folder
+    (app.config.user_data_dir()). RealESRGANer's own default is a "weights" folder inside the
+    installed realesrgan package -- in the packaged desktop build that's under _internal/, i.e.
+    inside Program Files, which a normal user can't write to, so the first AI Upscale failed there."""
+    from app.config import user_data_dir
+
+    return user_data_dir() / "weights"
 
 
 @lru_cache(maxsize=1)
@@ -81,10 +111,19 @@ def _load_upsampler():
     device, dtype = _resolve_device_and_dtype()
     half = dtype == torch.float16
 
+    from basicsr.utils.download_util import load_file_from_url
+
     model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=_NATIVE_SCALE)
+    # Downloaded (once) into weights_dir() explicitly and handed to RealESRGANer as a local path --
+    # given a URL, RealESRGANer would download into its own package folder instead (see weights_dir()).
+    model_path = load_file_from_url(
+        f"https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/{_MODEL_NAME}.pth",
+        model_dir=str(weights_dir()),
+        progress=False,
+    )
     upsampler = RealESRGANer(
         scale=_NATIVE_SCALE,
-        model_path=f"https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/{_MODEL_NAME}.pth",
+        model_path=model_path,
         model=model,
         tile=0,
         tile_pad=10,

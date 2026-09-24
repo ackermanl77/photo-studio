@@ -9,7 +9,11 @@ param(
     [string]$Python = "",
     # Skip the 7z archive. A GPU build bundles several GB of CUDA libraries, and -mx=9 LZMA over
     # that takes a long time -- skip it when only the unpacked release\ folder is needed.
-    [switch]$SkipArchive
+    [switch]$SkipArchive,
+    # Also build the Inno Setup installer (installer\PhotoStudio.iss) from the finished release\
+    # folder, passing -Version through so the installer's version matches the build. Needs ISCC.exe
+    # (Inno Setup 6) on PATH or in its default install location.
+    [switch]$Installer
 )
 
 $ErrorActionPreference = "Stop"
@@ -121,6 +125,14 @@ try {
     if (Test-Path $ReleaseFolder) { Remove-Item $ReleaseFolder -Recurse -Force }
     Copy-Item $Package $ReleaseFolder -Recurse
     Write-Host "Release folder (fixed location): $ReleaseFolder"
+
+    if ($Installer) {
+        $iscc = Get-Command iscc -ErrorAction SilentlyContinue
+        $isccPath = if ($iscc) { $iscc.Source } else { Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe" }
+        if (-not (Test-Path $isccPath)) { throw "ISCC.exe (Inno Setup 6) not found -- needed for -Installer." }
+        & $isccPath "/DMyAppVersion=$Version" (Join-Path $ProjectRoot "installer\PhotoStudio.iss")
+        if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed (exit code $LASTEXITCODE)." }
+    }
 } finally {
     Pop-Location
 }
