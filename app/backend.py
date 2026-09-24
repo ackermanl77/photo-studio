@@ -7,8 +7,11 @@ from io import BytesIO
 import cv2
 from flask import Flask, g, jsonify, request, send_file
 from PIL import Image
+from werkzeug.exceptions import RequestEntityTooLarge
 
-from app.config import MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES, BACKEND_HOST, BACKEND_PORT
+from app.config import (
+    BACKEND_HOST, BACKEND_PORT, INTERNAL_STAGE_HEADER, INTERNAL_STAGE_RESUME, MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES,
+)
 from app.image_processor import PhotoProcessor
 from app.layer_workspace import LayerWorkspace, layers_from_json
 from app.observability import ProcessingAudit, configure_json_logger, log_audit
@@ -16,18 +19,31 @@ from app.portrait_tools import smooth_skin
 from app.presets import PRESETS, apply_preset
 from app.professional_color import ICC_TRANSFORM_ERRORS, normalize_to_srgb, srgb_icc_bytes
 from app.raw_import import is_raw_path
-from app.reliability import new_request_id, validate_image_bytes
+from app.reliability import check_pixel_count, new_request_id, validate_image_bytes
 
 app = Flask(__name__)
 backend_logger = configure_json_logger("photo-studio-backend")
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
+# INTERNAL_STAGE_HEADER (app/config.py) is set by app/backend_client.py::process_via_backend() on a
+# `resume_from_detail` request (the frontend's Stage 2, see process_image()'s docstring). That
+# request's "image" is Stage 1's own
+# lossless PNG output, not the user's upload -- for a large photo (e.g. 45 MP) it's ~75+ MB, over
+# MAX_UPLOAD_BYTES even though the original JPEG the user opened was well under it, so every edit
+# on such a photo used to fail with "Upload exceeds 50 MB". The byte cap exists to bound what a user
+# can upload; this internal hop instead gets a cap derived from the pixel limit (a worst-case
+# uncompressed RGB PNG plus full-resolution local/removal masks, plus the normal budget for the
+# layers payload), and the pixel limit itself is still enforced on it (see process_image()).
+INTERNAL_STAGE_MAX_BYTES = MAX_UPLOAD_BYTES + 6 * MAX_IMAGE_PIXELS
+
 
 @app.before_request
 def assign_request_id():
     request.request_id = request.headers.get("X-Request-ID", new_request_id())
     g.processing_started = time.perf_counter()
+    if request.path == "/process" and request.headers.get(INTERNAL_STAGE_HEADER) == INTERNAL_STAGE_RESUME:
+        request.max_content_length = INTERNAL_STAGE_MAX_BYTES
 
 
 @app.after_request
@@ -35,7 +51,12 @@ def attach_request_id(response):
     request_id = getattr(request, "request_id", new_request_id())
     response.headers["X-Request-ID"] = request_id
     if request.path == "/process":
-        source_name = request.files.get("image").filename if request.files.get("image") else "unknown"
+        try:
+            source_name = request.files.get("image").filename if request.files.get("image") else "unknown"
+        except RequestEntityTooLarge:
+            # An over-cap upload: touching request.files re-raises the 413 from inside this hook,
+            # which turned the intended clean JSON 413 (request_too_large() below) into an HTML 500.
+            source_name = "unknown"
         audit = ProcessingAudit(request_id, source_name or "unknown", "process", "ok" if response.status_code < 400 else "error", (time.perf_counter() - getattr(g, "processing_started", time.perf_counter())) * 1000)
         log_audit(backend_logger, audit)
     return response
@@ -88,6 +109,9 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
         # PNG round trip to the frontend (see "Known Issues") -- this split doesn't make that any
         # worse, it just doesn't yet fix it either.
         processor = PhotoProcessor.from_bytes(source_bytes, filename)
+        # This hop may be exempt from the upload byte cap (see INTERNAL_STAGE_MAX_BYTES), so the
+        # pixel limit is the one bound that still applies -- checked exactly, not via PIL's 2x one.
+        check_pixel_count(*processor.image.size)
         source_exif = None
         source_icc = processor.image.info.get("icc_profile")
     else:
@@ -97,6 +121,11 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
         if not is_raw_path(filename):
             validate_image_bytes(source_bytes, filename)
         processor = PhotoProcessor.from_bytes(source_bytes, filename)
+        if is_raw_path(filename):
+            # RAW skipped validate_image_bytes() above, so apply the same exact pixel limit to its
+            # decoded size here -- otherwise a RAW over the limit would pass this first stage and
+            # only fail at the frontend's Stage 2 (the resume_from_detail check above).
+            check_pixel_count(*processor.image.size)
         source_exif = processor.image.getexif().tobytes()
         source_icc = processor.image.info.get("icc_profile")
 
@@ -280,7 +309,11 @@ def process():
                 save_options["icc_profile"] = result.info["icc_profile"]
             result.save(buffer, **save_options)
         else:
-            save_options = {"format": "PNG", "optimize": True}
+            # compress_level=1, not optimize=True: a PNG response is only ever an internal lossless
+            # hand-off (process_via_backend() always requests PNG, and the frontend re-encodes the
+            # result itself on export), often re-uploaded straight back for Stage 2 -- on a large
+            # photo optimize=True spent seconds per edit squeezing out bytes nobody keeps.
+            save_options = {"format": "PNG", "compress_level": 1}
             if result.info.get("icc_profile") and not options.get("strip_metadata", False):
                 save_options["icc_profile"] = result.info["icc_profile"]
             result.save(buffer, **save_options)

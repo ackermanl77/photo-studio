@@ -11,7 +11,7 @@ import requests
 import streamlit as st
 from PIL import Image
 
-from app.config import BACKEND_HOST, BACKEND_PORT
+from app.config import BACKEND_HOST, BACKEND_PORT, INTERNAL_STAGE_HEADER, INTERNAL_STAGE_RESUME
 
 BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
 _HEALTH_CHECK_TIMEOUT = 0.5
@@ -94,11 +94,18 @@ def process_via_backend(
     # measured at ~20 s on a fast connection in the packaged build, so the normal 30 s budget
     # would time out on a slower one. Every other request keeps the short timeout.
     timeout = AI_UPSCALE_REQUEST_TIMEOUT_S if request_options.get("ai_upscale") else REQUEST_TIMEOUT_S
+    # A resume_from_detail request re-uploads the backend's own Stage 1 PNG, not the user's file --
+    # the header tells app/backend.py to apply its internal-stage size cap instead of the user
+    # upload cap (see INTERNAL_STAGE_MAX_BYTES there for why).
+    headers = {}
+    if request_options.get("resume_from_detail"):
+        headers[INTERNAL_STAGE_HEADER] = INTERNAL_STAGE_RESUME
     try:
         response = requests.post(
             f"{BACKEND_URL}/process",
             data={"options": json.dumps(request_options)},
             files=files,
+            headers=headers,
             timeout=timeout,
         )
     except requests.RequestException as error:

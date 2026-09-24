@@ -10,6 +10,8 @@ from pathlib import PurePosixPath
 
 from PIL import Image, UnidentifiedImageError
 
+from app.config import MAX_IMAGE_PIXELS
+
 
 @dataclass
 class RequestReport:
@@ -27,16 +29,31 @@ def image_digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def validate_image_bytes(content: bytes, filename: str = "image") -> tuple[int, int, str]:
+def check_pixel_count(width: int, height: int, max_pixels: int | None = None) -> None:
+    """Enforces MAX_IMAGE_PIXELS exactly. Setting PIL's own Image.MAX_IMAGE_PIXELS (app/backend.py
+    does) is not enough on its own: PIL only *warns* between 1x and 2x that value and raises only
+    above 2x, so an image up to twice the configured limit used to be admitted. Raises PIL's own
+    DecompressionBombError so callers keep the single existing "pixel limit" error path (a 413 from
+    /process)."""
+    limit = MAX_IMAGE_PIXELS if max_pixels is None else max_pixels
+    if width * height > limit:
+        raise Image.DecompressionBombError(
+            f"Image size ({width}x{height} = {width * height} pixels) exceeds limit of {limit} pixels"
+        )
+
+
+def validate_image_bytes(content: bytes, filename: str = "image", max_pixels: int | None = None) -> tuple[int, int, str]:
     if not content:
         raise ValueError("Image upload is empty")
     try:
         with Image.open(io.BytesIO(content)) as image:
             image.verify()
         with Image.open(io.BytesIO(content)) as image:
-            return image.width, image.height, image.format or "unknown"
+            width, height, format_name = image.width, image.height, image.format or "unknown"
     except (UnidentifiedImageError, OSError) as error:
         raise ValueError(f"Invalid image content: {filename}") from error
+    check_pixel_count(width, height, max_pixels)
+    return width, height, format_name
 
 
 def validate_project_archive(content: bytes, max_entries: int = 20, max_uncompressed_bytes: int = 250 * 1024 * 1024) -> dict:
