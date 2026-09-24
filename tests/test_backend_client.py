@@ -146,7 +146,7 @@ def test_process_via_backend_gives_ai_upscale_a_longer_timeout(monkeypatch, opti
     fast connection in the packaged build), so it must not share the short default timeout."""
     seen = {}
 
-    def fake_post(url, data=None, files=None, timeout=None):
+    def fake_post(url, data=None, files=None, headers=None, timeout=None):
         seen["timeout"] = timeout
         return _FakeResponse(_png_bytes())
 
