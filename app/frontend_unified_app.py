@@ -14,6 +14,7 @@ from PIL import Image
 import cv2
 
 from app.advanced_masks import MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, magic_wand_mask, radial_mask, soften_mask
+from app.ai_upscale import ai_upscale_available
 from app.backend import process_image
 from app.backend_client import ensure_backend_running, process_via_backend
 from app.batch_release import FileLike, export_multiple, make_zip, process_files
@@ -51,6 +52,7 @@ RECIPE_WIDGET_KEYS = {
     "curve_highlights": "c-p3", "curve_white": "c-p4",
     "texture": "d-text", "clarity": "d-clar", "denoise": "d-den", "denoise_color": "d-den-color",
     "sharpen": "d-sharp", "dehaze": "d-haze",
+    "ai_upscale": "d-ai-upscale-en", "ai_upscale_factor": "d-ai-upscale-factor",
     "effects_vignette_amount": "fx-vignette-amt", "effects_vignette_midpoint": "fx-vignette-mid",
     "effects_grain_amount": "fx-grain-amt",
     "portrait_smoothing": "port-sm",
@@ -72,6 +74,7 @@ RECIPE_DEFAULTS = {
     "temperature": 0, "tint": 0, "saturation": 1.0, "vibrance": 0,
     "curve_enabled": False, "curve_black": 0, "curve_shadows": 64, "curve_mid": 128, "curve_highlights": 192, "curve_white": 255,
     "texture": 0, "clarity": 0, "denoise": 0, "denoise_color": 0, "sharpen": False, "dehaze": 0,
+    "ai_upscale": False, "ai_upscale_factor": 2,
     "effects_vignette_amount": 0, "effects_vignette_midpoint": 50, "effects_grain_amount": 0,
     "portrait_smoothing": 0.0,
     "mask_target_exposure": 1.0, "mask_target_contrast": 1.0, "mask_target_saturation": 1.0,
@@ -2570,6 +2573,25 @@ with st.container(key="workspace-split"):
             )
             sharp_en = st.checkbox("Sharpen (Unsharp Mask)", value=False, key="d-sharp", help="Increases edge contrast to make the image look crisper -- applied last in the Detail group, after Texture/Clarity/Denoise.")
 
+            st.markdown("**AI Upscale**")
+            if ai_upscale_available():
+                ai_upscale_en = st.checkbox(
+                    "Enable AI Upscale (Real-ESRGAN)", value=False, key="d-ai-upscale-en",
+                    help="Neural super-resolution -- the one deliberate exception to this app's otherwise classical, "
+                    "CPU-only adjustments (see docs/PROJECT_STATUS.md). Applies last, after every other edit including "
+                    "Crop and Effects, so the enlarged output isn't re-processed at the original resolution. Uses a "
+                    "GPU when available, falls back to CPU (much slower) otherwise. Off by default -- an expensive, "
+                    "optional operation.",
+                )
+                ai_upscale_factor_val = st.selectbox(
+                    "Upscale Factor", (2, 4), index=0, key="d-ai-upscale-factor", disabled=not ai_upscale_en,
+                    help="2x or 4x linear resolution increase.",
+                )
+            else:
+                ai_upscale_en = False
+                ai_upscale_factor_val = 2
+                st.caption("Install requirements-gpu.txt to enable AI Upscale.")
+
             with st.expander("✨ Effects", expanded=False):
                 st.caption("Creative finishing touches applied to the final, already-cropped frame -- separate from the Lens tab's corrective vignette, which runs before Crop.")
                 fx_v_col, fx_g_col = st.columns(2)
@@ -2939,6 +2961,8 @@ with st.container(key="workspace-split"):
             "denoise": denoise_val,
             "denoise_color": denoise_color_val,
             "sharpen": sharp_en,
+            "ai_upscale": ai_upscale_en,
+            "ai_upscale_factor": ai_upscale_factor_val,
             "effects_vignette_amount": fx_vignette_amount,
             "effects_vignette_midpoint": fx_vignette_midpoint,
             "effects_grain_amount": fx_grain_amount,

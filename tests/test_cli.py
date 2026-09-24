@@ -54,3 +54,47 @@ def test_cli_applies_preset_in_the_same_relative_position_as_the_backend(tmp_pat
 
     assert np.array_equal(cli_result, correct_order_result)
     assert not np.array_equal(cli_result, wrong_order_result)
+
+
+def test_cli_applies_ai_upscale_last_after_crop(tmp_path, monkeypatch):
+    """--ai-upscale should apply after every other adjustment including --crop, matching
+    app/backend.py::process_image()'s pipeline position (AI Upscale runs last, after Effects).
+    Mocks PhotoProcessor.apply_ai_upscale (no real GPU/model needed, and requirements-gpu.txt
+    isn't installed in this test environment) and confirms it receives the already-cropped
+    image's dimensions, not the original upload's."""
+    input_path = tmp_path / "in.png"
+    output_path = tmp_path / "out.png"
+    Image.new("RGB", (20, 20), (100, 100, 100)).save(input_path)
+
+    calls = []
+
+    def fake_apply_ai_upscale(self, factor=2):
+        calls.append((factor, self.image.size))
+        self.image = self.image.resize((self.image.width * factor, self.image.height * factor))
+        return self
+
+    monkeypatch.setattr(PhotoProcessor, "apply_ai_upscale", fake_apply_ai_upscale)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "cli.py",
+            "--input", str(input_path),
+            "--output", str(output_path),
+            "--crop", "0", "0", "10", "10",
+            "--ai-upscale", "4",
+        ],
+    )
+
+    cli.main()
+
+    assert calls == [(4, (10, 10))]  # ran after the crop had already shrunk the image
+    assert Image.open(output_path).size == (40, 40)
+
+
+def test_cli_ai_upscale_defaults_to_off():
+    """--ai-upscale defaults to 0 (disabled) -- an expensive, optional operation opted into
+    explicitly, matching the frontend control's own off-by-default behavior."""
+    parser = cli.build_parser()
+    args = parser.parse_args(["--input", "in.png", "--output", "out.png"])
+    assert args.ai_upscale == 0

@@ -250,6 +250,57 @@ def test_uploading_image_renders_every_tab_without_errors():
     assert canvas_dims(at) == (40, 30)
 
 
+def test_ai_upscale_control_shows_an_install_caption_when_unavailable(monkeypatch):
+    """Most environments only install requirements.txt (never requirements-gpu.txt, per
+    CLAUDE.md's Commands section and CI's own install list), so app.ai_upscale.ai_upscale_available()
+    is normally False -- but a dev machine that DOES have requirements-gpu.txt installed (e.g. to
+    verify the feature for real) must not make this test flaky, so the "not installed" case is
+    forced via the same monkeypatch pattern the sibling "enabled" test below uses. Confirms the
+    Detail tab degrades to a plain caption instead of rendering a checkbox/selectbox that would be
+    broken if the feature weren't actually installed, and that the rest of the app still renders
+    without error."""
+    import app.ai_upscale as ai_upscale_module
+
+    monkeypatch.setattr(ai_upscale_module, "ai_upscale_available", lambda: False)
+
+    at = run_with_uploaded_image()
+
+    assert not at.exception
+    assert any("requirements-gpu.txt" in caption.value for caption in at.caption)
+    assert not [checkbox for checkbox in at.checkbox if checkbox.key == "d-ai-upscale-en"]
+
+
+def test_enabling_ai_upscale_sends_the_selected_factor_through_to_the_backend(monkeypatch):
+    """Monkeypatches app.ai_upscale.ai_upscale_available (picked up by the frontend's own
+    top-level `from app.ai_upscale import ai_upscale_available` on every AppTest rerun, the same
+    mechanism _stub_backend above relies on for app.backend_client) to simulate a machine with
+    requirements-gpu.txt installed, and PhotoProcessor.apply_ai_upscale (no real GPU/model
+    needed) so this stays a fast offline unit test -- confirms the checkbox/selectbox actually
+    reach app.backend.process_image()'s options dict rather than just existing in the UI."""
+    import app.ai_upscale as ai_upscale_module
+    from app.image_processor import PhotoProcessor
+
+    monkeypatch.setattr(ai_upscale_module, "ai_upscale_available", lambda: True)
+    calls = []
+
+    def fake_apply_ai_upscale(self, factor=2):
+        calls.append(factor)
+        return self
+
+    monkeypatch.setattr(PhotoProcessor, "apply_ai_upscale", fake_apply_ai_upscale)
+
+    at = run_with_uploaded_image()
+    assert not calls  # off by default -- must not run before being enabled
+
+    at.checkbox(key="d-ai-upscale-en").set_value(True)
+    at.run(timeout=30)
+    at.selectbox(key="d-ai-upscale-factor").set_value(4)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert calls[-1] == 4
+
+
 def test_layer_composite_is_reflected_in_final_image():
     """Regression test for the bug where the Layers tab composited into a local variable
     that every later tab (and the final export) ignored -- see docs/PROJECT_STATUS.md's

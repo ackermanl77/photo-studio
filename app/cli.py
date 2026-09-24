@@ -46,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--quality", type=int, default=92, help="JPEG delivery quality from 1 to 100")
     parser.add_argument("--crop", nargs=4, type=int, metavar=("LEFT", "TOP", "RIGHT", "BOTTOM"), help="Crop rectangle in pixels")
     parser.add_argument("--aspect", nargs=2, type=int, metavar=("WIDTH", "HEIGHT"), help="Center-crop to an aspect ratio")
+    parser.add_argument(
+        "--ai-upscale", type=int, choices=(2, 4), default=0,
+        help="Real-ESRGAN neural upscale factor (2 or 4) -- optional, requires requirements-gpu.txt "
+        "(torch, realesrgan); omit for no upscaling. The one deliberate exception to this app's "
+        "otherwise CPU-only, classical-algorithms design -- see docs/PROJECT_STATUS.md.",
+    )
     return parser
 
 
@@ -101,6 +107,12 @@ def main() -> None:
         processor.crop(*args.crop)
     if args.aspect:
         processor.fit_aspect_ratio(*args.aspect)
+
+    # AI Upscale -- last, matching app/backend.py::process_image()'s pipeline position (after every
+    # other adjustment, including Crop): it upscales the final edited result rather than being
+    # undone by a later step operating at the original resolution.
+    if args.ai_upscale:
+        processor.apply_ai_upscale(args.ai_upscale)
 
     output_path = save_for_delivery(processor, args.output, quality=args.quality)
     print(f"Saved edited image to: {output_path}")

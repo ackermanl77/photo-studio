@@ -2,12 +2,19 @@
 param(
     [string]$Version = "0.1.0",
     [switch]$Sign,
-    [string]$CertificateSubject = ""
+    [string]$CertificateSubject = "",
+    # Build with a specific interpreter instead of the default lookup below -- e.g. the project's
+    # own .venv when that's where requirements-gpu.txt (CUDA torch + Real-ESRGAN, for AI Upscale)
+    # is installed; PyInstaller only bundles what the interpreter running it can import.
+    [string]$Python = "",
+    # Skip the 7z archive. A GPU build bundles several GB of CUDA libraries, and -mx=9 LZMA over
+    # that takes a long time -- skip it when only the unpacked release\ folder is needed.
+    [switch]$SkipArchive
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$Python = "C:\Users\MELEJ\AppData\Local\Python\pythoncore-3.14-64\python.exe"
+if (-not $Python) { $Python = "C:\Users\MELEJ\AppData\Local\Python\pythoncore-3.14-64\python.exe" }
 if (-not (Test-Path $Python)) { $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe" }
 if (-not (Test-Path $Python)) {
     # Neither of the two dev-machine-specific paths above exist on a CI runner (e.g. the
@@ -92,7 +99,9 @@ try {
     }
 
     $sevenZip = Get-Command 7z -ErrorAction SilentlyContinue
-    if ($sevenZip) {
+    if ($SkipArchive) {
+        Write-Host "Skipping 7z archive (-SkipArchive)."
+    } elseif ($sevenZip) {
         if (Test-Path $Archive) { Remove-Item $Archive -Force }
         & $sevenZip.Source a -t7z -mx=9 -m0=lzma2 -ms=on $Archive (Join-Path $Package "*")
     } else {
@@ -100,7 +109,9 @@ try {
     }
 
     $hashPath = "$Archive.sha256"
-    if (Test-Path $Archive) {
+    # With -SkipArchive, any $Archive on disk is left over from an earlier build and no longer
+    # matches the release folder -- don't re-hash it and report it as this build's archive.
+    if (-not $SkipArchive -and (Test-Path $Archive)) {
         (Get-FileHash $Archive -Algorithm SHA256).Hash | Set-Content $hashPath
         Write-Host "Release archive: $Archive"
         Write-Host "SHA-256 file: $hashPath"

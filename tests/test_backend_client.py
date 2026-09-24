@@ -124,3 +124,35 @@ def test_process_via_backend_sends_mask_and_layer_files(live_backend):
 def test_process_via_backend_raises_runtime_error_on_backend_error(live_backend):
     with pytest.raises(RuntimeError, match="Unknown preset"):
         backend_client.process_via_backend(_png_bytes(), "input.png", {"preset": "does-not-exist"})
+
+
+class _FakeResponse:
+    ok = True
+
+    def __init__(self, content: bytes):
+        self.content = content
+
+
+@pytest.mark.parametrize(
+    "options, expected_timeout",
+    [
+        ({"exposure": 1.1}, backend_client.REQUEST_TIMEOUT_S),
+        ({"ai_upscale": False}, backend_client.REQUEST_TIMEOUT_S),
+        ({"ai_upscale": True, "ai_upscale_factor": 2}, backend_client.AI_UPSCALE_REQUEST_TIMEOUT_S),
+    ],
+)
+def test_process_via_backend_gives_ai_upscale_a_longer_timeout(monkeypatch, options, expected_timeout):
+    """AI Upscale's first request loads torch and downloads its model before inferring (~20 s on a
+    fast connection in the packaged build), so it must not share the short default timeout."""
+    seen = {}
+
+    def fake_post(url, data=None, files=None, timeout=None):
+        seen["timeout"] = timeout
+        return _FakeResponse(_png_bytes())
+
+    monkeypatch.setattr(backend_client.requests, "post", fake_post)
+
+    backend_client.process_via_backend(_png_bytes(), "in.png", options)
+
+    assert seen["timeout"] == expected_timeout
+    assert backend_client.AI_UPSCALE_REQUEST_TIMEOUT_S > backend_client.REQUEST_TIMEOUT_S

@@ -60,6 +60,10 @@ def ensure_backend_running() -> None:
     )
 
 
+REQUEST_TIMEOUT_S = 30
+AI_UPSCALE_REQUEST_TIMEOUT_S = 300
+
+
 def process_via_backend(
     image_bytes: bytes,
     filename: str,
@@ -86,12 +90,16 @@ def process_via_backend(
     if removal_mask_bytes:
         files["removal_mask"] = ("removal_mask.png", removal_mask_bytes)
 
+    # AI Upscale's first request loads torch and downloads its ~64 MB model before inferring --
+    # measured at ~20 s on a fast connection in the packaged build, so the normal 30 s budget
+    # would time out on a slower one. Every other request keeps the short timeout.
+    timeout = AI_UPSCALE_REQUEST_TIMEOUT_S if request_options.get("ai_upscale") else REQUEST_TIMEOUT_S
     try:
         response = requests.post(
             f"{BACKEND_URL}/process",
             data={"options": json.dumps(request_options)},
             files=files,
-            timeout=30,
+            timeout=timeout,
         )
     except requests.RequestException as error:
         raise RuntimeError(f"Could not reach the local processing backend: {error}") from error
