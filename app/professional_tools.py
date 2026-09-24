@@ -236,6 +236,15 @@ def export_profile(
     if format_name == "JPEG":
         save_kwargs.update(quality=profile["quality"], optimize=True)
         result = result.convert("RGB")
+    # Metadata is read from the *input* image's info (a resize/watermark/convert above may not
+    # carry it). The profile's strip_metadata flag used to be ignored entirely -- EXIF was never
+    # written, even for Print/Archive. Now EXIF (camera data, capture time, possibly GPS) is kept
+    # unless the profile strips it; the ICC profile is always kept, since it isn't personal data
+    # and dropping it would change how a non-sRGB export's colors are displayed.
+    if image.info.get("icc_profile"):
+        save_kwargs["icc_profile"] = image.info["icc_profile"]
+    if image.info.get("exif") and not profile["strip_metadata"]:
+        save_kwargs["exif"] = image.info["exif"]
     result.save(output, **save_kwargs)
     extension = {"JPEG": ".jpg", "TIFF": ".tif", "PNG": ".png"}[format_name]
     return output.getvalue(), extension, "image/jpeg" if format_name == "JPEG" else "image/" + format_name.lower()
