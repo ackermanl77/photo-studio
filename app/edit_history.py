@@ -5,6 +5,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+# Undo steps kept (P5): each snapshot is a full recipe -- painted masks included -- so an unbounded
+# list grew for the whole session.
+MAX_HISTORY_STEPS = 200
+
+
 @dataclass
 class EditHistory:
     snapshots: list[dict[str, Any]] = field(default_factory=list)
@@ -22,6 +27,8 @@ class EditHistory:
         if self.cursor < len(self.snapshots) - 1:
             self.snapshots = self.snapshots[: self.cursor + 1]
         self.snapshots.append(snapshot)
+        if len(self.snapshots) > MAX_HISTORY_STEPS:
+            del self.snapshots[: len(self.snapshots) - MAX_HISTORY_STEPS]
         self.cursor = len(self.snapshots) - 1
 
     @property

@@ -214,10 +214,11 @@ def heal_patch(image: Image.Image, source_box: tuple[int, int, int, int], target
     return Image.fromarray(cv2.cvtColor(repaired, cv2.COLOR_BGR2RGB), mode="RGB")
 
 
-def preview_image(image: Image.Image, max_size: tuple[int, int] = (1600, 1600)) -> Image.Image:
-    preview = image.copy()
-    preview.thumbnail(max_size, Image.Resampling.LANCZOS)
-    return preview
+def preview_image(image, max_size=(1600, 1600)):
+    """Kept for existing callers; the one implementation is app.professional_tools.preview_image."""
+    from app.professional_tools import preview_image as _preview_image
+
+    return _preview_image(image, max_size)
 
 
 class PhotoCatalog:
@@ -252,6 +253,12 @@ class PhotoCatalog:
         tag_text = ",".join(sorted({tag.strip() for tag in (tags or []) if tag.strip()}))
         with self._connect() as connection:
             connection.execute("INSERT INTO photos(path, rating, tags) VALUES (?, ?, ?) ON CONFLICT(path) DO UPDATE SET rating=excluded.rating, tags=excluded.tags", (str(path), rating, tag_text))
+
+    def ensure(self, path: str | Path) -> None:
+        """Add `path` unrated if it isn't catalogued yet -- a rescan must not reset the ratings and
+        tags already given (index_folder() used upsert(), which overwrote them with 0 / none)."""
+        with self._connect() as connection:
+            connection.execute("INSERT OR IGNORE INTO photos(path, rating, tags) VALUES (?, 0, '')", (str(path),))
 
     def get(self, path: str | Path) -> dict[str, object]:
         with self._connect() as connection:
