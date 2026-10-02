@@ -1,0 +1,36 @@
+name: WebView2 runtime age
+
+# The desktop build bundles a pinned *Fixed Version* WebView2 runtime, which never auto-updates
+# with Chromium security fixes (see scripts/build_release.ps1). This opens an issue once a month
+# when the pinned version is older than MAX_AGE_DAYS, so bumping it is a scheduled chore rather
+# than something remembered by chance.
+on:
+  schedule:
+    - cron: "0 9 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      MAX_AGE_DAYS: "90"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the pinned WebView2 version's age
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep -oP '^\$WebView2Version = "\K[^"]+' scripts/build_release.ps1)
+          pinned=$(grep -oP '^\$WebView2PinnedOn = "\K[^"]+' scripts/build_release.ps1)
+          age=$(( ( $(date +%s) - $(date -d "$pinned" +%s) ) / 86400 ))
+          echo "WebView2 $version pinned on $pinned ($age days ago)"
+          if [ "$age" -gt "$MAX_AGE_DAYS" ]; then
+            title="Bump the bundled WebView2 runtime ($version is $age days old)"
+            if ! gh issue list --state open --search "$title in:title" --json number --jq '.[0].number' | grep -q .; then
+              gh issue create --title "$title" --body "scripts/build_release.ps1 pins WebView2 Fixed Version $version (pinned on $pinned). Fixed Version runtimes don't receive Chromium security updates -- pick a current version, update \$WebView2Version, \$WebView2Url, \$WebView2Sha256 and \$WebView2PinnedOn, and rebuild."
+            fi
+          fi
