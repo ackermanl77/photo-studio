@@ -20,6 +20,19 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
+SetupIconFile=..\app\assets\photostudio.ico
+UninstallDisplayIcon={app}\PhotoStudio.exe
+; .photoproject association below writes to HKA (per-machine when installed for all users).
+ChangesAssociations=yes
+
+[Tasks]
+Name: "assocproject"; Description: "Open .photoproject files with Photo Studio"; GroupDescription: "File associations:"
+
+[Registry]
+Root: HKA; Subkey: "Software\Classes\.photoproject"; ValueType: string; ValueName: ""; ValueData: "PhotoStudio.Project"; Flags: uninsdeletevalue; Tasks: assocproject
+Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project"; ValueType: string; ValueName: ""; ValueData: "Photo Studio Project"; Flags: uninsdeletekey; Tasks: assocproject
+Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\PhotoStudio.exe,0"; Tasks: assocproject
+Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\PhotoStudio.exe"" ""%1"""; Tasks: assocproject
 
 [Files]
 ; ..\release is build_release.ps1's finished package folder (PhotoStudio.exe + _internal + the
@@ -31,6 +44,16 @@ Source: "..\release\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 [Icons]
 Name: "{group}\Photo Studio"; Filename: "{app}\PhotoStudio.exe"
 Name: "{autodesktop}\Photo Studio"; Filename: "{app}\PhotoStudio.exe"
+
+[Code]
+; Settings, presets, the library catalog and logs live in %LOCALAPPDATA%\PhotoStudio (app.config.
+; user_data_dir()). They are kept on uninstall unless the user agrees here.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    if MsgBox('Also delete your Photo Studio presets, catalog, downloaded models and logs (' + ExpandConstant('{localappdata}\PhotoStudio') + ')?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+      DelTree(ExpandConstant('{localappdata}\PhotoStudio'), True, True, True);
+end;
 
 [Run]
 Filename: "{app}\PhotoStudio.exe"; Description: "Launch Photo Studio"; Flags: nowait postinstall skipifsilent

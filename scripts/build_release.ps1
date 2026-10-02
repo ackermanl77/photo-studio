@@ -2,11 +2,30 @@
 param(
     [string]$Version = "0.1.0",
     [switch]$Sign,
-    [string]$CertificateSubject = "",
-    # Build with a specific interpreter instead of the default lookup below -- e.g. the project's
-    # own .venv when that's where requirements-gpu.txt (CUDA torch + Real-ESRGAN, for AI Upscale)
-    # is installed; PyInstaller only bundles what the interpreter running it can import.
+    # SHA-1 thumbprint of the code-signing certificate (signtool /sha1). Was misleadingly named
+    # -CertificateSubject although it was always passed to /sha1; the old name still works.
+    [Alias("CertificateSubject")]
+    [string]$CertificateThumbprint = "",
+    # Build profile. Every build runs from a fresh virtual environment the script creates itself
+    # (build-venv\<profile>\), so what ships depends only on the requirement files -- never on
+    # whatever happens to be installed in the developer's own interpreter (the old default build
+    # bundled rawpy/CUDA torch only because the dev interpreter had them, and a CI build shipped
+    # without RAW support).
+    #   cpu: requirements-desktop.txt + requirements-raw.txt (RAW import is part of every build)
+    #   gpu: cpu + requirements-gpu.txt (CUDA torch + Real-ESRGAN for AI Upscale). torch's CUDA
+    #        wheels come from PyTorch's own index -- see requirements-gpu.txt's header; pass it via
+    #        -ExtraIndexUrl, e.g. https://download.pytorch.org/whl/cu130
+    # A constraints-<profile>.txt next to this repo's requirement files, when present, pins every
+    # transitive version (pip -c) for a reproducible build.
+    [ValidateSet("cpu", "gpu")]
+    [string]$BuildProfile = "cpu",
+    [string]$ExtraIndexUrl = "",
+    # The *base* interpreter the build venv is created from (not the one PyInstaller runs in).
+    # Default: `py -3.14` when the Python launcher is present, else whatever `python` is on PATH.
     [string]$Python = "",
+    # Reuse an existing build-venv\<profile>\ instead of recreating it (faster local rebuilds;
+    # never used by CI).
+    [switch]$ReuseVenv,
     # Skip the 7z archive. A GPU build bundles several GB of CUDA libraries, and -mx=9 LZMA over
     # that takes a long time -- skip it when only the unpacked release\ folder is needed.
     [switch]$SkipArchive,
@@ -23,15 +42,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-if (-not $Python) { $Python = "C:\Users\MELEJ\AppData\Local\Python\pythoncore-3.14-64\python.exe" }
-if (-not (Test-Path $Python)) { $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe" }
-if (-not (Test-Path $Python)) {
-    # Neither of the two dev-machine-specific paths above exist on a CI runner (e.g. the
-    # release-build GitHub Actions workflow, which sets up Python via actions/setup-python and
-    # puts it on PATH instead) -- fall back to whatever "python" resolves to there.
-    $onPath = Get-Command python -ErrorAction SilentlyContinue
-    if ($onPath) { $Python = $onPath.Source }
+if (-not $Python) {
+    $launcher = Get-Command py -ErrorAction SilentlyContinue
+    if ($launcher) {
+        $Python = (& $launcher.Source -3.14 -c "import sys; print(sys.executable)" 2>$null)
+    }
+    if (-not $Python) {
+        $onPath = Get-Command python -ErrorAction SilentlyContinue
+        if ($onPath) { $Python = $onPath.Source }
+    }
 }
+$BuildVenv = Join-Path $ProjectRoot "build-venv\$BuildProfile"
+$VenvPython = Join-Path $BuildVenv "Scripts\python.exe"
+$SelfTestReport = Join-Path $ProjectRoot "build-release-self-test.json"
 $Dist = Join-Path $ProjectRoot "dist-release"
 $Build = Join-Path $ProjectRoot "build-release"
 # The only unpacked copy of the finished app: a fixed name, so the built .exe always has one stable,
@@ -56,6 +79,12 @@ $LegacyPackage = Join-Path $ProjectRoot "PhotoStudio-$Version-Windows"
 # version + x64 under "Fixed Version", accept the EULA, then read the .cab URL out of the page's
 # own HTML -- search it for "filestreamingservice" -- since each version gets its own URL).
 $WebView2Version = "153.0.4234.32"
+# SHA-256 of that version's .cab, checked after every download (and against a cached copy) so a
+# corrupted or substituted download can't end up inside a release. Update together with
+# $WebView2Version. $WebView2PinnedOn is read by .github/workflows/webview2-age.yml, which opens an
+# issue once the pin is more than 90 days old.
+$WebView2Sha256 = "2CB653A74426F0AA802C2396775C6BC674FD662D5396BD677F47BFA6E12EBA9C"
+$WebView2PinnedOn = "2026-09-15"
 $WebView2CabName = "Microsoft.WebView2.FixedVersionRuntime.$WebView2Version.x64.cab"
 $WebView2Url = "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/c3d95bc1-a0a7-4ca6-aaa1-fa0ac3dd1a37/$WebView2CabName"
 $WebView2CacheDir = Join-Path $ProjectRoot "vendor\webview2-cache"
@@ -63,17 +92,29 @@ $WebView2Cab = Join-Path $WebView2CacheDir $WebView2CabName
 $WebView2ExtractedRoot = Join-Path $WebView2CacheDir "extracted"
 $WebView2RuntimeSource = Join-Path $WebView2ExtractedRoot "Microsoft.WebView2.FixedVersionRuntime.$WebView2Version.x64"
 
-if (-not (Test-Path $Python)) {
-    throw "Python interpreter not found. Install Python globally or create .venv."
+if (-not $Python -or -not (Test-Path $Python)) {
+    throw "Base Python interpreter not found. Install Python 3.14 (or pass -Python <path>)."
 }
 
 Push-Location $ProjectRoot
 try {
     # $ErrorActionPreference doesn't cover native commands -- check their exit codes explicitly, so a
     # failed install or build stops here instead of packaging (and cleaning up around) a stale output.
-    & $Python -m pip install -r requirements-desktop.txt
+    if ((Test-Path $BuildVenv) -and -not $ReuseVenv) { Remove-Item $BuildVenv -Recurse -Force }
+    if (-not (Test-Path $VenvPython)) {
+        & $Python -m venv $BuildVenv
+        if ($LASTEXITCODE -ne 0) { throw "Creating the build venv failed (exit code $LASTEXITCODE)." }
+    }
+    & $VenvPython -m pip install --upgrade pip
+    if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed (exit code $LASTEXITCODE)." }
+    $requirements = @("-r", "requirements-desktop.txt", "-r", "requirements-raw.txt")
+    if ($BuildProfile -eq "gpu") { $requirements += @("-r", "requirements-gpu.txt") }
+    $constraints = Join-Path $ProjectRoot "constraints-$BuildProfile.txt"
+    if (Test-Path $constraints) { $requirements += @("-c", $constraints) } else { Write-Warning "No constraints-$BuildProfile.txt -- transitive versions are not pinned for this build." }
+    if ($ExtraIndexUrl) { $requirements += @("--extra-index-url", $ExtraIndexUrl) }
+    & $VenvPython -m pip install @requirements
     if ($LASTEXITCODE -ne 0) { throw "pip install failed (exit code $LASTEXITCODE)." }
-    & $Python -m PyInstaller --noconfirm --distpath $Dist --workpath $Build PhotoStudio.spec
+    & $VenvPython -m PyInstaller --noconfirm --distpath $Dist --workpath $Build PhotoStudio.spec
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed (exit code $LASTEXITCODE)." }
 
     # Move (not copy) PyInstaller's output into release\: on the same drive that's a rename, so the
@@ -97,6 +138,11 @@ try {
         Write-Host "Downloading WebView2 Runtime $WebView2Version (x64)..."
         Invoke-WebRequest -Uri $WebView2Url -OutFile $WebView2Cab
     }
+    $cabHash = (Get-FileHash $WebView2Cab -Algorithm SHA256).Hash
+    if ($cabHash -ne $WebView2Sha256) {
+        Remove-Item $WebView2Cab -Force
+        throw "WebView2 runtime download failed its SHA-256 check (got $cabHash, expected $WebView2Sha256) -- deleted it; rerun to download again."
+    }
     if (-not (Test-Path $WebView2RuntimeSource)) {
         Write-Host "Extracting WebView2 Runtime..."
         New-Item -ItemType Directory -Force -Path $WebView2ExtractedRoot | Out-Null
@@ -107,12 +153,24 @@ try {
     }
     Copy-Item $WebView2RuntimeSource (Join-Path $ReleaseFolder "WebView2Runtime") -Recurse
 
+    # Post-build smoke test (app/desktop.py --self-test): every bundled module imports, rawpy and a
+    # face detector are present. The windowed exe has no console, so the report is read from a file.
+    if (Test-Path $SelfTestReport) { Remove-Item $SelfTestReport -Force }
+    $selfTest = Start-Process -FilePath (Join-Path $ReleaseFolder "PhotoStudio.exe") -ArgumentList @("--self-test", "--self-test-report", "`"$SelfTestReport`"") -Wait -PassThru
+    if (Test-Path $SelfTestReport) { Get-Content $SelfTestReport | Write-Host }
+    if ($selfTest.ExitCode -ne 0) { throw "PhotoStudio.exe --self-test failed (exit code $($selfTest.ExitCode)) -- see $SelfTestReport." }
+    if ($BuildProfile -eq "gpu") {
+        $report = Get-Content $SelfTestReport -Raw | ConvertFrom-Json
+        if (-not $report.capabilities.ai_upscale_installed) { throw "gpu profile build is missing the AI Upscale packages." }
+    }
+
     if ($Sign) {
-        if ([string]::IsNullOrWhiteSpace($CertificateSubject)) {
-            throw "-CertificateSubject is required when -Sign is used."
+        if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
+            throw "-CertificateThumbprint is required when -Sign is used."
         }
         $exe = Join-Path $ReleaseFolder "PhotoStudio.exe"
-        & signtool sign /sha1 $CertificateSubject /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a $exe
+        & signtool sign /sha1 $CertificateThumbprint /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a $exe
+        if ($LASTEXITCODE -ne 0) { throw "signtool failed (exit code $LASTEXITCODE) -- the release is unsigned." }
     }
 
     $hashPath = "$Archive.sha256"

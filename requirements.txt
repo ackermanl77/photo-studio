@@ -1,8 +1,11 @@
-Pillow>=10.0.0
-numpy>=1.26.0
-opencv-python-headless>=4.9.0
-scikit-image>=0.22.0
-pytest>=8.0.0
-streamlit>=1.40.0
-Flask>=3.0.0
-requests>=2.31.0
+# Runtime dependencies. Upper bounds stop a new major release from silently changing behaviour
+# (OpenCV 5 once dropped the Haar face detector this app relied on; the CSS targets Streamlit
+# DOM internals). Raise a bound deliberately, after running the tests -- the exact versions last
+# verified are in constraints-cpu.txt. Test-only tools live in requirements-dev.txt.
+Pillow>=10.1.0,<14
+numpy>=1.26.0,<3
+opencv-python-headless>=4.9.0,<6
+tifffile>=2023.7.10
+streamlit>=1.64.0,<2
+Flask>=3.0.0,<4
+requests>=2.31.0,<3

@@ -4,16 +4,22 @@ version = "0.1.0"
 description = "CPU-friendly professional photo editing utilities in Python"
 readme = "README.md"
 requires-python = ">=3.10"
+# Mirrors requirements.txt (scikit-image was never imported -- only tifffile, which it used to pull
+# in transitively, is; pytest moved to the "dev" extra).
 dependencies = [
-    "Pillow>=10.0.0",
-    "numpy>=1.26.0",
-    "opencv-python-headless>=4.9.0",
-    "scikit-image>=0.22.0",
-    "pytest>=8.0.0",
-    "streamlit>=1.40.0",
-    "Flask>=3.0.0",
-    "requests>=2.31.0",
+    "Pillow>=10.1.0,<14",
+    "numpy>=1.26.0,<3",
+    "opencv-python-headless>=4.9.0,<6",
+    "tifffile>=2023.7.10",
+    "streamlit>=1.64.0,<2",
+    "Flask>=3.0.0,<4",
+    "requests>=2.31.0,<3",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0,<10"]
+raw = ["rawpy>=0.25.0,<1"]
+desktop = ["pywebview>=5.4,<7", "pyinstaller>=6.10,<7"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -21,3 +27,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: drives the whole Streamlit script through AppTest (deselect with -m 'not slow')",
+    "perf: opt-in 24 MP performance budgets (PHOTO_PERF_TESTS=1)",
+]

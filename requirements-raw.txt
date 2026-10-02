@@ -1,2 +1,2 @@
 -r requirements.txt
-rawpy>=0.25.0
+rawpy>=0.25.0,<1

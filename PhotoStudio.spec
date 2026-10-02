@@ -18,7 +18,11 @@ for package in ["streamlit", "pywebview"]:
     hiddenimports += package_hiddenimports
 
 hiddenimports += collect_submodules("app")
-datas += [("app", "app")]
+# ("app", "app") also carries app/assets/ (the sample photo and the YuNet face-detection model
+# app/portrait_tools.py loads). The Streamlit config is bundled for standalone runs from the
+# release folder; the desktop launcher passes the same settings as command-line flags anyway
+# (app/desktop.py::_streamlit_server_flags), since its children run in the per-user data folder.
+datas += [("app", "app"), (".streamlit/config.toml", ".streamlit")]
 
 # Optional AI Upscale deps (requirements-gpu.txt). Only bundled when the interpreter running
 # PyInstaller actually has them -- a plain requirements.txt build is unchanged. basicsr and
@@ -74,6 +78,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    icon="app/assets/photostudio.ico",
 )
 coll = COLLECT(
     exe,
