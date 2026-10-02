@@ -69,6 +69,33 @@ def render_text_layer(
     return image
 
 
+def render_image_layer(
+    canvas_size: tuple[int, int],
+    image: Image.Image,
+    x_pct: float = 50.0,
+    y_pct: float = 50.0,
+    scale_pct: float = 100.0,
+    rotation_deg: float = 0.0,
+) -> Image.Image:
+    """Place an image layer on a transparent canvas-sized RGBA image, keeping its aspect ratio (F5
+    in the improvement report -- every image layer used to be stretched to the canvas). At
+    scale 100 % it's fitted inside the canvas; `x_pct`/`y_pct` place its center; `rotation_deg`
+    turns it clockwise. Everything is relative to the canvas, so a proxy preview and the
+    full-resolution export place it identically."""
+    width, height = canvas_size
+    content = image.convert("RGBA")
+    fit = min(width / content.width, height / content.height) * max(0.01, float(scale_pct)) / 100.0
+    size = (max(1, round(content.width * fit)), max(1, round(content.height * fit)))
+    content = content.resize(size, Image.Resampling.LANCZOS)
+    if rotation_deg:
+        content = content.rotate(-float(rotation_deg), resample=Image.Resampling.BICUBIC, expand=True)
+    canvas = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
+    left = round(width * float(x_pct) / 100.0 - content.width / 2)
+    top = round(height * float(y_pct) / 100.0 - content.height / 2)
+    canvas.alpha_composite(content, (max(0, left), max(0, top)), (max(0, -left), max(0, -top)))
+    return canvas
+
+
 @dataclass
 class WorkspaceLayer:
     name: str

@@ -35,6 +35,10 @@ from app.project_bundle import ProjectBundle
 
 APP_PATH = Path(__file__).resolve().parent.parent / "app" / "frontend_unified_app.py"
 
+# Every test here reruns the whole Streamlit script -- `pytest -m "not slow"` skips them for a quick
+# check of the processing modules alone (T7 in the improvement report).
+pytestmark = pytest.mark.slow
+
 
 def image_bytes(color=(90, 120, 160), size=(40, 30), fmt="PNG"):
     buf = io.BytesIO()
@@ -68,7 +72,7 @@ class _FakeFileStorage:
         return self.stream.read()
 
 
-def _fake_process_via_backend(image_bytes_, filename, options, local_mask_bytes=None, layers_bytes=None, removal_mask_bytes=None):
+def _fake_process_via_backend(image_bytes_, filename, options, local_mask_bytes=None, layers_bytes=None, removal_mask_bytes=None, stage_handle=None, local_masks_bytes=None):
     request_options = dict(options)
     request_options["output_format"] = "PNG"
     image_file = _FakeFileStorage(filename, image_bytes_)
@@ -76,7 +80,8 @@ def _fake_process_via_backend(image_bytes_, filename, options, local_mask_bytes=
     layers_file = _FakeFileStorage("layers.json", layers_bytes) if layers_bytes else None
     removal_mask = _FakeFileStorage("removal_mask.png", removal_mask_bytes) if removal_mask_bytes else None
     try:
-        return process_image(image_file, request_options, removal_mask=removal_mask, local_mask=local_mask, layers_file=layers_file)
+        local_masks = _FakeFileStorage("local_masks.json", local_masks_bytes) if local_masks_bytes else None
+        return process_image(image_file, request_options, removal_mask=removal_mask, local_mask=local_mask, layers_file=layers_file, local_masks_file=local_masks)
     except (KeyError, ValueError, OSError, RuntimeError, json.JSONDecodeError, cv2.error) as error:
         # Mirrors app/backend.py's /process route, which catches exactly this tuple and returns
         # a 400 JSON error -- process_via_backend() (the real HTTP client) then turns a non-OK
@@ -172,9 +177,9 @@ def test_new_tooltips_render_without_breaking_the_app():
     widgets' own values/behavior."""
     at = run_with_uploaded_image()
 
-    assert at.slider(key="t-exp").help
+    assert at.slider(key="t-ev").help
     assert at.slider(key="d-text").help
-    assert at.slider(key="m-texp").help
+    assert at.slider(key="m-tev").help
     assert at.checkbox(key="d-sharp").help
 
     at.radio(key="l-new-kind").set_value("Text")
@@ -212,7 +217,7 @@ def test_two_stage_cache_skips_detail_stage_when_only_a_later_option_changes(mon
     at.run(timeout=30)
     at.button(key="m-add-btn").click()
     at.run(timeout=30)
-    at.slider(key="m-texp").set_value(1.3)
+    at.slider(key="m-tev").set_value(1.0)
     at.run(timeout=30)
 
     assert not at.exception
@@ -270,13 +275,14 @@ def test_ai_upscale_control_shows_an_install_caption_when_unavailable(monkeypatc
     assert not [checkbox for checkbox in at.checkbox if checkbox.key == "d-ai-upscale-en"]
 
 
-def test_enabling_ai_upscale_sends_the_selected_factor_through_to_the_backend(monkeypatch):
-    """Monkeypatches app.ai_upscale.ai_upscale_installed (picked up by the frontend's own
-    top-level `from app.ai_upscale import ai_upscale_installed` on every AppTest rerun, the same
-    mechanism _stub_backend above relies on for app.backend_client) to simulate a machine with
-    requirements-gpu.txt installed, and PhotoProcessor.apply_ai_upscale (no real GPU/model
-    needed) so this stays a fast offline unit test -- confirms the checkbox/selectbox actually
-    reach app.backend.process_image()'s options dict rather than just existing in the UI."""
+def test_ai_upscale_is_an_export_action_run_only_when_save_is_clicked(monkeypatch):
+    """AI Upscale moved from the Detail tab to the Export settings: choosing a factor must never
+    run Real-ESRGAN during a rerun (it used to re-run on every Stage 2 change), and clicking Save
+    must hand the backend the selected factor. The Save button's data is a callable Streamlit
+    runs on click; AppTest can't click a download, so st.download_button is wrapped to capture
+    the callable and invoke it directly. PhotoProcessor.apply_ai_upscale is faked (no GPU/model)."""
+    import streamlit as st
+
     import app.ai_upscale as ai_upscale_module
     from app.image_processor import PhotoProcessor
 
@@ -286,20 +292,42 @@ def test_enabling_ai_upscale_sends_the_selected_factor_through_to_the_backend(mo
 
     def fake_apply_ai_upscale(self, factor=2):
         calls.append(factor)
+        self.image = self.image.resize((self.image.width * factor, self.image.height * factor))
         return self
 
     monkeypatch.setattr(PhotoProcessor, "apply_ai_upscale", fake_apply_ai_upscale)
+    exports = []
+
+    def fake_export_via_backend(image_bytes_, filename, options, export_settings, local_mask_bytes=None, layers_bytes=None, removal_mask_bytes=None):
+        from app.export import encode_export
+
+        result = process_image(_FakeFileStorage(filename, image_bytes_), options)
+        exports.append(options)
+        return encode_export(result, export_settings)[0]
+
+    monkeypatch.setattr(backend_client, "export_via_backend", fake_export_via_backend)
+    captured = {}
+    original_download_button = st.download_button
+
+    def capturing_download_button(label, data, *args, **kwargs):
+        if kwargs.get("key") == "exp-download-btn":
+            captured["data"] = data
+        return original_download_button(label, data, *args, **kwargs)
+
+    monkeypatch.setattr(st, "download_button", capturing_download_button)
 
     at = run_with_uploaded_image()
-    assert not calls  # off by default -- must not run before being enabled
-
-    at.checkbox(key="d-ai-upscale-en").set_value(True)
-    at.run(timeout=30)
-    at.selectbox(key="d-ai-upscale-factor").set_value(4)
+    at.selectbox(key="exp-ai-upscale").set_value(4)
     at.run(timeout=30)
 
     assert not at.exception
-    assert calls[-1] == 4
+    assert not calls  # choosing the factor ran nothing
+    assert not [checkbox for checkbox in at.checkbox if checkbox.key == "d-ai-upscale-en"]
+
+    content = captured["data"]()
+    assert calls == [4]
+    assert exports[-1]["ai_upscale"] is True and exports[-1]["ai_upscale_factor"] == 4
+    assert Image.open(io.BytesIO(content)).size == (160, 120)
 
 
 def test_layer_composite_is_reflected_in_final_image():
@@ -678,7 +706,7 @@ def test_mask_stack_target_adjustment_is_reflected_in_final_image():
     at.run(timeout=30)
     assert at.session_state["mask_layers"], "expected the mask layer to be added"
 
-    at.slider(key="m-texp").set_value(1.5)
+    at.slider(key="m-tev").set_value(1.3)
     at.run(timeout=30)
 
     assert not at.exception
@@ -722,7 +750,7 @@ def test_painted_mask_selection_changes_the_final_image_via_masks_tab():
     assert len(layers) == 1
     assert layers[0]["kind"] == "Painted"
 
-    at.slider(key="m-texp").set_value(1.5)
+    at.slider(key="m-tev").set_value(1.3)
     at.run(timeout=30)
     assert canvas_hash(at) != baseline
 
@@ -800,7 +828,7 @@ def test_masks_tab_state_survives_adding_a_repair_selection():
     at.run(timeout=30)
     at.text_area(key="m-paint-data").set_value(painted_mask_base64())
     at.run(timeout=30)
-    at.slider(key="m-tsat").set_value(1.72)
+    at.slider(key="m-tsaturation").set_value(72)
     at.run(timeout=30)
     baseline = canvas_hash(at)
 
@@ -810,7 +838,7 @@ def test_masks_tab_state_survives_adding_a_repair_selection():
     at.run(timeout=30)
 
     assert not at.exception
-    assert at.slider(key="m-tsat").value == 1.72
+    assert at.slider(key="m-tsaturation").value == 72
     assert at.selectbox(key="m-new-kind").value == "Painted"
     assert canvas_hash(at) != baseline
 
@@ -904,9 +932,9 @@ def test_export_multiple_sizes_button_disabled_with_no_sizes_selected():
 def test_mask_target_sliders_disabled_until_an_enabled_mask_layer_exists():
     at = run_with_uploaded_image()
 
-    assert at.slider(key="m-texp").disabled
-    assert at.slider(key="m-tcont").disabled
-    assert at.slider(key="m-tsat").disabled
+    assert at.slider(key="m-tev").disabled
+    assert at.slider(key="m-tcontrast").disabled
+    assert at.slider(key="m-tsaturation").disabled
 
     at.selectbox(key="m-new-kind").set_value("Radial")
     at.run(timeout=30)
@@ -914,9 +942,9 @@ def test_mask_target_sliders_disabled_until_an_enabled_mask_layer_exists():
     at.run(timeout=30)
 
     assert not at.exception
-    assert not at.slider(key="m-texp").disabled
-    assert not at.slider(key="m-tcont").disabled
-    assert not at.slider(key="m-tsat").disabled
+    assert not at.slider(key="m-tev").disabled
+    assert not at.slider(key="m-tcontrast").disabled
+    assert not at.slider(key="m-tsaturation").disabled
 
 
 def test_removing_a_mask_layer_does_not_corrupt_the_remaining_layers():
@@ -987,17 +1015,17 @@ def test_undo_button_does_not_reset_canvas_view_settings():
     before the zoom/split-view/pan/export widgets defined right after it in canvas_col were
     instantiated that pass."""
     at = run_with_uploaded_image()
-    at.slider(key="t-exp").set_value(1.2)
+    at.slider(key="t-ev").set_value(0.6)
     at.run(timeout=30)
     at.selectbox(key="cv-zoom").set_value(2.0)
     at.run(timeout=30)
-    assert at.slider(key="t-exp").value == 1.2
+    assert at.slider(key="t-ev").value == 0.6
 
     at.button(key="hist-undo-btn").click()
     at.run(timeout=30)
 
     assert not at.exception
-    assert at.slider(key="t-exp").value == 1.0
+    assert at.slider(key="t-ev").value == 0.0
     assert at.selectbox(key="cv-zoom").value == 2.0
 
 
@@ -1018,36 +1046,35 @@ def test_reset_button_restores_defaults_without_touching_the_layer():
     at.run(timeout=30)
     with_layer_hash = canvas_hash(at)
 
-    at.slider(key="t-exp").set_value(1.4)
+    at.slider(key="t-ev").set_value(1.0)
     at.slider(key="d-text").set_value(60)
     at.run(timeout=30)
-    assert at.slider(key="t-exp").value == 1.4
+    assert at.slider(key="t-ev").value == 1.0
 
     at.button(key="hist-reset-btn").click()
     at.run(timeout=30)
 
     assert not at.exception
-    assert at.slider(key="t-exp").value == 1.0
+    assert at.slider(key="t-ev").value == 0.0
     assert at.slider(key="d-text").value == 0
     # The layer itself survives the reset -- same composited image as right after uploading it.
     assert canvas_hash(at) == with_layer_hash
 
 
-def test_auto_enhance_button_applies_photoprocessor_auto_enhance_values():
-    """Mirrors PhotoProcessor.auto_enhance()'s fixed constants (app/image_processor.py) --
-    a regression here would mean the button and the CLI's --auto-enhance flag have drifted
-    apart."""
-    at = run_with_uploaded_image()
+def test_auto_enhance_adapts_to_the_photo():
+    """F10: Auto Enhance measures the photo (app.image_processor.auto_enhance_recipe) instead of
+    writing the same constants for every image -- a dark photo is brightened, a bright one darkened."""
+    dark = run_with_uploaded_image(color=(30, 35, 40))
+    dark.button(key="auto-enhance-btn").click()
+    dark.run(timeout=30)
+    assert not dark.exception
+    assert dark.slider(key="t-ev").value > 0.5
+    assert any("Auto Enhance" in toast.value for toast in dark.toast)
 
-    at.button(key="auto-enhance-btn").click()
-    at.run(timeout=30)
-
-    assert not at.exception
-    assert at.slider(key="t-exp").value == 1.12
-    assert at.slider(key="t-cont").value == 1.15
-    assert at.slider(key="c-sat").value == 1.08
-    assert at.slider(key="d-den").value == 3
-    assert at.checkbox(key="d-sharp").value is True
+    bright = run_with_uploaded_image(color=(230, 225, 220))
+    bright.button(key="auto-enhance-btn").click()
+    bright.run(timeout=30)
+    assert bright.slider(key="t-ev").value < 0
 
 
 def test_import_presets_adds_new_ones_and_shows_a_toast(monkeypatch, tmp_path):
@@ -1133,7 +1160,7 @@ def test_load_preset_button_applies_its_saved_values(monkeypatch, tmp_path):
     presets_path.write_text(json.dumps({"Warm": {"exposure": 1.3, "temperature": 40}}), encoding="utf-8")
 
     at = run_with_uploaded_image()
-    assert at.slider(key="t-exp").value == 1.0
+    assert at.slider(key="t-ev").value == 0.0
 
     at.selectbox(key="p-load-sel").set_value("Warm")
     at.run(timeout=30)
@@ -1141,7 +1168,7 @@ def test_load_preset_button_applies_its_saved_values(monkeypatch, tmp_path):
     at.run(timeout=30)
 
     assert not at.exception
-    assert at.slider(key="t-exp").value == 1.3
+    assert at.slider(key="t-ev").value == 0.85
     assert at.slider(key="c-temp").value == 40
 
 
@@ -1185,16 +1212,35 @@ def test_batch_processor_preset_dropdown_lists_saved_custom_presets(monkeypatch,
     assert any(name in options for name in PRESETS)
 
 
-def test_save_project_shows_a_toast_pointing_at_the_download_button():
-    """Safe to click for real: ProjectBundle.save() here writes to an in-memory io.BytesIO,
-    not disk."""
+def _capture_download(monkeypatch, key):
+    """Records the `data` a st.download_button with `key` is given on each run -- a callable for
+    the lazy buttons, which AppTest itself never invokes."""
+    import streamlit as st
+
+    captured = {}
+    original = st.download_button
+
+    def capture(label, data, *args, **kwargs):
+        if kwargs.get("key") == key:
+            captured["data"] = data
+            captured["disabled"] = kwargs.get("disabled", False)
+        return original(label, data, *args, **kwargs)
+
+    monkeypatch.setattr(st, "download_button", capture)
+    return captured
+
+
+def test_save_project_is_one_lazy_download_button(monkeypatch):
+    """Save Project used to be two steps (package, then a separate download button that vanished
+    on the next rerun). It's one download_button now, whose data callable builds the archive only
+    when clicked."""
+    captured = _capture_download(monkeypatch, "proj-dl-btn")
     at = run_with_uploaded_image()
 
-    at.button(key="proj-save-btn").click()
-    at.run(timeout=30)
-
     assert not at.exception
-    assert any("Download" in t.value for t in at.toast)
+    assert callable(captured["data"]) and not captured["disabled"]
+    restored = ProjectBundle.load(captured["data"]())
+    assert restored.source_name == "photo.jpg"
 
 
 def test_split_view_renders_the_before_after_comparison_without_error():
@@ -1269,31 +1315,53 @@ def test_free_form_crop_box_survives_undo_redo():
 def test_undo_restores_previous_control_value():
     at = run_with_uploaded_image()
 
-    at.slider(key="t-exp").set_value(1.2)
+    at.slider(key="t-ev").set_value(0.6)
     at.run(timeout=30)
-    assert at.slider(key="t-exp").value == 1.2
+    assert at.slider(key="t-ev").value == 0.6
 
     at.button(key="hist-undo-btn").click()
     at.run(timeout=30)
 
     assert not at.exception
-    assert at.slider(key="t-exp").value == 1.0
+    assert at.slider(key="t-ev").value == 0.0
 
 
-def test_save_project_button_builds_a_bundle_with_the_layer_without_erroring():
-    """Regression guard for the Save Project button's ProjectBundle wiring (image_layers's
-    opacity/blend_mode -> LayerWorkspace -> ProjectBundle) -- a mismatch with LayerWorkspace's API
-    would raise here rather than only being caught by decoding the downloaded bytes, which AppTest
-    can't do."""
+def test_saved_project_keeps_image_layers_as_png_entries_and_text_layers_editable(monkeypatch):
+    """B10: layers are saved parametrically -- an Image layer's pixels as their own PNG entry in
+    the archive, a Text layer as its text/font/position (it used to be flattened to pixels and
+    reopen as an uneditable Image layer)."""
+    import zipfile
+
+    captured = _capture_download(monkeypatch, "proj-dl-btn")
     at = run_with_uploaded_image()
     at.get_by_key("l-new-file").set_value(("overlay.png", image_bytes((255, 0, 0), (40, 30)), "image/png"))
     at.run(timeout=30)
-
-    at.button(key="proj-save-btn").click()
+    at.radio(key="l-new-kind").set_value("Text")
     at.run(timeout=30)
-
+    at.button(key="l-add-text-btn").click()
+    at.run(timeout=30)
+    text_id = at.session_state["image_layers"][1]["id"]
+    at.text_area(key=f"l-text-{text_id}").set_value("Hello")
+    at.run(timeout=30)
     assert not at.exception
-    assert any(db.label == "⬇️ Download .photoproject" for db in at.download_button)
+
+    content = captured["data"]()
+    names = zipfile.ZipFile(io.BytesIO(content)).namelist()
+    assert "layers/stack.json" in names and any(name.startswith("layers/") and name.endswith(".png") for name in names)
+    restored = ProjectBundle.load(content)
+    kinds = [layer["kind"] for layer in restored.layer_stack]
+    assert kinds == ["image", "text"] and restored.layer_stack[1]["text"] == "Hello"
+
+    # ...and reopening it brings the Text layer back as a Text layer.
+    at2 = run_with_uploaded_image()
+    at2.get_by_key("proj-upload").set_value(("p.photoproject", content, "application/zip"))
+    at2.run(timeout=30)
+    at2.button(key="proj-load-btn").click()
+    at2.run(timeout=30)
+    assert not at2.exception
+    layers = at2.session_state["image_layers"]
+    assert [layer["kind"] for layer in layers] == ["image", "text"]
+    assert layers[1]["text"] == "Hello" and layers[0]["image_b64"]
 
 
 def test_adding_a_corrupted_layer_image_shows_an_error_instead_of_crashing():
@@ -1336,7 +1404,7 @@ def test_load_project_restores_recipe_and_layers_from_a_project_bundle():
 
     assert not at.exception
     assert at.session_state["restored_source_name"] == "saved.png"
-    assert at.slider(key="t-exp").value == 1.3
+    assert at.slider(key="t-ev").value == 0.85
     restored_layers = at.session_state["image_layers"]
     assert len(restored_layers) == 1
     assert restored_layers[0]["opacity"] == 0.7
@@ -1364,7 +1432,7 @@ def test_load_project_still_reads_the_legacy_photoproject_format():
 
     assert not at.exception
     assert at.session_state["restored_source_name"] == "legacy.png"
-    assert at.slider(key="t-exp").value == 1.4
+    assert at.slider(key="t-ev").value == 1.05
 
 
 def test_load_project_with_a_corrupted_file_shows_an_error_instead_of_crashing():
@@ -1682,7 +1750,7 @@ def test_magic_wand_selection_commits_via_the_hidden_click_field():
     assert layers[0]["params"]["click_x"] == 0.5
     assert layers[0]["params"]["click_y"] == 0.5
 
-    at.slider(key="m-texp").set_value(1.5)
+    at.slider(key="m-tev").set_value(1.3)
     at.run(timeout=30)
     assert canvas_hash(at) != baseline
 
@@ -1698,6 +1766,7 @@ def test_load_preset_section_shows_a_thumbnail_preview(monkeypatch, tmp_path):
     presets_path.write_text(json.dumps({"Warm": {"exposure": 1.3, "temperature": 40}}), encoding="utf-8")
 
     at = run_with_uploaded_image()
+    at.session_state["tool-tab"] = "✦ Presets"  # thumbnails only render in the visible tab (F1)
     at.selectbox(key="p-load-sel").set_value("Warm")
     at.run(timeout=30)
 
@@ -1952,13 +2021,13 @@ def test_mask_overlay_preview_reflects_lens_distortion_correction():
     at.run(timeout=30)
     at.checkbox(key="m-preview-overlay").set_value(True)
     at.run(timeout=30)
-    baseline = [img.value[0] for img in at.image if img.captions and img.captions[0] == "Red = selected by the combined mask"][0]
+    baseline = [img.value[0] for img in at.image if img.captions and img.captions[0] == "Highlighted = selected by the combined mask"][0]
 
     at.slider(key="lens-distortion").set_value(80)
     at.run(timeout=30)
 
     assert not at.exception
-    overlay_after = [img.value[0] for img in at.image if img.captions and img.captions[0] == "Red = selected by the combined mask"][0]
+    overlay_after = [img.value[0] for img in at.image if img.captions and img.captions[0] == "Highlighted = selected by the combined mask"][0]
     assert overlay_after != baseline
 
 
@@ -2165,7 +2234,7 @@ def test_save_snapshot_without_a_name_shows_a_warning_toast():
 
 def test_save_and_restore_named_snapshot_recovers_the_saved_control_value():
     at = run_with_uploaded_image()
-    at.slider(key="t-exp").set_value(1.3)
+    at.slider(key="t-ev").set_value(0.8)
     at.run(timeout=30)
 
     at.text_input(key="snap-name-in").set_value("My Look")
@@ -2177,15 +2246,15 @@ def test_save_and_restore_named_snapshot_recovers_the_saved_control_value():
     assert any("My Look" in t.value for t in at.toast)
     assert "My Look" in at.session_state["edit_history"].snapshot_names
 
-    at.slider(key="t-exp").set_value(1.0)
+    at.slider(key="t-ev").set_value(0.0)
     at.run(timeout=30)
-    assert at.slider(key="t-exp").value == 1.0
+    assert at.slider(key="t-ev").value == 0.0
 
     at.button(key="snap-restore-My Look").click()
     at.run(timeout=30)
 
     assert not at.exception
-    assert at.slider(key="t-exp").value == 1.3
+    assert at.slider(key="t-ev").value == 0.8
 
 
 def test_restoring_a_snapshot_does_not_remove_it_and_undo_still_reaches_the_step_before_the_restore():
@@ -2195,28 +2264,28 @@ def test_restoring_a_snapshot_does_not_remove_it_and_undo_still_reaches_the_step
     Undo right after a restore goes back to the value just before the restore, the same as it
     would after applying a preset."""
     at = run_with_uploaded_image()
-    at.slider(key="t-exp").set_value(1.3)
+    at.slider(key="t-ev").set_value(0.8)
     at.run(timeout=30)
     at.text_input(key="snap-name-in").set_value("Bookmark")
     at.run(timeout=30)
     at.button(key="snap-save-btn").click()
     at.run(timeout=30)
 
-    at.slider(key="t-exp").set_value(1.0)
+    at.slider(key="t-ev").set_value(0.0)
     at.run(timeout=30)
 
     at.button(key="snap-restore-Bookmark").click()
     at.run(timeout=30)
 
     assert not at.exception
-    assert at.slider(key="t-exp").value == 1.3
+    assert at.slider(key="t-ev").value == 0.8
     assert "Bookmark" in at.session_state["edit_history"].snapshot_names  # still there, not consumed
 
     at.button(key="hist-undo-btn").click()
     at.run(timeout=30)
 
     assert not at.exception
-    assert at.slider(key="t-exp").value == 1.0
+    assert at.slider(key="t-ev").value == 0.0
 
 
 def test_delete_snapshot_removes_it_from_the_saved_list():
@@ -2355,7 +2424,7 @@ def test_load_project_replaces_an_already_open_photo_and_resets_unmentioned_cont
     the recipe wasn't merged over RECIPE_DEFAULTS, so any control the project didn't mention kept
     the previous photo's value."""
     at = run_with_uploaded_image(size=(40, 30))
-    at.slider(key="t-cont").set_value(1.4)
+    at.slider(key="t-contrast").set_value(40)
     at.run(timeout=30)
     assert canvas_dims(at) == (40, 30)
 
@@ -2372,8 +2441,8 @@ def test_load_project_replaces_an_already_open_photo_and_resets_unmentioned_cont
     assert not at.exception
     assert canvas_dims(at) == (20, 10)
     assert not at.file_uploader[0].value
-    assert at.slider(key="t-exp").value == 1.3
-    assert at.slider(key="t-cont").value == 1.0
+    assert at.slider(key="t-ev").value == 0.85
+    assert at.slider(key="t-contrast").value == 0
 
 
 def test_every_streamlit_data_cache_is_bounded():
