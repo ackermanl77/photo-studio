@@ -45,7 +45,7 @@ def _estimate_atmospheric_light(image: np.ndarray, dark_channel: np.ndarray) -> 
     return flat_image[brightest_indices].max(axis=0).astype(np.float32)
 
 
-def apply_dehaze(image: Image.Image, strength: float = 0.0) -> Image.Image:
+def apply_dehaze(image: Image.Image, strength: float = 0.0, pixel_scale: float = 1.0) -> Image.Image:
     """Reduces atmospheric haze via the Dark Channel Prior. `strength` is 0-100 (0 is a no-op);
     it scales `omega`, the fraction of the estimated haze this actually removes for a given pixel
     -- kept well under the theoretical maximum even at strength=100 so a hazy sky doesn't turn
@@ -57,12 +57,15 @@ def apply_dehaze(image: Image.Image, strength: float = 0.0) -> Image.Image:
         return image
     normalized = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
 
-    dark = _dark_channel(normalized)
+    # `pixel_scale` < 1 on a reduced-size preview (see app.pipeline): the patch shrinks with it so
+    # it covers the same fraction of the scene as at full resolution. Odd, at least 3 px.
+    patch_size = _PATCH_SIZE if pixel_scale == 1.0 else max(3, int(round(_PATCH_SIZE * pixel_scale)) | 1)
+    dark = _dark_channel(normalized, patch_size)
     atmospheric_light = _estimate_atmospheric_light(normalized, dark)
     atmospheric_light = np.clip(atmospheric_light, _MIN_ATMOSPHERIC_LIGHT, 1.0)
 
     omega = _OMEGA * (strength / 100.0)
-    transmission = 1.0 - omega * _dark_channel(normalized / atmospheric_light[None, None, :])
+    transmission = 1.0 - omega * _dark_channel(normalized / atmospheric_light[None, None, :], patch_size)
     blur_sigma = max(1.0, normalized.shape[1] / 50.0)
     transmission = cv2.GaussianBlur(transmission, (0, 0), sigmaX=blur_sigma)
     transmission = np.clip(transmission, _MIN_TRANSMISSION, 1.0)

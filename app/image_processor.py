@@ -14,7 +14,123 @@ from app.professional_color import apply_color_grading, apply_hsl_mixer, apply_v
 from app.raw_import import open_image
 
 
+# Rec. 709 luma weights -- the luminance Clarity and Highlights/Shadows act on (the old
+# Highlights/Shadows used mean(R, G, B), which treats a saturated blue as darker than it looks).
+_LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+# Spatial scales as a fraction of the image's long edge, so a reduced-size preview proxy and the
+# full-resolution export get the same look (B5 in the improvement report).
+CLARITY_SIGMA_FRACTION = 0.012
+TONE_BASE_RADIUS_FRACTION = 0.02
+
+
+def _luminance(array: np.ndarray) -> np.ndarray:
+    """(H, W, 3) float32 0-255 -> (H, W) float32 0-1."""
+    return (array @ _LUMA) / 255.0
+
+
+def guided_filter(guide: np.ndarray, radius: int, eps: float) -> np.ndarray:
+    """He et al.'s guided filter, self-guided, built from cv2.boxFilter (no opencv-contrib): an
+    edge-preserving blur whose output follows the guide's edges, so a tone change computed from it
+    doesn't bleed (halo) across a sharp boundary the way a Gaussian base would."""
+    size = (2 * radius + 1, 2 * radius + 1)
+    mean_i = cv2.boxFilter(guide, -1, size)
+    variance = cv2.boxFilter(guide * guide, -1, size) - mean_i * mean_i
+    a = variance / (variance + eps)
+    b = mean_i - a * mean_i
+    return cv2.boxFilter(a, -1, size) * guide + cv2.boxFilter(b, -1, size)
+
+
+def _srgb_to_linear(values: np.ndarray) -> np.ndarray:
+    return np.where(values <= 0.04045, values / 12.92, ((values + 0.055) / 1.055) ** 2.4)
+
+
+def _linear_to_srgb(values: np.ndarray) -> np.ndarray:
+    values = np.clip(values, 0.0, 1.0)
+    return np.where(values <= 0.0031308, values * 12.92, 1.055 * np.power(values, 1 / 2.4) - 0.055)
+
+
+# Linear values above the knee roll off smoothly toward 1.0 instead of clipping hard, so +EV
+# compresses highlights the way a film/RAW editor's shoulder does rather than blowing them flat.
+_SHOULDER_KNEE = 0.8
+
+
+def exposure_lut(ev: float) -> list[int]:
+    """256-entry LUT for an exposure change of `ev` stops: decode sRGB to linear light, multiply by
+    2**ev, roll the highlights off above _SHOULDER_KNEE, encode back. One stop = twice the light,
+    the way Lightroom/darktable define exposure (the old slider multiplied the gamma-encoded values,
+    and its 0.5-1.5 range was only about -1..+0.6 EV)."""
+    linear = _srgb_to_linear(np.arange(256, dtype=np.float64) / 255.0) * (2.0 ** float(ev))
+    over = linear > _SHOULDER_KNEE
+    headroom = 1.0 - _SHOULDER_KNEE
+    shouldered = _SHOULDER_KNEE + headroom * (1.0 - np.exp(-(linear[over] - _SHOULDER_KNEE) / headroom))
+    # Faded in over the first stop of brightening, so 0 EV is exactly the identity and a small
+    # change never jumps.
+    weight = min(1.0, max(0.0, float(ev)))
+    linear[over] = (1.0 - weight) * np.minimum(linear[over], 1.0) + weight * shouldered
+    return [int(v) for v in np.clip(np.round(_linear_to_srgb(linear) * 255.0), 0, 255)]
+
+
+def _apply_clarity(arr: np.ndarray, clarity: float) -> np.ndarray:
+    """Clarity = midtone local contrast on luminance only: unsharp-mask the luminance with a large
+    radius (~1.2 % of the long edge), weight the boost toward the midtones (4*L*(1-L)), and add the
+    luminance change back to all three channels so colors don't shift. Negative values soften
+    local contrast instead. It used to be ImageEnhance.Contrast -- the same global operation as the
+    Contrast slider -- despite promising "midtone contrast at a larger scale than Texture"."""
+    luminance = _luminance(arr)
+    sigma = max(1.0, CLARITY_SIGMA_FRACTION * max(arr.shape[:2]))
+    blurred = cv2.GaussianBlur(luminance, (0, 0), sigma)
+    midtones = 4.0 * luminance * (1.0 - luminance)
+    new_luminance = np.clip(luminance + (clarity / 100.0) * 1.5 * (luminance - blurred) * midtones, 0.0, 1.0)
+    arr = arr + ((new_luminance - luminance) * 255.0)[..., None]
+    return np.clip(arr, 0, 255).astype(np.uint8)
+
+
+def auto_enhance_recipe(image: Image.Image) -> dict:
+    """Image-adaptive "Auto Enhance" settings (recipe keys, see app.edit_schema.RECIPE_CONTROLS),
+    measured on a <=512 px proxy -- it used to write the same constants (exposure 1.12, contrast
+    1.15, saturation 1.08, denoise 3, sharpen) whatever the photo:
+    - exposure: the EV that moves median luminance to ~0.45 (sRGB), within +-2 stops;
+    - black/white points: the 0.1 / 99.9 % luminance percentiles, fed to the tone curve when the
+      photo doesn't already use the full range;
+    - white balance: gray-world (the average color treated as neutral), at half strength;
+    - vibrance: more for a flat, low-chroma photo, none for an already colorful one;
+    - denoise: only when the estimated noise (Immerkaer's Laplacian method) is high.
+    Every key is always present, so the result also resets what a previous Auto Enhance set."""
+    from app.professional_color import estimate_white_balance
+
+    proxy = image.convert("RGB")
+    proxy.thumbnail((512, 512), Image.Resampling.LANCZOS)
+    arr = np.asarray(proxy, dtype=np.float32)
+    luminance = arr @ _LUMA
+    median = max(1.0, float(np.median(luminance))) / 255.0
+    ev = float(np.clip(2.2 * np.log2(0.45 / median), -2.0, 2.0))
+    ev = round(round(ev / 0.05) * 0.05, 2) if abs(ev) >= 0.1 else 0.0
+    low, high = (float(v) for v in np.percentile(luminance, (0.1, 99.9)))
+    black, white = int(np.clip(round(low), 0, 64)), int(np.clip(round(high), 192, 255))
+    mean_color = Image.new("RGB", (1, 1), tuple(int(c) for c in arr.reshape(-1, 3).mean(axis=0)))
+    temperature, tint = estimate_white_balance(mean_color, 0.5, 0.5)
+    chroma = float((arr.max(axis=2) - arr.min(axis=2)).mean()) / 255.0
+    gray = luminance.astype(np.float64)
+    kernel = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], dtype=np.float64)
+    laplacian = cv2.filter2D(gray, -1, kernel)[1:-1, 1:-1]
+    noise_sigma = float(np.sqrt(np.pi / 2.0) / 6.0 * np.abs(laplacian).mean()) if laplacian.size else 0.0
+    return {
+        "exposure_ev": ev,
+        "curve_enabled": black > 2 or white < 253,
+        "curve_black": black, "curve_shadows": 64, "curve_mid": 128, "curve_highlights": 192, "curve_white": white,
+        "temperature": int(round(temperature / 2)), "tint": int(round(tint / 2)),
+        "vibrance": int(np.clip(round((0.25 - chroma) * 120), 0, 30)),
+        "denoise": 3 if noise_sigma > 4.0 else 0,
+    }
+
+
 class PhotoProcessor:
+    # Multiplier for the few pixel-unit radii below (texture blur, sharpen, dehaze patch), which
+    # are tuned for a full-resolution photo. app.pipeline sets it to the preview scale when
+    # rendering a reduced-size interactive proxy, so the proxy looks like a downscaled copy of the
+    # export (and a built-in preset's own sharpen call scales with it too). 1.0 = unchanged.
+    pixel_scale: float = 1.0
+
     def __init__(self, input_path: str | Path):
         self.input_path = Path(input_path)
         self.image = open_image(self.input_path)
@@ -46,6 +162,12 @@ class PhotoProcessor:
     def apply_exposure(self, value: float) -> "PhotoProcessor":
         arr = np.array(self.image, dtype=np.float32)
         self.image = Image.fromarray(np.clip(arr * value, 0, 255).astype(np.uint8), mode="RGB")
+        return self
+
+    def apply_exposure_ev(self, ev: float = 0.0) -> "PhotoProcessor":
+        """Exposure in stops, in linear light (see exposure_lut)."""
+        if ev:
+            self.image = self.image.convert("RGB").point(exposure_lut(ev) * 3)
         return self
 
     def apply_temperature_tint(self, temperature: float = 0.0, tint: float = 0.0) -> "PhotoProcessor":
@@ -82,7 +204,7 @@ class PhotoProcessor:
         return self
 
     def apply_dehaze(self, strength: float = 0.0) -> "PhotoProcessor":
-        self.image = apply_dehaze(self.image, strength)
+        self.image = apply_dehaze(self.image, strength, pixel_scale=self.pixel_scale)
         return self
 
     def apply_lens_corrections(
@@ -126,14 +248,24 @@ class PhotoProcessor:
         exposure: float = 1.0,
         contrast: float = 1.0,
         saturation: float = 1.0,
+        exposure_ev: float = 0.0,
+        temperature: float = 0.0,
+        tint: float = 0.0,
+        clarity: float = 0.0,
     ) -> "PhotoProcessor":
+        """Apply an adjustment set only where `mask` is selected (blended by the mask's value)."""
         mask_array = self._mask_array(mask).astype(np.float32) / 255.0
         original = np.array(self.image)
+        local = PhotoProcessor.from_image(self.image)
+        local.pixel_scale = self.pixel_scale
         edited = (
-            PhotoProcessor.from_image(self.image)
+            local
             .apply_exposure(exposure)
+            .apply_exposure_ev(exposure_ev)
             .apply_contrast(contrast)
             .apply_saturation(saturation)
+            .apply_temperature_tint(temperature, tint)
+            .apply_texture_clarity(0.0, clarity)
             .as_numpy()
         )
         blend = mask_array[..., None]
@@ -163,11 +295,28 @@ class PhotoProcessor:
         return np.clip(mask_array, 0, 255).astype(np.uint8)
 
     def apply_highlights_shadows(self, highlights: float = 0.0, shadows: float = 0.0) -> "PhotoProcessor":
+        """Edge-aware Highlights/Shadows: luminance is split into an edge-preserving base (a guided
+        filter over ~2 % of the long edge) and the detail on top of it; the tone shift is computed
+        from the *base*, then the detail is added back unchanged. A shadowed face lifts as a region
+        while its texture -- and the bright background next to it -- stays put, instead of every
+        dark pixel getting the same flat offset (the old version, which also used mean(RGB) rather
+        than luminance). `highlights`/`shadows` keep their old scale: roughly 8-bit levels at the
+        extreme of each range."""
+        if not highlights and not shadows:
+            return self
         arr = np.array(self.image, dtype=np.float32)
-        luminance = arr.mean(axis=2)
-        highlights_mask = np.clip((luminance - 128.0) / 127.0, 0.0, 1.0)[..., None]
-        shadows_mask = np.clip((128.0 - luminance) / 128.0, 0.0, 1.0)[..., None]
-        arr += highlights_mask * float(highlights) + shadows_mask * float(shadows)
+        luminance = _luminance(arr)
+        radius = max(1, int(round(TONE_BASE_RADIUS_FRACTION * max(self.image.size))))
+        base = guided_filter(luminance, radius, 0.01)
+        detail = luminance - base
+        shadow_weight = np.clip((0.5 - base) / 0.5, 0.0, 1.0)
+        highlight_weight = np.clip((base - 0.5) / 0.5, 0.0, 1.0)
+        # Smoothstep so the weights ease in from the midtones instead of starting with a kink.
+        shadow_weight = shadow_weight * shadow_weight * (3 - 2 * shadow_weight)
+        highlight_weight = highlight_weight * highlight_weight * (3 - 2 * highlight_weight)
+        new_base = np.clip(base + (float(shadows) / 255.0) * shadow_weight * 1.6 + (float(highlights) / 255.0) * highlight_weight * 1.6, 0.0, 1.0)
+        delta = (new_base + detail - luminance) * 255.0
+        arr += delta[..., None]
         self.image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), mode="RGB")
         return self
 
@@ -175,14 +324,14 @@ class PhotoProcessor:
         texture = max(-100.0, min(100.0, float(texture)))
         clarity = max(-100.0, min(100.0, float(clarity)))
         if texture:
-            radius = max(1, int(round(3 - abs(texture) / 60)))
+            radius = max(1, int(round(3 - abs(texture) / 60))) * self.pixel_scale
             blurred = self.image.filter(ImageFilter.GaussianBlur(radius=radius))
             original = np.array(self.image, dtype=np.float32)
             detail = original - np.array(blurred, dtype=np.float32)
             original += detail * (texture / 100.0)
             self.image = Image.fromarray(np.clip(original, 0, 255).astype(np.uint8), mode="RGB")
         if clarity:
-            self.image = ImageEnhance.Contrast(self.image).enhance(1.0 + clarity / 100.0)
+            self.image = Image.fromarray(_apply_clarity(np.array(self.image, dtype=np.float32), clarity), mode="RGB")
         return self
 
     def crop(self, left: int, top: int, right: int, bottom: int) -> "PhotoProcessor":
@@ -245,6 +394,8 @@ class PhotoProcessor:
 
     def apply_sharpen(self, radius: float = 1.0, percent: float = 150.0) -> "PhotoProcessor":
         radius = max(1, int(round(radius)))
+        if self.pixel_scale != 1.0:
+            radius = max(0.1, radius * self.pixel_scale)
         percent = max(0, int(percent))
         self.image = self.image.filter(ImageFilter.UnsharpMask(radius=radius, percent=percent))
         return self

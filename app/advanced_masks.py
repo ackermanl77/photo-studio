@@ -7,6 +7,9 @@ import numpy as np
 from PIL import Image, ImageChops, ImageFilter
 
 
+COMBINE_MODES = ("add", "subtract", "intersect")
+
+
 @dataclass
 class MaskLayer:
     name: str
@@ -14,6 +17,9 @@ class MaskLayer:
     enabled: bool = True
     invert: bool = False
     opacity: float = 1.0
+    # How this layer joins the ones above it in MaskStack.combined(): "add" (union), "subtract"
+    # (removes its area), or "intersect" (keeps only the overlap). The first enabled layer always adds.
+    combine: str = "add"
 
     def normalized(self, size: tuple[int, int]) -> Image.Image:
         mask = self.image.convert("L").resize(size, Image.Resampling.BILINEAR)
@@ -46,10 +52,19 @@ class MaskStack:
 
     def combined(self) -> Image.Image:
         result = np.zeros((self.size[1], self.size[0]), dtype=np.float32)
+        first = True
         for layer in self.layers:
-            if layer.enabled:
-                result = np.maximum(result, np.asarray(layer.normalized(self.size), dtype=np.float32))
-        return Image.fromarray(result.astype(np.uint8), mode="L")
+            if not layer.enabled:
+                continue
+            mask = np.asarray(layer.normalized(self.size), dtype=np.float32)
+            if first or layer.combine not in COMBINE_MODES or layer.combine == "add":
+                result = np.maximum(result, mask)
+            elif layer.combine == "subtract":
+                result = result * (1.0 - mask / 255.0)
+            else:  # intersect
+                result = np.minimum(result, mask)
+            first = False
+        return Image.fromarray(np.clip(result, 0, 255).astype(np.uint8), mode="L")
 
 
 def gradient_mask(size: tuple[int, int], direction: str = "horizontal", reverse: bool = False) -> Image.Image:
