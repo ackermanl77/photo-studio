@@ -4,6 +4,9 @@ import numpy as np
 from PIL import Image
 
 
+GRAIN_GRID_LONG_EDGE = 1800
+
+
 def apply_film_grain(image: Image.Image, amount: float = 0.0) -> Image.Image:
     """Creative film grain -- Lightroom's/RawTherapee's "Effects" panel offers the same idea,
     always applied after crop/export framing (like the Post-Crop Vignette above) since grain is a
@@ -18,6 +21,14 @@ def apply_film_grain(image: Image.Image, amount: float = 0.0) -> Image.Image:
         return image
     arr = np.asarray(image.convert("RGB"), dtype=np.float32)
     std_dev = (amount / 100.0) * 20.0
-    noise = np.random.default_rng().normal(0.0, std_dev, size=arr.shape[:2])[..., None]
-    result = np.clip(arr + noise, 0, 255).astype(np.uint8)
+    height, width = arr.shape[:2]
+    # Generated on a grid of at most GRAIN_GRID_LONG_EDGE px and resized to the frame, so the grain
+    # has the same size relative to the photo at any resolution -- per-pixel noise was invisible on
+    # a 24 MP export but three times coarser on the 2048 px interactive preview.
+    grid_scale = min(1.0, GRAIN_GRID_LONG_EDGE / max(width, height))
+    grid = (max(1, round(width * grid_scale)), max(1, round(height * grid_scale)))
+    noise = np.random.default_rng().normal(0.0, std_dev, size=(grid[1], grid[0])).astype(np.float32)
+    if grid != (width, height):
+        noise = np.asarray(Image.fromarray(noise, mode="F").resize((width, height), Image.Resampling.BICUBIC))
+    result = np.clip(arr + noise[..., None], 0, 255).astype(np.uint8)
     return Image.fromarray(result, mode="RGB")
