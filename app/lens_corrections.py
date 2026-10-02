@@ -84,13 +84,13 @@ def correct_chromatic_aberration(image: Image.Image, amount: float) -> Image.Ima
     return Image.fromarray(corrected, mode="RGB")
 
 
-def _perspective_warp(array: np.ndarray, src: np.ndarray, dst: np.ndarray) -> np.ndarray:
+def _perspective_warp(array: np.ndarray, src: np.ndarray, dst: np.ndarray, border: int = cv2.BORDER_REPLICATE) -> np.ndarray:
     height, width = array.shape[:2]
     matrix = cv2.getPerspectiveTransform(src, dst)
-    return cv2.warpPerspective(array, matrix, (width, height), borderMode=cv2.BORDER_REPLICATE)
+    return cv2.warpPerspective(array, matrix, (width, height), borderMode=border)
 
 
-def correct_perspective(image: Image.Image, vertical: float = 0.0, horizontal: float = 0.0) -> Image.Image:
+def correct_perspective(image: Image.Image, vertical: float = 0.0, horizontal: float = 0.0, border: int = cv2.BORDER_REPLICATE) -> Image.Image:
     """Perspective/keystone correction for converging lines -- darktable's rotate-and-perspective
     module ("corrects converging lines by warping the image so lines in question become parallel
     to the image frame"), RawTherapee's/Lightroom's Vertical/Horizontal Perspective sliders. Unlike
@@ -109,6 +109,8 @@ def correct_perspective(image: Image.Image, vertical: float = 0.0, horizontal: f
     sequentially is indistinguishable from a single combined solve. 0/0 is a no-op. The maximum
     shift at +-100 is capped at 30% of the corrected edge's own length so even the extreme end of
     the slider stays a recognizable keystone correction rather than degenerating toward a sliver.
+    `border` is how uncovered edges are filled (edge pixels replicated by default); app.geometry
+    passes BORDER_CONSTANT to measure the uncovered area for "constrain crop".
     """
     vertical = max(-100.0, min(100.0, float(vertical)))
     horizontal = max(-100.0, min(100.0, float(horizontal)))
@@ -124,7 +126,7 @@ def correct_perspective(image: Image.Image, vertical: float = 0.0, horizontal: f
             dst = np.float32([[shift, 0], [width - shift, 0], [width, height], [0, height]])
         else:
             dst = np.float32([[0, 0], [width, 0], [width - shift, height], [shift, height]])
-        array = _perspective_warp(array, src, dst)
+        array = _perspective_warp(array, src, dst, border)
 
     if horizontal:
         shift = abs(horizontal) / 100.0 * (height * 0.3)
@@ -132,7 +134,7 @@ def correct_perspective(image: Image.Image, vertical: float = 0.0, horizontal: f
             dst = np.float32([[0, shift], [width, 0], [width, height], [0, height - shift]])
         else:
             dst = np.float32([[0, 0], [width, shift], [width, height - shift], [0, height]])
-        array = _perspective_warp(array, src, dst)
+        array = _perspective_warp(array, src, dst, border)
 
     return Image.fromarray(array, mode="RGB")
 
