@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
@@ -72,20 +73,44 @@ EXPORT_PROFILES = {
 }
 
 
-def zoom_preview(image: Image.Image, zoom: float = 1.0, center: tuple[float, float] = (0.5, 0.5), max_size: tuple[int, int] = (1200, 900)) -> Image.Image:
-    zoom = max(0.25, min(8.0, float(zoom)))
-    if zoom <= 1.0:
-        result = image.copy()
-        result.thumbnail(max_size, Image.Resampling.LANCZOS)
-        return result
-    width, height = image.size
-    crop_width = max(1, int(width / zoom))
-    crop_height = max(1, int(height / zoom))
+def zoom_viewport(size: tuple[int, int], zoom: float, center: tuple[float, float] = (0.5, 0.5), max_size: tuple[int, int] = (1200, 900)) -> tuple[int, int, int, int]:
+    """The (left, top, right, bottom) region of an image of `size` that a `zoom` view centered at
+    `center` (fractions) shows in a `max_size` viewport -- the whole image for Fit (zoom < 1)."""
+    width, height = size
+    if zoom < 1.0:
+        return (0, 0, width, height)
+    crop_width = max(1, min(width, int(max_size[0] / zoom)))
+    crop_height = max(1, min(height, int(max_size[1] / zoom)))
     cx, cy = max(0.0, min(1.0, center[0])), max(0.0, min(1.0, center[1]))
     left = max(0, min(width - crop_width, int(width * cx - crop_width / 2)))
     top = max(0, min(height - crop_height, int(height * cy - crop_height / 2)))
-    result = image.crop((left, top, left + crop_width, top + crop_height))
-    result.thumbnail(max_size, Image.Resampling.LANCZOS)
+    return (left, top, left + crop_width, top + crop_height)
+
+
+def draw_viewport_box(image: Image.Image, box: tuple[int, int, int, int], color: tuple[int, int, int] = (251, 191, 36)) -> Image.Image:
+    """The zoom navigator's overview: `image` with the visible region outlined."""
+    from PIL import ImageDraw
+
+    result = image.convert("RGB").copy()
+    draw = ImageDraw.Draw(result)
+    left, top, right, bottom = box
+    draw.rectangle((left, top, max(left + 1, right - 1), max(top + 1, bottom - 1)), outline=color, width=2)
+    return result
+
+
+def zoom_preview(image: Image.Image, zoom: float = 0.0, center: tuple[float, float] = (0.5, 0.5), max_size: tuple[int, int] = (1200, 900)) -> Image.Image:
+    """The canvas view. `zoom` < 1 is Fit (the whole image, downscaled to `max_size`); 1.0 is a true
+    1:1 view -- a viewport-sized region at the image's own pixels, never resampled; 2.0/4.0 enlarge
+    that region with nearest-neighbour so individual pixels stay visible. (100 % used to mean "fit",
+    and 200 % cropped a region and then *downscaled* it, so actual pixels were never shown.)"""
+    zoom = max(0.0, min(8.0, float(zoom)))
+    if zoom < 1.0:
+        result = image.copy()
+        result.thumbnail(max_size, Image.Resampling.LANCZOS)
+        return result
+    result = image.crop(zoom_viewport(image.size, zoom, center, max_size))
+    if zoom > 1.0:
+        result = result.resize((max(1, int(result.width * zoom)), max(1, int(result.height * zoom))), Image.Resampling.NEAREST)
     return result
 
 
@@ -156,10 +181,30 @@ def normalize_mask(mask: Image.Image | np.ndarray, size: tuple[int, int], invert
     return result
 
 
-def apply_mask_overlay(image: Image.Image, mask: Image.Image, color: tuple[int, int, int] = (220, 55, 35), opacity: int = 35) -> Image.Image:
+OVERLAY_STYLES = ("Tint", "Hatched", "Outline")
+
+
+def apply_mask_overlay(image: Image.Image, mask: Image.Image, color: tuple[int, int, int] = (220, 55, 35), opacity: int = 35, style: str = "Tint") -> Image.Image:
+    """Show a selection on `image`. "Tint" washes it with `color`; "Hatched" draws diagonal stripes
+    and "Outline" its edge -- both readable without telling colors apart (F11)."""
     base = image.convert("RGBA")
-    overlay = Image.new("RGBA", base.size, (*color, max(0, min(255, int(opacity)))))
     alpha = normalize_mask(mask, base.size)
+    if style == "Hatched":
+        width, height = base.size
+        yy, xx = np.mgrid[0:height, 0:width]
+        stripes = (((xx + yy) // 6) % 2 == 0).astype(np.float32)
+        strength = np.asarray(alpha, dtype=np.float32) / 255.0 * stripes * 0.85
+        layer = Image.new("RGBA", base.size, (*color, 255))
+        layer.putalpha(Image.fromarray((strength * 255).astype(np.uint8), mode="L"))
+        return Image.alpha_composite(base, layer).convert("RGB")
+    if style == "Outline":
+        binary = (np.asarray(alpha) >= 128).astype(np.uint8)
+        edge = cv2.morphologyEx(binary, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+        edge = cv2.dilate(edge, np.ones((2, 2), np.uint8))
+        layer = Image.new("RGBA", base.size, (*color, 255))
+        layer.putalpha(Image.fromarray(edge * 255, mode="L"))
+        return Image.alpha_composite(base, layer).convert("RGB")
+    overlay = Image.new("RGBA", base.size, (*color, max(0, min(255, int(opacity)))))
     overlay.putalpha(alpha.point(lambda value: value * overlay.getchannel("A").getextrema()[1] // 255))
     return Image.alpha_composite(base, overlay).convert("RGB")
 
@@ -191,11 +236,11 @@ def apply_watermark(
     overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     size = max(1, int(font_size))
-    try:
-        font = ImageFont.load_default(size=size)
-    except TypeError:
-        # Pillow versions older than 10.1 don't accept a `size=` argument to load_default().
-        font = ImageFont.load_default()
+    # The same TrueType lookup Text layers use (app.layer_workspace._load_font), so a watermark
+    # and a text layer look alike; it falls back to Pillow's own font when none is installed.
+    from app.layer_workspace import _load_font
+
+    font = _load_font(size)
     bbox = draw.textbbox((0, 0), text, font=font)
     text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
     margin = max(4, int(size * 0.4))
@@ -219,7 +264,13 @@ def export_profile(
     watermark_position: str = "Bottom Right",
     watermark_opacity: int = 50,
     watermark_font_size: int = 32,
+    exif: bytes | None = None,
+    remove_gps: bool = False,
 ) -> tuple[bytes, str, str]:
+    """`remove_gps` drops the GPS block from a profile that keeps EXIF (Print/Archive; Web and
+    Social strip all EXIF anyway). `exif` overrides `image.info["exif"]` -- the frontend passes the *source* photo's EXIF,
+    since the processed canvas image it exports isn't guaranteed to carry any (the regression
+    test this used to have only passed because it injected image.info["exif"] by hand)."""
     if profile_name not in EXPORT_PROFILES:
         raise ValueError(f"Unknown export profile: {profile_name}")
     profile = EXPORT_PROFILES[profile_name]
@@ -241,10 +292,15 @@ def export_profile(
     # written, even for Print/Archive. Now EXIF (camera data, capture time, possibly GPS) is kept
     # unless the profile strips it; the ICC profile is always kept, since it isn't personal data
     # and dropping it would change how a non-sRGB export's colors are displayed.
+    # prepare_exif() fixes the kept EXIF up for the exported file (Orientation 1, the exported
+    # pixel dimensions, no stale embedded thumbnail) -- see app.export.
+    from app.export import prepare_exif
+
     if image.info.get("icc_profile"):
         save_kwargs["icc_profile"] = image.info["icc_profile"]
-    if image.info.get("exif") and not profile["strip_metadata"]:
-        save_kwargs["exif"] = image.info["exif"]
+    exif_out = prepare_exif(exif if exif is not None else image.info.get("exif"), result.size, "none" if profile["strip_metadata"] else "all", remove_gps)
+    if exif_out:
+        save_kwargs["exif"] = exif_out
     result.save(output, **save_kwargs)
     extension = {"JPEG": ".jpg", "TIFF": ".tif", "PNG": ".png"}[format_name]
     return output.getvalue(), extension, "image/jpeg" if format_name == "JPEG" else "image/" + format_name.lower()
