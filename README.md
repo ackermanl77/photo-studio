@@ -6,7 +6,7 @@ A CPU-first Python photo editor with a Streamlit interface, Windows desktop pack
 
 ## Current Status
 
-- Global Python: `C:/Users/MELEJ/AppData/Local/Python/pythoncore-3.14-64/python.exe`.
+- Python 3.12-3.14 (the desktop build and CI use 3.14); the commands below assume a virtual environment.
 - Current packaged release: `release\PhotoStudio.exe` (distributed as `PhotoStudio-0.1.0-Windows.7z`).
 - Designed for computers without a dedicated GPU.
 - `docs/PROJECT_STATUS.md` is the authoritative reference for entry points, architecture, and known issues — this README only covers day-to-day commands.
@@ -14,18 +14,22 @@ A CPU-first Python photo editor with a Streamlit interface, Windows desktop pack
 
 ## Install
 
+From the project folder:
+
 ```powershell
-cd "C:\Users\MELEJ\OneDrive\photo_professional_tool"
-C:\Users\MELEJ\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pip install -r requirements.txt
-C:\Users\MELEJ\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pip install -r requirements-raw.txt -r requirements-desktop.txt
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -r requirements-dev.txt          # app + pytest
+python -m pip install -r requirements-raw.txt -r requirements-desktop.txt   # optional: RAW import, desktop build
 ```
 
-The `.venv` folder is optional.
+`requirements.txt` carries upper bounds; `constraints-cpu.txt` / `constraints-gpu.txt` pin the exact
+versions the release build uses (`-c constraints-cpu.txt`).
 
 ## Recommended App
 
 ```powershell
-C:\Users\MELEJ\AppData\Local\Python\pythoncore-3.14-64\python.exe -m streamlit run app/frontend_unified_app.py
+python -m streamlit run app/frontend_unified_app.py
 ```
 
 `app/frontend_unified_app.py` is currently the **only** Streamlit entry point in the project. Earlier "specialized workspace" scripts (`frontend_project.py`, `frontend_layers.py`, `frontend_masking.py`, `frontend_batch.py`, `frontend_library_editor.py`, `frontend_portrait.py`, `frontend_release.py`, and others) were consolidated into it during development and no longer exist. If you find them mentioned elsewhere in `docs/workflows/`, that's a historical development note, not a current instruction — see the notice at the top of `docs/workflows/README.md`.
@@ -47,19 +51,19 @@ Rebuild:
 .\scripts\build_release.ps1 -Version "0.1.0"
 ```
 
-The release script prefers global Python, supports one-file and one-folder PyInstaller output, optional signing, 7-Zip compression, and SHA-256 checksums.
+The release script builds from a fresh virtual environment (`build-venv\<profile>`, pinned by `constraints-<profile>.txt`, `-BuildProfile cpu|gpu`), verifies the bundled WebView2 runtime's SHA-256, runs `PhotoStudio.exe --self-test`, and supports optional signing (`-Sign -CertificateThumbprint <sha1>`), 7-Zip compression, SHA-256 checksums, and the Inno Setup installer (`-Installer`).
 
-**Or let CI build it for you**: pushing a tag like `v0.1.0` triggers `.github/workflows/release.yml`, which runs this exact same script on a `windows-latest` runner and attaches `PhotoStudio-<version>-Windows.7z` + its `.sha256` to a new GitHub Release, plus keeps them as a build artifact on the workflow run either way. It can also be run on demand (Actions tab → "Release Build" → "Run workflow", enter a version) without needing a tag push or a real release at all, which just builds and uploads the artifact.
+**Or let CI build it for you**: pushing a tag like `v0.1.0` triggers `.github/workflows/release.yml`, which first runs the full test matrix and then runs this exact same script on a `windows-latest` runner and attaches `PhotoStudio-<version>-Windows.7z` + its `.sha256` to a new GitHub Release, plus keeps them as a build artifact on the workflow run either way. It can also be run on demand (Actions tab → "Release Build" → "Run workflow", enter a version) without needing a tag push or a real release at all, which just builds and uploads the artifact.
 
 **The native window needs Microsoft Edge WebView2 Runtime, and it's bundled — nothing to install on the target machine.** Confirmed missing on a second PC when the app was first tested there, so `build_release.ps1` now downloads a pinned "Fixed Version" copy of the WebView2 Runtime (cached under `vendor/webview2-cache/`, gitignored — first build needs internet access for this one-time ~300MB download) and copies it into the release folder as `WebView2Runtime`, a sibling of `PhotoStudio.exe`. `app/desktop.py` points pywebview at it via `webview.settings["WEBVIEW2_RUNTIME_PATH"]`, so the packaged app never depends on WebView2 being installed system-wide. Copy the whole `release` folder (or the `PhotoStudio-<version>-Windows.7z`) to another machine — extract and run, no installer, no Python. The one trade-off: a bundled Fixed Version copy doesn't auto-update with Chromium security patches the way a system install does, so `$WebView2Version` in `build_release.ps1` should be bumped deliberately every so often (see the comment above it for how to get a new version's download URL).
 
-`app/desktop.py` starts both the Streamlit frontend (`frontend_unified_app.py`) and the Flask processing backend (`app/backend.py`, `127.0.0.1:8502`) — the frontend sends its edit pipeline to the backend over HTTP rather than processing in-process. Running the frontend standalone (`streamlit run app/frontend_unified_app.py`, below) also works without `desktop.py`: the frontend starts the backend on demand the first time it's needed. See "Architecture" in `docs/PROJECT_STATUS.md` for the request flow and the latency trade-off that comes with it.
+`app/desktop.py` starts both the Streamlit frontend (`frontend_unified_app.py`) and the Flask processing backend (`app/backend.py`, on free local ports chosen per launch, with a per-launch access token) — the frontend sends its edit pipeline to the backend over HTTP rather than processing in-process. Running the frontend standalone (`streamlit run app/frontend_unified_app.py`, below) also works without `desktop.py`: the frontend starts the backend on demand the first time it's needed. See "Architecture" in `docs/PROJECT_STATUS.md` for the request flow and the latency trade-off that comes with it.
 
 There is currently no dedicated preflight UI. See [docs/workflows/secure-distribution/preflight.md](docs/workflows/secure-distribution/preflight.md) for how to run the preflight checks that exist today before building a release.
 
 ## Core Features
 
-- Exposure, contrast, highlights, shadows, temperature, tint, texture, clarity, sharpening, and a one-click "✨ Auto Enhance" pass, all live in the unified UI. A draggable free-form crop rectangle directly on the photo (drag a corner to resize, drag inside to move), or a named aspect ratio, positioned right after Tone.
+- Exposure in EV (linear light, soft highlight roll-off), contrast, edge-aware highlights/shadows, temperature, tint, texture, local-contrast clarity, sharpening, and an image-adaptive "✨ Auto Enhance", all live in the unified UI. Rotate 90°, flip, straighten with auto-level and "constrain crop", plus a draggable free-form crop rectangle with numeric fields, a custom W:H ratio, or a named one.
 - Denoise via OpenCV's Non-Local Means — a real upgrade over a flat median filter (preserves edges/detail while smoothing noise), classical rather than a neural network (see `docs/PROJECT_STATUS.md` for why, given this app's CPU-first, no-GPU design). An independent "Color Noise" slider pushes chroma (color speckle) smoothing further than luminance/detail smoothing, without needing a second algorithm.
 - A draggable RGB tone curve — drag any of the 5 fixed Blacks/Shadows/Midtones/Highlights/Whites points vertically, or click an empty spot on the curve to add a fully free-form point (drag it anywhere, double-click to remove), or use the numeric sliders below it for exact values on the 5 fixed points.
 - Per-channel HSL color grading ("Color Mixer") — independent Hue/Saturation/Luminance adjustment for each of 8 named color bands (Red/Orange/Yellow/Green/Aqua/Blue/Purple/Magenta).
@@ -71,18 +75,18 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 - Object removal / repair: select a blemish or object with the same Luminance/Color/gradient/Radial/Painted/Magic Wand selection tools as Masks, then it's inpainted away. Magic Wand selects by clicking a point on the photo — contiguous (flood-fill) by default, or every matching-color pixel anywhere in the frame.
 - A "⚠️ Show clipping" toggle next to the histogram highlights blocked shadows and blown highlights directly on the canvas, the same idea as Lightroom's clipping triangles.
 - Built-in presets with live thumbnail previews, plus custom presets you can save, load back onto a photo, delete, and export/import as a shareable `.json` file — a custom preset also gets its own live thumbnail preview (in "Load a Preset" and in the Batch Processor's preset picker), rendered by running its full recipe through the real pipeline on a small copy of the current photo. Saving captures the full set of adjustments (masks included), not just a handful of basic sliders.
-- Undo/Redo and a one-click Reset to defaults, always available in the bar above the canvas regardless of which tab is open — Undo/Redo also work anywhere via Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, not just by clicking the buttons.
-- Combinable named masks (`app/advanced_masks.py::MaskStack`) — any number of Luminance/Color/gradient/Radial/Painted/Magic Wand selections, each with opacity/invert/soften, unioned into one target adjustment. "Painted" selections are made on-canvas — freehand brush (with an eraser), a drag-out radial, or a drag-out gradient — instead of typing in parameters, and can be reopened later for a second pass at the canvas ("🎨 Edit Painting") instead of only delete-and-repaint; "Magic Wand" is a single click that samples a color and selects similar pixels around it.
+- Undo/Redo and a one-click Reset to defaults, always available in the bar above the canvas regardless of which tab is open, plus per-section "↺ Reset" buttons. Keyboard: Ctrl+Z / Ctrl+Shift+Z (undo/redo), Ctrl+E (save), Z (1:1 view), B (before/after), G (grid).
+- Combinable named masks (`app/advanced_masks.py::MaskStack`) — any number of Luminance/Color/gradient/Radial/Painted/Magic Wand selections, each with opacity/invert/soften, combined by add/subtract/intersect into one target adjustment — or each with its own adjustment set (exposure, contrast, saturation, clarity, temperature, tint). "Painted" selections are made on-canvas — freehand brush (with an eraser), a drag-out radial, or a drag-out gradient — instead of typing in parameters, and can be reopened later for a second pass at the canvas ("🎨 Edit Painting") instead of only delete-and-repaint; "Magic Wand" is a single click that samples a color and selects similar pixels around it.
 - Creative "✨ Effects" — a post-crop vignette (applied to the final, already-cropped frame, separate from the Lens tab's corrective one) and film grain, both on the Detail tab.
-- Any number of stacked layers, each with its own opacity, visibility, and blend mode — 23 Photoshop-matching modes (Multiply/Screen/Overlay/Soft Light/Hard Light/Color Dodge/Color Burn/Difference/Hue/Saturation/Color/Luminosity, and more), reorderable and duplicable, preserved through Save/Load Project. A layer can be an uploaded image, a Text layer (content, font size, color, alignment, position), a vector Shape layer (Rectangle/Ellipse/Line/Polygon/Star, with its own fill and outline), or a Pen tool path — click to place anchor points on the photo, drag a point to move it, drag its handle to curve the path through it, double-click to remove a point; open paths can be stroked, closed ones filled and/or stroked. Text/Shape/Path layers stay editable while you work, though all three are flattened to a plain image once saved into a `.photoproject` file.
+- Any number of stacked layers, each with its own opacity, visibility, and blend mode — 23 Photoshop-matching modes (Multiply/Screen/Overlay/Soft Light/Hard Light/Color Dodge/Color Burn/Difference/Hue/Saturation/Color/Luminosity, and more), reorderable and duplicable, preserved through Save/Load Project. A layer can be an uploaded image, a Text layer (content, font size, color, alignment, position), a vector Shape layer (Rectangle/Ellipse/Line/Polygon/Star, with its own fill and outline), or a Pen tool path — click to place anchor points on the photo, drag a point to move it, drag its handle to curve the path through it, double-click to remove a point; open paths can be stroked, closed ones filled and/or stroked. Image layers keep their proportions and can be moved, scaled and rotated; Text/Shape/Path layers stay editable, including after saving and reopening a `.photoproject` file.
 - Layer Styles — Drop Shadow, Outer Glow, Stroke, and Color Overlay, any combination stackable on any layer (image, text, or shape), each independently computed from that layer's own silhouette so one effect's settings never bleed into another's shape.
 - Guides & Grid — a Rule of Thirds / 4x4 / Golden Ratio grid overlay plus any number of custom horizontal/vertical guides, shown on the canvas as a pure composition aid (never sent through the backend or included in an export). The free-form Crop tool's corner handles snap to whichever grid lines/guides are active.
-- Camera RAW import (`.cr2/.cr3/.nef/.arw/.dng`, optional via `requirements-raw.txt`) directly from the unified UI's uploader.
-- A draggable before/after comparison ("Split View"), plus a live per-channel histogram.
+- Camera RAW import (`.cr2/.cr3/.nef/.arw/.dng/.raf/.rw2/.orf/.pef/.srw`, optional via `requirements-raw.txt`) in the editor, the Batch Processor and the Library.
+- A true 1:1 zoom (plus 200 %/400 %) with a click-to-center navigator, a draggable before/after comparison ("Split View"), and a live per-channel histogram.
 - Real ICC color management (via littlecms/`PIL.ImageCms`): an embedded non-sRGB profile (Adobe RGB, ProPhoto RGB, a camera's own profile) is actually converted into the app's sRGB working space, not just tagged-and-preserved, plus a "Soft Proof: Gamut Warning" preview highlighting pixels that get clipped in that conversion. Not a simulation of an external printer/press profile — no profile database is bundled. Tested 16-bit TIFF export support.
-- Local photo library with scanning, thumbnails, search, and a Rate & Flag panel (star ratings, reject, tags) with keyboard shortcuts (1-5 rate, 0 clears, X rejects, arrows move Prev/Next — spelled out on screen under "Rate & Flag", not just in these docs). Scan Folder shows a live progress bar as it works, ending in a "Done — indexed N photo(s)" summary; an empty search/star filter says so instead of showing a silent blank table.
-- Batch profiles, filename templates, error reports, and ZIP delivery. The Batch Processor can apply either a built-in named look or a saved custom preset's full recipe (tone/color/detail/lens — "sync settings" across a whole shoot, the same idea as Lightroom's Sync) to every file in the batch; only the two photo-specific fields (mask layers, an overlay layer) are left out, since they reference coordinates/pixels tied to one particular photo. Run Batch shows a live progress bar and per-file status as it works, ending in a "Done — N/M succeeded" summary.
-- Save/Load Project (`.photoproject`, `app/project_bundle.py`) persisting the source image, recipe, layer, and mask selections.
+- Local photo library with scanning (RAW included; a rescan keeps ratings), a cached thumbnail grid with "✏️ Edit" into the editor, search, and a Rate & Flag panel (star ratings, reject, tags) with keyboard shortcuts (1-5 rate, 0 clears, X rejects, arrows move Prev/Next — spelled out on screen under "Rate & Flag", not just in these docs). Scan Folder shows a live progress bar as it works, ending in a "Done — indexed N photo(s)" summary; an empty search/star filter says so instead of showing a silent blank table.
+- Batch profiles, filename templates, error reports, and ZIP delivery — every supported format, processed from memory and streamed into a ZIP on disk, with a Stop button. The Batch Processor can apply either a built-in named look or a saved custom preset's full recipe (tone/color/detail/lens — "sync settings" across a whole shoot, the same idea as Lightroom's Sync) to every file in the batch; only the two photo-specific fields (mask layers, an overlay layer) are left out, since they reference coordinates/pixels tied to one particular photo. Run Batch shows a live progress bar and per-file status as it works, ending in a "Done — N/M succeeded" summary.
+- Save/Load Project (`.photoproject`, `app/project_bundle.py`) persisting the source image, recipe, the editable layer stack (image layers as PNG entries), and mask selections — one-click save.
 - "Export Multiple Sizes" — bundle the current photo under several named export profiles (Web/Social/Print/Archive) into one ZIP in a single click, distinct from the Batch Processor's "one recipe, many photos."
 - Preview caching, diagnostics, request IDs, image validation, and structured audit logs.
 
@@ -91,12 +95,13 @@ See `docs/PROJECT_STATUS.md`'s "Known Issues" for the current gaps.
 ## Test
 
 ```powershell
-C:\Users\MELEJ\AppData\Local\Python\pythoncore-3.14-64\python.exe -m compileall -q app
-C:\Users\MELEJ\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pytest -q
+python -m compileall -q app
+python -m pytest -q
+python -m pytest -q -m "not slow"     # skip the AppTest-driven frontend tests
 ```
 
 Run this yourself before trusting a pass count — different historical snapshots in `docs/workflows/` report different totals as the suite grew.
 
-GitHub Actions (`.github/workflows/ci.yml`) runs the same `compileall` + `pytest` on every push and pull request, installing only `requirements.txt` — `requirements-raw.txt` (rawpy) and `requirements-desktop.txt` (pywebview/PyInstaller) are for the local dev/build workflow, not the test suite, and installing pywebview on a plain Linux runner risks needing system GTK/WebKit packages the runner doesn't have, for zero test coverage benefit.
+GitHub Actions (`.github/workflows/ci.yml`) runs the same `compileall` + `pytest` on every push and pull request on Windows and Ubuntu with Python 3.12 and 3.14 (installing `requirements-dev.txt`), plus a job that installs `requirements-raw.txt` and decodes a real (generated) DNG. `requirements-desktop.txt` (pywebview/PyInstaller) is build-only. The test images are generated in code (`tests/synthetic_assets.py`); the older third-party images under `tests/assets/` are no longer used and can be deleted.
 
 See [docs/workflows/README.md](docs/workflows/README.md) and [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).

@@ -48,11 +48,21 @@ sends the edit to the local processing backend and the canvas updates in place.
 
 The starting point for every edit.
 
-- **✨ Auto Enhance** — one click applies a balanced Exposure/Contrast/Saturation/Denoise/Sharpen
-  pass as a starting point; touches nothing else (crop, masks, curve, temperature, …).
+- **✨ Auto Enhance** — measures *this* photo and sets Exposure, the black/white points (tone
+  curve), a gray-world white balance, Vibrance for a flat image, and Denoise only for a noisy one; a
+  message lists what it changed. Crop, masks, HSL and everything else stay as you left them.
 - **Preset Look** — a row of thumbnails (None, plus every built-in look) previews each one on your
   actual photo before you pick it.
-- **Exposure**, **Contrast**, **Highlights**, **Shadows** — the four basic tonal sliders.
+- **Exposure (EV)** — in stops of light, −5 to +5: +1 doubles the light, −1 halves it. Bright
+  highlights roll off smoothly instead of clipping.
+- **Contrast**, **Highlights**, **Shadows** — −100 to +100. Highlights/Shadows work on regions (an
+  edge-aware base layer), so lifting a shadowed face keeps its texture and doesn't flatten the bright
+  background next to it.
+- **↺ Reset Tone** — puts just this section back to its defaults. Lens, Rotate & Straighten, Color,
+  Detail, Effects and the mask targets have the same button.
+
+Older presets and projects (saved with the earlier 0.5–1.5 multiplier sliders) are converted
+automatically when you open them.
 
 ## 4. Lens
 
@@ -73,10 +83,22 @@ Standard zoom, Telephoto, Fisheye), which you fine-tune from there.
 
 ## 5. Crop
 
-- **Aspect Ratio** — "Original" (no crop), "Free-form", or a named ratio (Square, 4:5, 5:4, 3:2,
-  16:9, 9:16).
+**Rotate & Straighten** (top of the tab):
+
+- **⟲ Rotate left** / **⟳ Rotate right** — 90° turns (the rotation is also shown and selectable).
+- **⇆ Flip horizontal** / **⇅ Flip vertical**.
+- **Straighten (°)** — −45° to +45° to level a tilted horizon; **Auto** detects the photo's
+  dominant horizontal/vertical lines and sets the angle for you.
+- **Constrain crop** (on by default) — crops away the black or smeared corners that Distortion,
+  Keystone and Straighten would otherwise leave.
+
+**Crop / Aspect Ratio**:
+
+- **Aspect Ratio** — "Original" (no crop), "Free-form", "Custom" (type any W:H), or a named ratio
+  (Square, 4:5, 5:4, 3:2, 16:9, 9:16). **Swap orientation** turns a ratio portrait ↔ landscape.
 - **Free-form** shows a draggable rectangle directly on the photo — drag a corner to resize, drag
-  the body to move it. A named ratio center-crops automatically. If a grid or guide is active (see
+  the body to move it — plus **Left / Top / Width / Height** fields to type the box in pixels. A
+  named ratio center-crops automatically. If a grid or guide is active (see
   [Guides & Grid](#canvas-controls) below), the corners snap to those lines as you drag them close —
   moving the whole rectangle doesn't snap, only resizing from a corner does.
 
@@ -143,8 +165,8 @@ the image renders.
 
 | Type | What you get |
 |---|---|
-| **Image** | Upload a PNG/JPG/WEBP to composite on top of your photo. |
-| **Text** | Type content, then set font size, color, alignment (left/center/right), and position (as a % of the photo, placing the text block's own center). |
+| **Image** | Upload a PNG/JPG/WEBP to composite on top of your photo. It keeps its proportions (fitted inside the photo at 100 %) and can be moved, scaled and rotated; "Stretch to fill the photo" makes it cover the whole frame instead. |
+| **Text** | Type content, then set font size (a % of the photo's short edge, so it looks the same at any resolution), color, alignment (left/center/right), and position (as a % of the photo, placing the text block's own center). |
 | **Shape** | A vector Rectangle, Ellipse, Line, Polygon, or Star — position, size, and rotation (except Ellipse, which doesn't rotate), plus its own fill color/opacity and outline color/width. Polygon and Star also get a Sides/Points count; Star gets an Inner Radius controlling how sharp its points are. |
 | **Pen** | Click points directly on the photo below to trace a freeform path, then **➕ Add Path Layer**. See [The Pen Tool](#the-pen-tool) below. |
 
@@ -195,16 +217,23 @@ to begin with.
 
 ## 10. Masks (local adjustments)
 
-Build any number of named selections and combine them (union) into one mask; the Target sliders
-below only affect pixels inside that combined selection.
+Build any number of named selections and combine them into one mask; the Target sliders below
+only affect pixels inside that combined selection. A selection can also have its **own
+adjustments** instead (see below) — so you can brighten a face and darken the sky in one edit.
 
 - **➕ Add a selection** — see [Selection Types](#selection-types-masks--repair) below for the six
   kinds available.
 - Each added layer can be enabled/disabled, inverted, given an edge-softening radius, and (for most
   types) an opacity — all editable after adding it, and removable.
-- **👁️ Preview combined mask overlay** — shows the union of every enabled layer in red.
-- **Target Exposure**, **Target Contrast**, **Target Saturation** — the actual local adjustment,
-  applied only where the mask is active. Disabled until at least one mask layer is enabled.
+- **Combine with the selections above** — Add (union), Subtract (cut its area out) or Intersect
+  (keep only the overlap).
+- **Own adjustments** — this selection gets its own Exposure (EV), Contrast, Saturation, Clarity,
+  Temperature and Tint, applied only inside it, instead of joining the combined mask.
+- **👁️ Preview combined mask overlay** — shows the combined selection as a tint, diagonal hatching,
+  or an outline (so it's readable without telling colours apart), in a colour you choose.
+- **Target Exposure (EV)**, **Target Contrast**, **Target Saturation** — the shared local
+  adjustment, applied only where the combined mask is active. Disabled until at least one mask layer
+  without its own adjustments is enabled.
 
 ### Selection Types (Masks & Repair)
 
@@ -215,7 +244,7 @@ Both the Masks tab and the Repair tab share the same six selection tools:
 | **Luminance** | Selects pixels within a brightness range (Min/Max Luma, 0–255). |
 | **Color** | Pick a target color and a tolerance; selects similar-colored pixels anywhere in the frame. |
 | **Horizontal / Vertical gradient** | A smooth linear fade across the frame. |
-| **Radial** | A smooth fade outward from a center point. |
+| **Radial** | A smooth fade outward from a center point — set its Center X/Y, Radius and Feather (also editable afterwards). |
 | **Painted** | Paint directly on the photo — freehand brush (with an eraser), a drag-out radial, or a drag-out gradient. Reopen it later with "🎨 Edit Painting" to continue painting on the same selection instead of starting over. |
 | **Magic Wand** | Click a point on the photo; selects similar colors around it. Contiguous mode (default) only grows outward from that connected region; unchecked, it selects every matching-color pixel anywhere in the frame. Tolerance controls how similar a color has to be. |
 
@@ -251,9 +280,13 @@ Three modes, selected via the radio buttons at the top of the tab.
 
 ### Library Catalog
 
-- **Folder** + **Scan Folder** — indexes every JPG/PNG/WEBP/TIFF in a folder (recursively), showing
-  a live progress bar as it works. Scanning doesn't touch the files themselves — it just builds a
-  local searchable catalog with thumbnails.
+- **Folder** + **Scan Folder** — indexes every JPG/PNG/WEBP/TIFF and camera RAW file in a folder
+  (recursively), showing a live progress bar as it works. Scanning doesn't touch the files
+  themselves, and rescanning keeps the ratings and tags you've already given. The catalog is shown
+  the next time you open the app, without scanning again.
+- **Thumbnail grid** — the matching photos as thumbnails (cached, RAW files via their embedded
+  preview), each with **✏️ Edit** to open it in the editor. Your current adjustments are kept, so a
+  look carries over to the next photo of a shoot; **↺** resets them.
 - **Search** + **Min Stars** — filters the indexed photos by filename/tag text and a minimum star
   rating. If nothing matches, the app says so instead of showing a silent empty table.
 - **Rate & Flag** — after a scan, step through your photos one at a time:
@@ -261,21 +294,24 @@ Three modes, selected via the radio buttons at the top of the tab.
   - Five star buttons to rate (or **Clear rating**).
   - **🚫 Reject** to flag a photo (stored as a tag, doesn't affect its rating).
   - A comma-separated **Tags** field, with **Save tags**.
+  - **✏️ Edit this photo** — opens the current photo in the editor.
   - **Keyboard shortcuts** (work whenever this panel is visible and you're not typing in a text
     field): **1–5** to rate, **0** to clear the rating, **X** to toggle reject, **←/→** to move
     Prev/Next.
 
 ### Batch Processor
 
-- **Batch Files** — upload multiple photos at once.
+- **Batch Files** — upload multiple photos at once — any format the editor opens, RAW included.
+  Files are processed straight from the upload (two files with the same name are both kept).
 - **Profile** — an export profile (size/quality preset) applied to every file.
 - **Preset** — apply either a built-in named look, or any saved custom preset (suffixed
   "(custom)") to every photo in the batch — the same idea as Lightroom's "Sync Settings" across a
   shoot. A custom preset's mask layers, removal selections, and layer overlay are intentionally
   *not* carried into the batch (they're tied to one specific photo's pixels) — only its global
   tone/color/detail/lens settings transfer.
-- **Run Batch** — shows a live progress bar and per-file status as it processes, ending in a
-  results table and a **Download ZIP** button.
+- **Run Batch** — shows a live progress bar and per-file status as it processes, writing each
+  result into a ZIP (with a `report.csv`) as it goes, ending in a results table and a **Download ZIP**
+  button. **⏹ Stop** ends a running batch; the files finished so far stay in the ZIP.
 
 ### System Health
 
@@ -288,14 +324,16 @@ like `rawpy` (RAW import) are actually installed and working.
 
 Always visible above/below the preview, on every tab:
 
-- **↶ Undo** / **↷ Redo** — step backward/forward through your edit history. Also available
-  anywhere via **Ctrl+Z** (undo) and **Ctrl+Shift+Z** or **Ctrl+Y** (redo) — these work even right
-  after dragging a slider, not just when a button has focus. They're suppressed only while you're
-  actually typing in a text field, so a normal Ctrl+Z there still does ordinary text-undo.
+- **↶ Undo** / **↷ Redo** — step backward/forward through your edit history (the last 200 steps).
+  Also available via **Ctrl+Z** (undo) and **Ctrl+Shift+Z** (redo).
 - **↺ Reset** — restores every adjustment to its default. Deliberately leaves an attached layer or
   RAW source alone — only the slider/checkbox values reset.
-- **Zoom View** — Fit, 50%, 100%, 150%, 200%, or 400%. Above 100%, Pan Horizontal/Vertical sliders
-  appear to move around the zoomed view.
+- **Zoom View** — **Fit** (the whole photo), **100% (1:1)** — the photo's real pixels, the view to
+  judge sharpening, noise, grain and mask edges in (rendered at full resolution even for a large
+  photo) — and 200%/400%, which enlarge those pixels. While zoomed, click the small **navigator**
+  overview to center the view there, or use the Pan sliders.
+- **🔍 1:1 / Fit (Z)**, **👁 Before / After (B)**, **# Grid (G)** — one-click toggles, also on the
+  keyboard.
 - **⇄ Split View** — a draggable before/after comparison slider over the same zoomed/panned view.
 - **👁️ Original** — shows the untouched source image instead of your edit (disabled while Split
   View is active, since that already shows both).
@@ -309,10 +347,18 @@ Always visible above/below the preview, on every tab:
 - **Histogram** — a live per-channel (Red/Green/Blue) chart of the current edited image.
 - **⚠️ Show clipping** — highlights blocked shadows (blue) and blown highlights (red) directly on
   the canvas.
+- **⚙️ Export settings** — resize by long edge, output sharpening (screen / matte / glossy), which
+  metadata to keep (all, copyright & camera only, or none, plus Remove GPS — on by default) and,
+  when requirements-gpu.txt is installed, AI Upscale 2x/4x. **File name** is a template:
+  `{stem}` (the original's name), `{date}`, `{width}`, `{height}`, `{format}`. **Save preset** keeps
+  these settings under a name; pick one and **Apply** to restore them. The file is only produced when
+  you click Save (or press **Ctrl+E**), and it carries the original photo's camera metadata and colour
+  profile.
 - **Export Format / Quality / Save** — choose JPEG, PNG, WEBP, or TIFF (Quality only applies to
   JPEG/WEBP), then download the edited result.
 - **📦 Export Multiple Sizes** — check any combination of the named export profiles (Web, Social,
-  Print, Archive) and click **Prepare ZIP**, then **⬇️ Download ZIP** — gets you the current photo
+  Print, Archive; Web and Social carry no EXIF, and **Remove GPS location** strips the location from
+  Print/Archive too) and click **Prepare ZIP**, then **⬇️ Download ZIP** — gets you the current photo
   at several sizes/formats in one click, instead of downloading each one separately. This is
   different from the Batch Processor (below): this is *one photo, several output variants*; Batch
   is *one recipe, many photos*.
@@ -324,14 +370,17 @@ Always visible above/below the preview, on every tab:
 Save everything — the source photo, every adjustment, your full layer stack, and your mask/removal
 selections — into one `.photoproject` file you can reopen later:
 
-- **💾 Save Project** (Presets tab) packages the current state and gives you a download button.
+- **💾 Save Project (.photoproject)** (Presets tab) downloads the project in one click. If the
+  project would be too large to reopen (very large image layers), the button is disabled with a
+  warning.
 - **📁 Open a saved project** (top of the app, above the uploader) restores a `.photoproject` back
   into the workspace exactly as you left it. A corrupted or hand-edited file shows a clear error
   instead of crashing the app.
-- **Text, Shape, and Pen path layers are flattened into plain images when saved** — reopening the
-  project shows them as ordinary Image layers, no longer editable as text/shapes/paths. Everything
-  else (every layer's position in the stack, opacity, blend mode, and any Layer Styles) round-trips
-  correctly.
+- **Every layer stays editable** — Text, Shape and Pen path layers reopen as Text/Shape/Path layers,
+  Image layers keep their placement, and every layer's stack position, opacity, blend mode and Layer
+  Styles round-trip. (Projects saved by older versions reopen with those layers as plain images.)
+- On the desktop app, double-clicking a `.photoproject` file (when the installer's file association
+  was chosen) opens it directly.
 
 ---
 
@@ -339,8 +388,12 @@ selections — into one `.photoproject` file you can reopen later:
 
 | Shortcut | Action | Where |
 |---|---|---|
-| Ctrl+Z | Undo | Anywhere (except while typing in a text field) |
-| Ctrl+Shift+Z or Ctrl+Y | Redo | Anywhere (except while typing in a text field) |
+| Ctrl+Z | Undo | Anywhere |
+| Ctrl+Shift+Z | Redo | Anywhere |
+| Ctrl+E | Save (export) | Anywhere |
+| Z | 1:1 / Fit | Anywhere |
+| B | Before / After | Anywhere |
+| G | Grid on/off | Anywhere |
 | 1–5 | Rate current photo | Library Catalog, Rate & Flag panel |
 | 0 | Clear rating | Library Catalog, Rate & Flag panel |
 | X | Toggle Reject | Library Catalog, Rate & Flag panel |
