@@ -1,3 +1,11 @@
+"""Feature smoke tests on photo-like inputs, plus decode tests for the formats that need special
+handling (16-bit grayscale, camera RAW).
+
+These used to run on copyrighted wallpapers and personal Facebook downloads committed under
+tests/assets, plus a `sample.png` whose bytes had been mangled into an unreadable file that one test
+asserted *stayed* unreadable. Every input is now generated (tests/synthetic_assets.py), so nothing
+here depends on third-party images (T3/T6 in the improvement report).
+"""
 from pathlib import Path
 
 import numpy as np
@@ -7,26 +15,20 @@ from PIL import Image
 from app.edit_history import EditHistory
 from app.export import save_for_delivery
 from app.image_processor import PhotoProcessor
+from app.pipeline import decode_source
 from app.presets import apply_preset
 from app.project import PhotoProject
+from app.raw_import import SUPPORTED_EXTENSIONS, open_bytes, uploader_types
+from tests.synthetic_assets import dng_bytes, encode, gray16_png, photo_like
 
 ASSET_DIR = Path(__file__).parent / "assets"
-FEATURE_CASES = [
-    ("154446-naruto-naruto-wallpaper.jpg", "exposure"),
-    ("850008.jpg", "contrast"),
-    ("9.jpg", "highlights-shadows"),
-    ("9i-QVZzaSIVuIJgALYY7upwbLflzGh-bk5Ex1S0uthE.jpg", "texture-clarity"),
-    ("download.jpg", "temperature-tint"),
-    ("dQM5l3.jpg", "curves"),
-    ("eIVhqz.jpg", "crop"),
-    ("FB_IMG_1529372941771.jpg", "preset"),
-    ("Levi-Ackerman-shingeki-no-kyojin-attack-on-titan-37276165-500-379.png", "masking"),
-]
+FEATURES = ["exposure", "contrast", "highlights-shadows", "texture-clarity", "temperature-tint", "curves", "crop", "preset", "masking"]
 
-# The repository's sample.png is user-modified and currently is not a readable image.
-@pytest.mark.parametrize("filename,feature", FEATURE_CASES)
-def test_real_asset_feature_smoke(tmp_path, filename, feature):
-    source = ASSET_DIR / filename
+
+@pytest.mark.parametrize("feature", FEATURES)
+def test_feature_smoke_on_a_photo_like_image(tmp_path, feature):
+    source = tmp_path / "photo.jpg"
+    source.write_bytes(encode(photo_like((400, 300), seed=FEATURES.index(feature)), "JPEG", quality=90))
     processor = PhotoProcessor(source)
     original_size = processor.image.size
 
@@ -63,30 +65,69 @@ def test_real_asset_feature_smoke(tmp_path, filename, feature):
         assert processor.image.size == original_size
 
 
-def test_real_assets_are_readable_except_known_modified_sample():
-    unreadable = []
-    for asset in ASSET_DIR.iterdir():
-        if asset.suffix.lower() not in {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}:
-            continue
-        try:
-            with Image.open(asset) as image:
-                image.verify()
-        except Exception:
-            unreadable.append(asset.name)
+def test_no_test_reads_any_binary_fixture_but_the_public_domain_portrait():
+    """The third-party images still sitting in tests/assets (until they're deleted from the
+    repository) must not be needed by any test."""
+    allowed = {"portrait_public_domain.jpg"}
+    fixtures = {path.name for path in ASSET_DIR.iterdir() if path.suffix.lower() in SUPPORTED_EXTENSIONS} - allowed
+    for test_file in Path(__file__).parent.glob("*.py"):
+        text = test_file.read_text(encoding="utf-8")
+        if "assets" not in text:
+            continue  # e.g. a test that writes its own image of the same name into tmp_path
+        used = sorted(name for name in fixtures if f'"{name}"' in text)
+        assert not used, f"{test_file.name} still reads {used}"
+    with Image.open(ASSET_DIR / "portrait_public_domain.jpg") as image:
+        image.verify()
 
-    assert unreadable == ["sample.png"]
 
-
-def test_real_asset_project_and_recipe_round_trip(tmp_path):
-    source = ASSET_DIR / "FB_IMG_1539485356370.jpg"
-    source_bytes = source.read_bytes()
+def test_project_and_recipe_round_trip(tmp_path):
+    source_bytes = encode(photo_like(), "JPEG")
     recipe = {"preset": "portrait-natural", "exposure": 1.1}
-    project_path = tmp_path / "real-image.photoproject"
+    project_path = tmp_path / "photo.photoproject"
 
-    PhotoProject(source.name, source_bytes, recipe).save(project_path)
+    PhotoProject("photo.jpg", source_bytes, recipe).save(project_path)
     restored = PhotoProject.load(project_path)
     history = EditHistory()
     history.record(restored.recipe)
 
     assert restored.source_bytes == source_bytes
     assert history.current == recipe
+
+
+# --- B7: 16-bit grayscale ---------------------------------------------------------------------------
+
+def test_16_bit_grayscale_png_decodes_as_a_gradient_not_white():
+    image = open_bytes(gray16_png(), "scan.png")
+    row = np.asarray(image)[0, :, 0].astype(int)
+    assert image.mode == "RGB"
+    assert row[0] <= 1 and row[-1] >= 254
+    assert np.all(np.diff(row) >= 0)  # monotonic, like the source gradient
+    assert (np.asarray(image) == 255).mean() < 0.02  # used to be ~99.6 % white
+
+
+def test_16_bit_grayscale_tiff_decodes_through_the_pipeline():
+    gradient = np.tile(np.linspace(0, 65535, 200).astype(np.uint16), (10, 1))
+    content = encode(Image.fromarray(gradient), "TIFF")
+    image = decode_source(content, "scan.tif")
+    values = np.asarray(image)[:, :, 0]
+    assert 120 <= values.mean() <= 135
+
+
+# --- R3: one supported-format list ------------------------------------------------------------------
+
+def test_every_raw_brand_is_in_the_uploader_list():
+    types = uploader_types()
+    for extension in ("raf", "rw2", "orf", "pef", "srw", "cr3", "dng", "jpg", "tiff", "webp"):
+        assert extension in types
+    assert "raf" not in uploader_types(include_raw=False)
+
+
+# --- T2: real RAW decode (needs the optional rawpy; CI runs it in its own job) ----------------------
+
+def test_a_real_dng_decodes_through_libraw():
+    pytest.importorskip("rawpy")
+    image = decode_source(dng_bytes(), "tiny.dng")
+    array = np.asarray(image).astype(int)
+    assert image.size == (64, 48)
+    # The synthetic sensor data has red rising left to right; the demosaiced image must too.
+    assert array[:, -8:, 0].mean() > array[:, :8, 0].mean() + 20
