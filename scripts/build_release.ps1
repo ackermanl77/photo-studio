@@ -41,6 +41,21 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# OneDrive (this repo lives under it) briefly locks files it is syncing, so deleting a large tree
+# such as build-venv\ or release\ can fail with "access denied" on one file. Retry before giving up.
+function Remove-TreeWithRetry([string]$Path) {
+    for ($attempt = 1; $attempt -le 6; $attempt++) {
+        try {
+            Remove-Item $Path -Recurse -Force
+            return
+        } catch {
+            if ($attempt -eq 6) { throw }
+            Write-Warning "Removing $Path failed (attempt $attempt, retrying): $($_.Exception.Message)"
+            Start-Sleep -Seconds (2 * $attempt)
+        }
+    }
+}
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Python) {
     $launcher = Get-Command py -ErrorAction SilentlyContinue
@@ -100,7 +115,7 @@ Push-Location $ProjectRoot
 try {
     # $ErrorActionPreference doesn't cover native commands -- check their exit codes explicitly, so a
     # failed install or build stops here instead of packaging (and cleaning up around) a stale output.
-    if ((Test-Path $BuildVenv) -and -not $ReuseVenv) { Remove-Item $BuildVenv -Recurse -Force }
+    if ((Test-Path $BuildVenv) -and -not $ReuseVenv) { Remove-TreeWithRetry $BuildVenv }
     if (-not (Test-Path $VenvPython)) {
         & $Python -m venv $BuildVenv
         if ($LASTEXITCODE -ne 0) { throw "Creating the build venv failed (exit code $LASTEXITCODE)." }
@@ -112,6 +127,50 @@ try {
     $constraints = Join-Path $ProjectRoot "constraints-$BuildProfile.txt"
     if (Test-Path $constraints) { $requirements += @("-c", $constraints) } else { Write-Warning "No constraints-$BuildProfile.txt -- transitive versions are not pinned for this build." }
     if ($ExtraIndexUrl) { $requirements += @("--extra-index-url", $ExtraIndexUrl) }
+    if ($BuildProfile -eq "gpu") {
+        # basicsr 1.4.2 is sdist-only and its setup.py fails on Python 3.13+ ("KeyError:
+        # '__version__'", PEP 667), and it imports the removed torchvision functional_tensor module
+        # -- see requirements-gpu.txt. Patch a hash-verified copy of the sdist and install it first;
+        # the main install below then finds basicsr already satisfied instead of building it.
+        $basicsrCache = Join-Path $ProjectRoot "vendor\basicsr-cache"
+        $basicsrTarball = Join-Path $basicsrCache "basicsr-1.4.2.tar.gz"
+        $basicsrSource = Join-Path $basicsrCache "basicsr-1.4.2"
+        New-Item -ItemType Directory -Force -Path $basicsrCache | Out-Null
+        if (-not (Test-Path $basicsrTarball)) {
+            Invoke-WebRequest -UseBasicParsing -OutFile $basicsrTarball -Uri "https://files.pythonhosted.org/packages/86/41/00a6b000f222f0fa4c6d9e1d6dcc9811a374cabb8abb9d408b77de39648c/basicsr-1.4.2.tar.gz"
+        }
+        $basicsrHash = (Get-FileHash $basicsrTarball -Algorithm SHA256).Hash
+        if ($basicsrHash -ne "B89B595A87EF964CDA9913B4D99380DDB6554C965577C0C10CB7B78E31301E87") {
+            Remove-Item $basicsrTarball -Force
+            throw "basicsr-1.4.2.tar.gz failed its SHA-256 check (got $basicsrHash) -- deleted it; rerun to download again."
+        }
+        if (Test-Path $basicsrSource) { Remove-TreeWithRetry $basicsrSource }
+        # Windows' own bsdtar by full path: a Git-for-Windows tar earlier on PATH reads "C:" as a host.
+        & (Join-Path $env:SystemRoot "System32\tar.exe") -xzf $basicsrTarball -C $basicsrCache
+        if ($LASTEXITCODE -ne 0) { throw "Extracting basicsr failed (exit code $LASTEXITCODE)." }
+        $patches = @(
+            @{ File = "setup.py"; Old = "        exec(compile(f.read(), version_file, 'exec'))`n    return locals()['__version__']"; New = "        ns = {}`n        exec(compile(f.read(), version_file, 'exec'), ns)`n    return ns['__version__']" },
+            # torch/numpy/cython are only needed to compile the optional CUDA extensions, which this
+            # build doesn't use; dropping them lets setup.py run without build isolation.
+            @{ File = "setup.py"; Old = "        setup_requires=['cython', 'numpy', 'torch'],`n"; New = "" },
+            @{ File = "basicsr\data\degradations.py"; Old = "from torchvision.transforms.functional_tensor import rgb_to_grayscale"; New = "from torchvision.transforms.functional import rgb_to_grayscale" }
+        )
+        foreach ($patch in $patches) {
+            $path = Join-Path $basicsrSource $patch.File
+            $text = [IO.File]::ReadAllText($path).Replace("`r`n", "`n")
+            if (-not $text.Contains($patch.Old)) { throw "basicsr patch target not found in $($patch.File)." }
+            [IO.File]::WriteAllText($path, $text.Replace($patch.Old, $patch.New))
+        }
+        $buildTools = @("setuptools")
+        if (Test-Path $constraints) { $buildTools += @("-c", $constraints) }
+        & $VenvPython -m pip install @buildTools
+        if ($LASTEXITCODE -ne 0) { throw "Installing setuptools failed (exit code $LASTEXITCODE)." }
+        $basicsrInstall = @("--no-build-isolation", $basicsrSource)
+        if (Test-Path $constraints) { $basicsrInstall += @("-c", $constraints) }
+        if ($ExtraIndexUrl) { $basicsrInstall += @("--extra-index-url", $ExtraIndexUrl) }
+        & $VenvPython -m pip install @basicsrInstall
+        if ($LASTEXITCODE -ne 0) { throw "Installing the patched basicsr failed (exit code $LASTEXITCODE)." }
+    }
     & $VenvPython -m pip install @requirements
     if ($LASTEXITCODE -ne 0) { throw "pip install failed (exit code $LASTEXITCODE)." }
     & $VenvPython -m PyInstaller --noconfirm --distpath $Dist --workpath $Build PhotoStudio.spec
@@ -119,7 +178,7 @@ try {
 
     # Move (not copy) PyInstaller's output into release\: on the same drive that's a rename, so the
     # multi-GB build is never duplicated on disk, not even briefly.
-    if (Test-Path $ReleaseFolder) { Remove-Item $ReleaseFolder -Recurse -Force }
+    if (Test-Path $ReleaseFolder) { Remove-TreeWithRetry $ReleaseFolder }
     $oneFolder = Join-Path $Dist "PhotoStudio"
     $oneFile = Join-Path $Dist "PhotoStudio.exe"
     if (Test-Path $oneFolder) {
@@ -207,7 +266,7 @@ try {
     $leftovers = @($LegacyPackage)
     if (-not $KeepBuildFiles) { $leftovers += @($Build, $Dist) }
     foreach ($leftover in $leftovers) {
-        if (Test-Path $leftover) { Remove-Item $leftover -Recurse -Force; Write-Host "Cleaned up $leftover" }
+        if (Test-Path $leftover) { Remove-TreeWithRetry $leftover; Write-Host "Cleaned up $leftover" }
     }
 } finally {
     Pop-Location

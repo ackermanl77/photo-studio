@@ -65,6 +65,17 @@ PhotoStudio-0.1.0-Windows.7z (+ .sha256)   -- the distributable, built from rele
 
 Run `python -m compileall -q app` and `python -m pytest -q` yourself before relying on a pass count (`-m "not slow"` skips the AppTest-driven tests; `PHOTO_PERF_TESTS=1 python -m pytest -m perf` runs the 24 MP budgets). The suite's size and pass count have changed repeatedly across development snapshots (75, 81, and 84 all appear in historical docs under `docs/workflows/`), so no single number here should be trusted as current without re-running it.
 
+Release checks last run on 2026-10-01 (Windows 11, RTX 5080): `build_release.ps1` built both profiles
+from a fresh `build-venv\<profile>` and `--self-test` passed (cpu: about 1.0 GB, 2,795 files; gpu with
+`-ExtraIndexUrl https://download.pytorch.org/whl/cu130`: about 4.2 GB, 5,945 files). The gpu profile
+now patches basicsr itself (see `requirements-gpu.txt`). The pinned WebView2 cab matches Microsoft's
+download (same SHA-256, Microsoft-signed). The packaged exe was launched headlessly: free per-launch
+ports bound to 127.0.0.1, `/process` returns 401 without the token or with a wrong one and 200 with it,
+the window uses the bundled `WebView2Runtime`, and a second launch exits in under a second without
+starting servers. The startup-failure dialog was checked by reading the code only, not by triggering it.
+Real CUDA Real-ESRGAN with 12 forced tiles matched an untiled run (PSNR 59 dB, no seams, no NaNs). The
+Inno Setup installer and the GitHub workflows have not been run.
+
 ## History
 
 The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).

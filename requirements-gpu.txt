@@ -40,6 +40,7 @@
 #   #   from torchvision.transforms.functional import rgb_to_grayscale
 #   pip install ./basicsr-1.4.2
 # realesrgan (below) then installs normally against the patched basicsr already in the environment.
+# scripts\build_release.ps1 -BuildProfile gpu does all of this itself (hash-checked sdist under vendor\).
 torch==2.14.0
 basicsr>=1.4.2
 realesrgan>=0.3.0
