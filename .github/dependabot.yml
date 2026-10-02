@@ -1,0 +1,14 @@
+# Weekly PRs that raise dependency bounds deliberately (K3 in the improvement report): requirements
+# carry upper bounds and constraints-*.txt pins exact versions, so nothing upgrades silently -- these
+# PRs are how upgrades happen, each one gated by CI.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly

@@ -15,16 +15,24 @@ permissions:
   contents: write
 
 jobs:
+  # The full CI test matrix must pass before anything is built or published.
+  test:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          # The build interpreter the release is tested with (constraints-cpu.txt was verified on it).
+          python-version: "3.14"
           cache: "pip"
-          cache-dependency-path: requirements-desktop.txt
+          cache-dependency-path: |
+            requirements-desktop.txt
+            constraints-cpu.txt
 
       - name: Resolve version
         id: version
