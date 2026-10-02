@@ -88,8 +88,8 @@ The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).
   and the zoom a click navigator, but there's no arrow-key nudging inside the iframes.
 - Keyboard shortcuts use Streamlit's native `shortcut=`; their behaviour while a text field has focus
   is Streamlit's, and AppTest can't press keys, so they're covered by source checks and manual testing.
-- The repository still contains the third-party test images under `tests/assets/` (no test reads them
-  any more); delete them, and purge them from git history if the repository is public.
+- The third-party test images were deleted from `tests/assets/`, but they remain in git history; purge
+  them from history (a force-push) if the repository is public.
 
 - Text layers have no font picker or custom font upload -- `app.layer_workspace._load_font()` checks a short list of common TrueType font paths per OS and falls back to Pillow's built-in bitmap font when none exist, so the actual typeface rendered depends on what's installed on the machine running the app (see docs/CHANGELOG.md), not a choice the user makes.
 - The free-form Crop tool's corner-drag handles snap to active grid lines/guides; dragging the whole rectangle to move it does not (see docs/CHANGELOG.md for why that scope cut was made).
