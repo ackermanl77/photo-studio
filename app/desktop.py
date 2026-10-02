@@ -78,6 +78,18 @@ def _show_error(message: str) -> None:
     print(message, file=sys.stderr)
 
 
+def _write_startup_error(path: Path) -> None:
+    """Appends the current exception's traceback to `path` (the windowed exe has no console)."""
+    import traceback
+    from datetime import datetime
+
+    try:
+        with path.open("a", encoding="utf-8") as log:
+            log.write(f"--- {datetime.now().isoformat(timespec='seconds')} startup failed\n{traceback.format_exc()}\n")
+    except OSError:
+        pass
+
+
 def _acquire_single_instance():
     """A named Windows mutex held for the app's lifetime. Returns the handle, or None when another
     instance already holds it -- that one's window is brought to the front instead of starting a
@@ -349,8 +361,12 @@ def main() -> None:
         webview.create_window(_WINDOW_TITLE, _frontend_url(), width=1440, height=960, min_size=(1024, 700))
         webview.start(gui="edgechromium")
     except Exception as error:  # noqa: BLE001 -- every startup failure gets a visible message
-        _show_error(f"Photo Studio could not start: {error}\n\nDetails are in the log files in:\n{_log_path('desktop-child.log').parent}")
-        raise
+        details = _log_path("desktop-startup-error.log")
+        _write_startup_error(details)
+        _show_error(f"Photo Studio could not start: {error}\n\nDetails are in the log files in:\n{details.parent}")
+        # Exit instead of re-raising: in the windowed exe an uncaught exception also makes
+        # PyInstaller show its own "Unhandled exception" box, so the user got two dialogs.
+        raise SystemExit(1) from None
     finally:
         if frontend is not None:
             _terminate(frontend)
