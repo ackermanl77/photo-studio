@@ -3,9 +3,22 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageOps
 
 RAW_EXTENSIONS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".rw2", ".orf", ".dng", ".pef", ".srw"}
+# Every non-RAW format the decoder below opens. SUPPORTED_EXTENSIONS is the one list every place
+# that accepts a photo derives from (the main uploader, the Batch uploader, the Library scan, the
+# CLI's --input-dir) -- they used to keep separate hand-written lists, so the main uploader refused
+# Fuji/Panasonic/Olympus/Pentax/Samsung RAW files the decoder supports and Batch took only JPG/PNG.
+STANDARD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
+SUPPORTED_EXTENSIONS = STANDARD_EXTENSIONS | RAW_EXTENSIONS
+
+
+def uploader_types(include_raw: bool = True) -> list[str]:
+    """st.file_uploader(type=...) form of the supported extensions (no leading dot), sorted."""
+    extensions = SUPPORTED_EXTENSIONS if include_raw else STANDARD_EXTENSIONS
+    return sorted(extension.lstrip(".") for extension in extensions)
 
 
 def is_raw_path(path: str | Path) -> bool:
@@ -21,7 +34,31 @@ def _decode_standard(source) -> Image.Image:
     viewer. (RAW needs no equivalent: rawpy's postprocess() already applies the camera's flip.)"""
     image = Image.open(source)
     ImageOps.exif_transpose(image, in_place=True)
+    if image.mode in _HIGH_BIT_GRAY_MODES:
+        return _high_bit_gray_to_rgb(image)
     return image.convert("RGB")
+
+
+# Pillow's own convert("RGB") *clips* these single-channel high-bit modes to 0-255 instead of
+# scaling them, so a 16-bit grayscale PNG/TIFF (scans, astro, scientific images) decoded with
+# ~99.6 % of its pixels pure white.
+_HIGH_BIT_GRAY_MODES = {"I;16", "I;16L", "I;16B", "I;16N", "I", "F"}
+
+
+def _high_bit_gray_to_rgb(image: Image.Image) -> Image.Image:
+    values = np.asarray(image, dtype=np.float64)
+    if image.mode.startswith("I;16"):
+        peak = 65535.0
+    elif image.mode == "F":
+        finite_max = float(np.nanmax(values)) if values.size else 1.0
+        peak = 1.0 if finite_max <= 1.0 else finite_max
+    else:  # 32-bit integer: usually a 16-bit file Pillow opened as "I"
+        finite_max = float(values.max()) if values.size else 255.0
+        peak = 255.0 if finite_max <= 255 else (65535.0 if finite_max <= 65535 else finite_max)
+    scaled = np.clip(np.nan_to_num(values) / peak * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    result = Image.fromarray(scaled, mode="L").convert("RGB")
+    result.info.update({key: value for key, value in image.info.items() if key in ("exif", "icc_profile", "dpi")})
+    return result
 
 
 def _decode_raw(source) -> Image.Image:
@@ -39,7 +76,12 @@ def _decode_raw(source) -> Image.Image:
         ) from error
     try:
         with rawpy.imread(source) as raw:
-            rgb = raw.postprocess(use_camera_wb=True, output_bps=8)
+            # highlight_mode=Blend: blend the clipped channels back in instead of LibRaw's
+            # default hard clip, so blown highlights fade to neutral rather than turning magenta
+            # or flat white at decode time (the Highlights slider can't recover clipped data).
+            blend = getattr(getattr(rawpy, "HighlightMode", None), "Blend", None)
+            extra = {"highlight_mode": blend} if blend is not None else {}
+            rgb = raw.postprocess(use_camera_wb=True, output_bps=8, **extra)
     except rawpy.LibRawError as error:
         raise RuntimeError(f"Could not decode this camera RAW file: {error}") from error
     return Image.fromarray(rgb, mode="RGB")
