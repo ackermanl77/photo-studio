@@ -118,7 +118,7 @@ def test_process_via_backend_sends_mask_and_layer_files(live_backend):
     )
 
     assert with_extras.size == (12, 12)
-    assert list(baseline.getdata()) != list(with_extras.getdata())
+    assert baseline.tobytes() != with_extras.tobytes()
 
 
 def test_process_via_backend_raises_runtime_error_on_backend_error(live_backend):

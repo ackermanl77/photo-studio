@@ -16,8 +16,10 @@ a GPU that supports it; float32 is the safe, universally-supported fallback for 
 which Real-ESRGAN still supports, just much slower).
 """
 
+import hashlib
 import importlib.util
 import logging
+import threading
 from functools import lru_cache
 
 from PIL import Image
@@ -98,6 +100,109 @@ def _resolve_device_and_dtype():
     return "cpu", torch.float32
 
 
+_WEIGHTS_URL = f"https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/{_MODEL_NAME}.pth"
+# SHA-256 of the official RealESRGAN_x4plus.pth release asset (67,040,989 bytes). Checked after
+# every download and before every load, so a truncated or substituted file is never fed to torch.
+WEIGHTS_SHA256 = "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1"
+WEIGHTS_SIZE_BYTES = 67_040_989
+
+# Tiled inference: RRDBNet's activation memory grows with the input's pixel count, so a whole-frame
+# pass (tile=0) on a large photo risked CUDA out-of-memory on a 16 GB card. 512 px tiles with a
+# 32 px overlap are seam-free in practice; _tile_size() halves the tile when free VRAM is low.
+_TILE = 512
+_SMALL_TILE = 256
+_TILE_PAD = 32
+_LOW_VRAM_BYTES = 3 * 1024**3
+
+# One inference at a time: the model object is shared by every request thread of the backend, and
+# two concurrent passes would also compete for the same VRAM.
+_INFERENCE_LOCK = threading.Lock()
+
+
+def weights_path():
+    return weights_dir() / f"{_MODEL_NAME}.pth"
+
+
+def _sha256(path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def weights_present() -> bool:
+    """True when the model file is already on disk at its expected size (no network needed to
+    upscale). Cheap -- the full hash is checked when the model actually loads."""
+    path = weights_path()
+    return path.is_file() and path.stat().st_size == WEIGHTS_SIZE_BYTES
+
+
+def download_weights(progress=None, url: str | None = None, opener=None):
+    """Download the Real-ESRGAN weights into weights_dir(), verifying their SHA-256, and return the
+    path. `progress(done_bytes, total_bytes)` is called as data arrives (the Export panel's
+    "Download model" button drives an st.progress bar with it). Written to a temporary file and
+    renamed only after the hash matches, so an interrupted or tampered download never leaves a
+    file that looks complete. `opener` (a urllib-style callable) exists for tests."""
+    import os
+    import tempfile
+    import urllib.request
+
+    target = weights_path()
+    if weights_present() and _sha256(target) == WEIGHTS_SHA256:
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    handle, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".part", dir=target.parent)
+    digest = hashlib.sha256()
+    done = 0
+    try:
+        with os.fdopen(handle, "wb") as out, (opener or urllib.request.urlopen)(url or _WEIGHTS_URL) as response:
+            total = int(response.headers.get("Content-Length") or WEIGHTS_SIZE_BYTES)
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                digest.update(chunk)
+                done += len(chunk)
+                if progress:
+                    progress(done, total)
+        if digest.hexdigest() != WEIGHTS_SHA256:
+            raise RuntimeError("The downloaded AI Upscale model failed its checksum -- try again (the file was discarded).")
+        os.replace(temp_name, target)
+    except BaseException:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
+    return target
+
+
+def _verified_weights():
+    """The local weights file, downloading it (verified) on first use when missing. A file on disk
+    whose hash doesn't match (e.g. a partial copy from an older build's unverified download) is
+    replaced rather than loaded."""
+    path = weights_path()
+    if path.is_file() and _sha256(path) == WEIGHTS_SHA256:
+        return path
+    if path.is_file():
+        path.unlink()
+    return download_weights()
+
+
+def _tile_size(device: str) -> int:
+    if device != "cuda":
+        return _TILE
+    try:
+        import torch
+
+        free_bytes, _total = torch.cuda.mem_get_info()
+    except Exception:  # noqa: BLE001 -- an odd driver must not block upscaling; keep the default
+        return _TILE
+    return _SMALL_TILE if free_bytes < _LOW_VRAM_BYTES else _TILE
+
+
 @lru_cache(maxsize=1)
 def _load_upsampler():
     """Builds (and caches, module-process-lifetime) the RealESRGANer wrapper around the
@@ -111,27 +216,19 @@ def _load_upsampler():
     device, dtype = _resolve_device_and_dtype()
     half = dtype == torch.float16
 
-    from basicsr.utils.download_util import load_file_from_url
-
     model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=_NATIVE_SCALE)
-    # Downloaded (once) into weights_dir() explicitly and handed to RealESRGANer as a local path --
-    # given a URL, RealESRGANer would download into its own package folder instead (see weights_dir()).
-    model_path = load_file_from_url(
-        f"https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/{_MODEL_NAME}.pth",
-        model_dir=str(weights_dir()),
-        progress=False,
-    )
-    upsampler = RealESRGANer(
+    # A verified local file (see _verified_weights) handed to RealESRGANer as a path -- given a
+    # URL, RealESRGANer would download into its own package folder, unverified.
+    return RealESRGANer(
         scale=_NATIVE_SCALE,
-        model_path=model_path,
+        model_path=str(_verified_weights()),
         model=model,
-        tile=0,
-        tile_pad=10,
+        tile=_tile_size(device),
+        tile_pad=_TILE_PAD,
         pre_pad=0,
         half=half,
         device=device,
     )
-    return upsampler
 
 
 def upscale(image: Image.Image, factor: int = 2) -> Image.Image:
@@ -144,7 +241,9 @@ def upscale(image: Image.Image, factor: int = 2) -> Image.Image:
 
     `factor` must be 2 or 4. RealESRGANer's `enhance(outscale=...)` handles both directly (it runs
     the native 4x model, then itself resizes to whatever `outscale` was requested), so 2x doesn't
-    need a second model -- it's the same architecture, just resized down further on the way out."""
+    need a second model -- it's the same architecture, just resized down further on the way out.
+    Inference is serialized (_INFERENCE_LOCK), runs under torch.inference_mode(), and frees the
+    CUDA cache afterwards."""
     if not ai_upscale_available():
         raise RuntimeError(
             "AI Upscale requires the optional 'torch' and 'realesrgan' packages -- "
@@ -155,10 +254,34 @@ def upscale(image: Image.Image, factor: int = 2) -> Image.Image:
 
     import numpy as np
 
-    upsampler = _load_upsampler()
-    rgb = np.array(image.convert("RGB"))
-    # RealESRGANer works in BGR (it's built around cv2 conventions internally).
-    bgr = rgb[:, :, ::-1]
-    output, _ = upsampler.enhance(bgr, outscale=factor)
+    with _INFERENCE_LOCK:
+        upsampler = _load_upsampler()
+        rgb = np.array(image.convert("RGB"))
+        # RealESRGANer works in BGR (it's built around cv2 conventions internally).
+        bgr = rgb[:, :, ::-1]
+        with _inference_mode():
+            output, _ = upsampler.enhance(bgr, outscale=factor)
+        _empty_cuda_cache()
     result_rgb = output[:, :, ::-1]
-    return Image.fromarray(result_rgb, mode="RGB")
+    return Image.fromarray(np.ascontiguousarray(result_rgb), mode="RGB")
+
+
+def _inference_mode():
+    try:
+        import torch
+
+        return torch.inference_mode()
+    except ImportError:
+        import contextlib
+
+        return contextlib.nullcontext()
+
+
+def _empty_cuda_cache() -> None:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001 -- best effort only
+        pass

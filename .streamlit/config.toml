@@ -1,2 +1,15 @@
 [theme]
 base = "dark"
+
+# Same values app/desktop.py passes on the desktop build's Streamlit command line (a frozen
+# build's children run in the per-user data folder, where this file isn't found) -- kept here too
+# so a plain `python -m streamlit run app/frontend_unified_app.py` behaves the same way.
+[browser]
+gatherUsageStats = false
+
+[server]
+# Matches the backend's own upload cap (app.config.MAX_UPLOAD_BYTES, 50 MB by default).
+maxUploadSize = 50
+
+[client]
+toolbarMode = "minimal"

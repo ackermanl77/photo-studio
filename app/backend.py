@@ -1,25 +1,32 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import hmac
 import json
+import threading
 import time
+import uuid
+from collections import OrderedDict
 from io import BytesIO
 
 import cv2
 from flask import Flask, g, jsonify, request, send_file
 from PIL import Image
-from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from app.config import (
-    BACKEND_HOST, BACKEND_PORT, INTERNAL_STAGE_HEADER, INTERNAL_STAGE_RESUME, MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES,
+    BACKEND_HOST, BACKEND_PORT, EDIT_GENERATION_HEADER, EDIT_LANE_HEADER, EDIT_SESSION_HEADER, INTERNAL_STAGE_HEADER,
+    INTERNAL_STAGE_RESUME, MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES, STAGE_CACHE_ENTRIES, STAGE_HANDLE_HEADER, TOKEN_HEADER,
+    backend_token,
 )
+from app.edit_schema import parse_options
+from app.export import encode_export
 from app.image_processor import PhotoProcessor
-from app.layer_workspace import LayerWorkspace, layers_from_json
+from app.layer_workspace import layers_from_json
 from app.observability import ProcessingAudit, configure_json_logger, log_audit
-from app.portrait_tools import smooth_skin
-from app.presets import PRESETS, apply_preset
-from app.professional_color import ICC_TRANSFORM_ERRORS, normalize_to_srgb, srgb_icc_bytes
-from app.raw_import import is_raw_path
-from app.reliability import check_pixel_count, new_request_id, validate_image_bytes
+from app.pipeline import PipelineCancelled, decode_source, run_pipeline
+from app.reliability import check_pixel_count, new_request_id
 
 app = Flask(__name__)
 backend_logger = configure_json_logger("photo-studio-backend")
@@ -37,13 +44,88 @@ Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 # layers payload), and the pixel limit itself is still enforced on it (see process_image()).
 INTERNAL_STAGE_MAX_BYTES = MAX_UPLOAD_BYTES + 6 * MAX_IMAGE_PIXELS
 
+# Every "the request itself is bad" failure -> JSON 400. OptionsError (app.edit_schema) is a
+# ValueError. cv2.error: Non-Local Means denoise can raise it for a degenerate input (e.g. an image
+# smaller than its fixed 21px search window).
+CLIENT_ERRORS = (KeyError, ValueError, OSError, RuntimeError, json.JSONDecodeError, cv2.error, binascii.Error)
+
 
 @app.before_request
 def assign_request_id():
     request.request_id = request.headers.get("X-Request-ID", new_request_id())
     g.processing_started = time.perf_counter()
+    expected = backend_token()
+    if expected and request.path != "/health":
+        # Checked before anything reads the body: an unauthenticated caller can't even make the
+        # backend parse a large upload (R1).
+        if not hmac.compare_digest(request.headers.get(TOKEN_HEADER, ""), expected):
+            return jsonify({"error": "Missing or invalid backend token"}), 401
     if request.path == "/process" and request.headers.get(INTERNAL_STAGE_HEADER) == INTERNAL_STAGE_RESUME:
         request.max_content_length = INTERNAL_STAGE_MAX_BYTES
+
+
+# --- "Latest wins" (B11) ----------------------------------------------------------------------------
+# The newest generation seen per (edit session, lane). A request whose generation has been passed
+# by a newer one from the same session and lane stops at the next pipeline step (PipelineCancelled
+# -> 409) instead of finishing a render nobody will look at.
+_LATEST_GENERATION: "OrderedDict[tuple[str, str], int]" = OrderedDict()
+_LATEST_LOCK = threading.Lock()
+_LATEST_MAX_KEYS = 512
+
+
+def _cancellation_check():
+    session = request.headers.get(EDIT_SESSION_HEADER)
+    try:
+        generation = int(request.headers.get(EDIT_GENERATION_HEADER, ""))
+    except ValueError:
+        return None
+    if not session:
+        return None
+    key = (session, request.headers.get(EDIT_LANE_HEADER, "default"))
+    with _LATEST_LOCK:
+        if generation >= _LATEST_GENERATION.get(key, -1):
+            _LATEST_GENERATION[key] = generation
+            _LATEST_GENERATION.move_to_end(key)
+            while len(_LATEST_GENERATION) > _LATEST_MAX_KEYS:
+                _LATEST_GENERATION.popitem(last=False)
+
+    def superseded() -> bool:
+        with _LATEST_LOCK:
+            return _LATEST_GENERATION.get(key, generation) > generation
+
+    return superseded
+
+
+# --- Stage 1 hand-off by handle (P3) ----------------------------------------------------------------
+# A `stop_after="detail"` result is kept here (a few entries, LRU) and its handle returned in
+# STAGE_HANDLE_HEADER; the frontend's Stage 2 then sends just the handle instead of re-uploading the
+# lossless PNG. A miss (evicted, or the backend restarted) is a 410 and the client re-uploads.
+_STAGE_CACHE: "OrderedDict[str, Image.Image]" = OrderedDict()
+_STAGE_CACHE_LOCK = threading.Lock()
+
+
+def _copy_with_info(image: Image.Image) -> Image.Image:
+    copy = image.copy()
+    copy.info.update(image.info)
+    return copy
+
+
+def _remember_stage(image: Image.Image) -> str:
+    handle = uuid.uuid4().hex
+    with _STAGE_CACHE_LOCK:
+        _STAGE_CACHE[handle] = _copy_with_info(image)
+        while len(_STAGE_CACHE) > STAGE_CACHE_ENTRIES:
+            _STAGE_CACHE.popitem(last=False)
+    return handle
+
+
+def _recall_stage(handle: str) -> Image.Image | None:
+    with _STAGE_CACHE_LOCK:
+        image = _STAGE_CACHE.get(handle)
+        if image is None:
+            return None
+        _STAGE_CACHE.move_to_end(handle)
+        return _copy_with_info(image)
 
 
 @app.after_request
@@ -52,7 +134,11 @@ def attach_request_id(response):
     response.headers["X-Request-ID"] = request_id
     if request.path == "/process":
         try:
-            source_name = request.files.get("image").filename if request.files.get("image") else "unknown"
+            # A rejected (401) request's body is never parsed, not even for this audit line.
+            if response.status_code == 401:
+                source_name = "unauthorized"
+            else:
+                source_name = request.files.get("image").filename if request.files.get("image") else "unknown"
         except RequestEntityTooLarge:
             # An over-cap upload: touching request.files re-raises the 413 from inside this hook,
             # which turned the intended clean JSON 413 (request_too_large() below) into an HTML 500.
@@ -62,271 +148,133 @@ def attach_request_id(response):
     return response
 
 
-def _number(options: dict, key: str, default: float) -> float:
-    return float(options.get(key, default))
+def _open_mask(file_storage) -> Image.Image | None:
+    if not file_storage:
+        return None
+    return Image.open(BytesIO(file_storage.read())).convert("L")
 
 
-def _image_mask(file_storage, size: tuple[int, int]) -> Image.Image:
-    mask = Image.open(file_storage.stream).convert("L")
-    if mask.size != size:
-        mask = mask.resize(size, Image.Resampling.NEAREST)
-    return mask
+def _open_local_masks(file_storage) -> list[Image.Image] | None:
+    """The "local_masks" upload: JSON {"masks": [base64 PNG, ...]} (one per local_adjustments entry)."""
+    if not file_storage:
+        return None
+    payload = json.loads(file_storage.read())
+    masks = payload.get("masks") if isinstance(payload, dict) else None
+    if not isinstance(masks, list):
+        raise ValueError("local_masks must be a JSON object with a 'masks' list")
+    return [Image.open(BytesIO(base64.b64decode(mask))).convert("L") for mask in masks]
 
 
-def process_image(image_file, options: dict, removal_mask=None, local_mask=None, layers_file=None) -> Image.Image:
-    """Mirrors the exact step order of the unified UI's tabs (Lens -> Tone -> Color -> Detail ->
-    Layers -> Masks -> Portrait -> Crop -> Effects -> AI Upscale) so that routing the frontend's edits through
-    this endpoint produces the same image as applying them in-process. Keeping this order in sync
-    with app/frontend_unified_app.py matters: a mismatched order is exactly the class of bug
-    documented under "Recently Fixed" in docs/PROJECT_STATUS.md (layers/masks silently producing a
-    different result than what the UI showed).
+def process_image(image_file, options: dict, removal_mask=None, local_mask=None, layers_file=None, *, should_cancel=None, stage_image: Image.Image | None = None, local_masks_file=None) -> Image.Image:
+    """Decode an uploaded file and run it through app.pipeline.run_pipeline() -- the one
+    implementation of the step order (see that module's docstring), shared with the CLI and batch
+    processing. `image_file`/masks/`layers_file` are Flask FileStorage-like objects (`.filename`,
+    `.read()`); `layers_file` carries app.layer_workspace.layers_to_json()'s payload.
 
-    Two option flags split this into two independently resumable/stoppable halves, used by
-    app/frontend_unified_app.py's two-stage cache (`_cached_process_through_detail` /
-    `_cached_process_from_repair_onward`) to resolve a Known Issue: a single cache keyed on the
-    *entire* options dict forced a full recompute -- including the genuinely expensive Non-Local
-    Means denoise step -- every time any option changed, even a Repair/Layers/Masks/Portrait/Crop/
-    Effects one that Detail's own output doesn't depend on at all.
-    - `options["stop_after"] == "detail"`: returns right after the Detail section, skipping
-      Repair/Layers/Masks/Portrait/Crop/Effects entirely.
-    - `options["resume_from_detail"]`: treats `image_file` as already having gone through Lens/
-      Tone/Color/Detail (a PNG this same function returned from a prior `stop_after="detail"`
-      call, not the original upload) and starts at Repair instead of re-running any of that.
-    Neither flag is set by any caller other than that frontend cache (the CLI, batch processing,
-    and every other existing test all still get the original one-pass behavior unchanged, since
-    both default to falsy).
+    `options` is validated first (app.edit_schema.parse_options): unknown keys, wrong types and
+    out-of-domain values raise OptionsError (a ValueError -> 400) before anything is decoded.
+
+    With `resume_from_detail`, `image_file` is a previous `stop_after="detail"` result (the
+    frontend's two-stage cache -- see run_pipeline()), already RAW-decoded and ICC-normalized; it
+    carries its EXIF in the PNG's eXIf chunk, so metadata survives both hops. That hop may be
+    exempt from the upload byte cap (INTERNAL_STAGE_MAX_BYTES), so the exact pixel limit is the
+    bound that still applies to it. `stage_image` is that same Stage 1 result recalled from the
+    backend's own cache by handle (P3) -- then `image_file` may be None.
     """
-    source_bytes = image_file.read()
-    filename = image_file.filename or "image"
-    resume_from_detail = options.get("resume_from_detail", False)
-
-    if resume_from_detail:
-        # `source_bytes` is a prior `stop_after="detail"` call's own PNG output, not the original
-        # upload -- already RAW-decoded (if applicable), ICC-normalized to sRGB, and Lens/Tone/
-        # Color/Detail-processed, so none of that runs again. Its ICC profile survives that PNG
-        # hop (explicitly re-embedded below in the "detail" stop_after branch); its EXIF currently
-        # does not, the same pre-existing gap already true of the *unsplit* pipeline's own internal
-        # PNG round trip to the frontend (see "Known Issues") -- this split doesn't make that any
-        # worse, it just doesn't yet fix it either.
-        processor = PhotoProcessor.from_bytes(source_bytes, filename)
-        # This hop may be exempt from the upload byte cap (see INTERNAL_STAGE_MAX_BYTES), so the
-        # pixel limit is the one bound that still applies -- checked exactly, not via PIL's 2x one.
-        check_pixel_count(*processor.image.size)
-        source_exif = None
-        source_icc = processor.image.info.get("icc_profile")
+    options = parse_options(options)
+    if stage_image is not None:
+        image = stage_image
     else:
-        # PIL (via validate_image_bytes) cannot decode camera RAW -- PhotoProcessor.from_bytes()
-        # routes RAW through rawpy and raises its own (already-tested) RuntimeError on failure, so
-        # RAW uploads skip this PIL-based check instead of always failing it.
-        if not is_raw_path(filename):
-            validate_image_bytes(source_bytes, filename)
-        processor = PhotoProcessor.from_bytes(source_bytes, filename)
-        if is_raw_path(filename):
-            # RAW skipped validate_image_bytes() above, so apply the same exact pixel limit to its
-            # decoded size here -- otherwise a RAW over the limit would pass this first stage and
-            # only fail at the frontend's Stage 2 (the resume_from_detail check above).
-            check_pixel_count(*processor.image.size)
-        source_exif = processor.image.getexif().tobytes()
-        source_icc = processor.image.info.get("icc_profile")
-
-        # ICC color management -- real conversion (via littlecms) of the source's own embedded
-        # profile into the sRGB working space every step below assumes, instead of the old
-        # behavior of just preserving the original bytes unlooked-at. A no-op for the common case
-        # (already sRGB); for a wider-gamut source (Adobe RGB, ProPhoto RGB, a camera's own
-        # profile, ...) this is the difference between colors looking correct and looking
-        # oversaturated once the pixels are (mis)treated as sRGB by everything downstream. Runs
-        # before Lens corrections -- as early as possible, same reasoning as Lens itself running
-        # before Tone. Re-tags the *output* as sRGB afterward instead of re-attaching the original
-        # (now-stale, pre-conversion) profile bytes, which would make a viewer interpret the
-        # already-converted pixels a second time.
-        if source_icc:
-            try:
-                processor.image = normalize_to_srgb(processor.image, source_icc)
-                source_icc = srgb_icc_bytes()
-            except ICC_TRANSFORM_ERRORS:
-                # Malformed/truncated/non-ICC bytes under the "icc_profile" key, or a profile
-                # littlecms can open but can't build a transform from (some files carry genuine
-                # garbage there) -- fall back to the old behavior (preserve whatever was embedded,
-                # unconverted) rather than fail the whole edit over an unparseable color tag.
-                pass
-
-        # Lens corrections -- geometric (distortion) and per-channel-radial (chromatic aberration)
-        # corrections need to run before anything else touches pixel positions or values, and
-        # before Crop (applied last, below) so the user frames their shot against the already-
-        # corrected geometry rather than having lens correction potentially introduce new edge
-        # artifacts inside a crop they already chose.
-        processor.apply_lens_corrections(
-            distortion=_number(options, "lens_distortion", 0.0),
-            vignette_amount=_number(options, "lens_vignette_amount", 0.0),
-            vignette_midpoint=_number(options, "lens_vignette_midpoint", 50.0),
-            chromatic_aberration=_number(options, "lens_chromatic_aberration", 0.0),
-            perspective_vertical=_number(options, "lens_perspective_v", 0.0),
-            perspective_horizontal=_number(options, "lens_perspective_h", 0.0),
-        )
-
-        # Tone
-        processor.apply_brightness(_number(options, "brightness", 1.0))
-        processor.apply_exposure(_number(options, "exposure", 1.0))
-        processor.apply_contrast(_number(options, "contrast", 1.0))
-        processor.apply_highlights_shadows(_number(options, "highlights", 0), _number(options, "shadows", 0))
-        if options.get("preset") and options["preset"] != "None":
-            if options["preset"] not in PRESETS:
-                raise ValueError(f"Unknown preset: {options['preset']}")
-            apply_preset(processor, options["preset"])
-
-        # Color
-        processor.apply_temperature_tint(_number(options, "temperature", 0), _number(options, "tint", 0))
-        processor.apply_saturation(_number(options, "saturation", 1.0))
-        processor.apply_vibrance(_number(options, "vibrance", 0.0))
-        hsl_bands = options.get("hsl_bands")
-        if hsl_bands:
-            processor.apply_hsl_mixer(hsl_bands)
-        processor.apply_color_grading(
-            shadows_hue=_number(options, "cg_shadows_hue", 0), shadows_intensity=_number(options, "cg_shadows_intensity", 0),
-            midtones_hue=_number(options, "cg_midtones_hue", 0), midtones_intensity=_number(options, "cg_midtones_intensity", 0),
-            highlights_hue=_number(options, "cg_highlights_hue", 0), highlights_intensity=_number(options, "cg_highlights_intensity", 0),
-            balance=_number(options, "cg_balance", 0),
-        )
-        curve = options.get("curve")
-        if curve:
-            processor.apply_curves([(int(point[0]), int(point[1])) for point in curve])
-
-        # Detail
-        processor.apply_texture_clarity(_number(options, "texture", 0), _number(options, "clarity", 0))
-        if options.get("dehaze", 0):
-            processor.apply_dehaze(_number(options, "dehaze", 0))
-        if options.get("denoise", 0):
-            processor.apply_denoise(int(options["denoise"]), int(options.get("denoise_color", 0)))
-        if options.get("sharpen", False):
-            processor.apply_sharpen()
-
-        if options.get("stop_after") == "detail":
-            if source_icc and not options.get("strip_metadata", False):
-                processor.image.info["icc_profile"] = source_icc
-            return processor.image
-
-    if removal_mask:
-        processor.remove_objects(_image_mask(removal_mask, processor.image.size), radius=_number(options, "removal_radius", 3.0))
-
-    # Layers -- layers_file is a JSON payload (app.layer_workspace.layers_to_json()'s format, a
-    # plain list with no mandatory "Background" entry) describing every layer in the Layers tab's
-    # stack, in bottom-to-top order; each is composited onto processor.image in turn.
-    if layers_file:
-        workspace = LayerWorkspace(processor.image)
-        for layer in layers_from_json(layers_file.read()):
-            workspace.add(layer)
-        processor.image = workspace.composite().convert("RGB")
-
-    # Masks
-    if local_mask:
-        processor.apply_masked_adjustments(
-            _image_mask(local_mask, processor.image.size),
-            exposure=_number(options, "mask_exposure", 1.0),
-            contrast=_number(options, "mask_contrast", 1.0),
-            saturation=_number(options, "mask_saturation", 1.0),
-        )
-
-    # Portrait
-    portrait_smoothing = _number(options, "portrait_smoothing", 0.0)
-    if portrait_smoothing > 0:
-        processor.image = smooth_skin(processor.image, portrait_smoothing)
-
-    # Crop -- an explicit crop_box (free-form, from the unified UI's Crop tab) takes priority over
-    # the named aspect-ratio fit; the frontend only ever sends one of the two at a time.
-    crop_box = options.get("crop_box")
-    if crop_box:
-        left, top, right, bottom = (int(value) for value in crop_box)
-        processor.crop(left, top, right, bottom)
-    else:
-        aspect = options.get("aspect", "Original")
-        if aspect != "Original":
-            ratios = {"1:1": (1, 1), "4:5": (4, 5), "5:4": (5, 4), "3:2": (3, 2), "16:9": (16, 9), "9:16": (9, 16)}
-            processor.fit_aspect_ratio(*ratios[aspect])
-
-    # Effects -- creative, applied to the final delivered frame, deliberately last: a post-crop
-    # vignette needs the crop to have already happened (its corners are the crop's corners, not
-    # the pre-crop source's), and grain is a finishing texture on top of everything else.
-    processor.apply_post_crop_vignette(
-        _number(options, "effects_vignette_amount", 0.0), _number(options, "effects_vignette_midpoint", 50.0)
+        source_bytes = image_file.read()
+        filename = image_file.filename or "image"
+        if options.get("resume_from_detail"):
+            image = PhotoProcessor.from_bytes(source_bytes, filename).image
+            check_pixel_count(*image.size)
+        else:
+            image = decode_source(source_bytes, filename)
+    layers = layers_from_json(layers_file.read()) if layers_file else None
+    return run_pipeline(
+        image, options, removal_mask=_open_mask(removal_mask), local_mask=_open_mask(local_mask), layers=layers,
+        should_cancel=should_cancel, local_masks=_open_local_masks(local_masks_file),
     )
-    if options.get("effects_grain_amount", 0):
-        processor.apply_film_grain(_number(options, "effects_grain_amount", 0.0))
 
-    # AI Upscale -- the one deliberate exception to this app's CPU-first, no-ML-dependency design
-    # (see "Known Issues" in docs/PROJECT_STATUS.md). Deliberately LAST, after Effects: it upscales
-    # the final composited/edited result, so it isn't undone or re-blurred by a later step (e.g. a
-    # crop or vignette) operating at the original resolution, and every earlier step runs on the
-    # smaller source image, which is both cheaper and matches the resolution every other adjustment
-    # was tuned against. Optional (requirements-gpu.txt) -- ai_upscale_available() is checked here
-    # too (not just by the frontend control) so a stray option on a machine without the optional
-    # deps installed fails with a clear error instead of an ImportError deep inside PhotoProcessor.
-    if options.get("ai_upscale", False):
-        from app.ai_upscale import ai_upscale_available
 
-        if not ai_upscale_available():
-            raise RuntimeError(
-                "AI Upscale requires the optional 'torch' and 'realesrgan' packages -- "
-                "install requirements-gpu.txt to enable this feature."
-            )
-        processor.apply_ai_upscale(int(options.get("ai_upscale_factor", 2)))
-
-    if source_exif and not options.get("strip_metadata", False):
-        processor.image.info["exif"] = source_exif
-    if source_icc and not options.get("strip_metadata", False):
-        processor.image.info["icc_profile"] = source_icc
-    return processor.image
+def _encode_response(result: Image.Image, options: dict):
+    """`options["export"]` (app.export settings) -> the final delivery file, encoded here so an
+    AI-upscaled result (possibly over the frontend process's own decode limit) never has to be
+    decoded by the caller. Otherwise the older transport formats: PNG (lossless internal hand-off)
+    or JPEG, both carrying EXIF and ICC unless strip_metadata."""
+    export_settings = options.get("export")
+    if export_settings:
+        content, extension, mime = encode_export(result, export_settings)
+        return BytesIO(content), mime, f"edited{extension}"
+    output_format = options.get("output_format", "PNG")
+    max_width, max_height = options.get("max_width", 0), options.get("max_height", 0)
+    if max_width > 0 and max_height > 0:
+        result.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+    keep_metadata = not options.get("strip_metadata", False)
+    buffer = BytesIO()
+    if output_format == "JPEG":
+        save_options = {"format": "JPEG", "quality": options.get("quality", 92), "optimize": True}
+    else:
+        # compress_level=1, not optimize=True: a PNG response is only ever an internal lossless
+        # hand-off, often re-uploaded straight back for Stage 2 -- optimize=True spent seconds per
+        # edit on a large photo squeezing out bytes nobody keeps.
+        save_options = {"format": "PNG", "compress_level": 1}
+    # EXIF now rides along on the PNG hand-off too (Pillow writes an eXIf chunk) -- it used to be
+    # dropped at Stage 1, so no export from the UI ever carried camera/capture metadata.
+    if keep_metadata and result.info.get("exif"):
+        save_options["exif"] = result.info["exif"]
+    if keep_metadata and result.info.get("icc_profile"):
+        save_options["icc_profile"] = result.info["icc_profile"]
+    result.save(buffer, **save_options)
+    buffer.seek(0)
+    return buffer, ("image/jpeg" if output_format == "JPEG" else "image/png"), ("edited.jpg" if output_format == "JPEG" else "edited.png")
 
 
 @app.get("/health")
 def health():
-    return jsonify({"status": "ok", "service": "photo-processing-backend"})
+    # "auth" tells a client whether this backend expects a token (no secret is revealed).
+    return jsonify({"status": "ok", "service": "photo-processing-backend", "auth": bool(backend_token())})
 
 
 @app.post("/process")
 def process():
     try:
-        options = json.loads(request.form.get("options", "{}"))
-        image_file = request.files["image"]
+        options = parse_options(json.loads(request.form.get("options", "{}")))
+        image_file = request.files.get("image")
+        stage_image = None
+        stage_handle = request.form.get("stage_handle")
+        if image_file is None and stage_handle and options.get("resume_from_detail"):
+            stage_image = _recall_stage(stage_handle)
+            if stage_image is None:
+                return jsonify({"error": "Stage handle expired -- re-upload the image", "stage_handle_expired": True}), 410
+        elif image_file is None:
+            raise ValueError("Missing 'image' file in the request")
         result = process_image(
             image_file,
             options,
             request.files.get("removal_mask"),
             request.files.get("local_mask"),
             request.files.get("layers"),
+            should_cancel=_cancellation_check(),
+            stage_image=stage_image,
+            local_masks_file=request.files.get("local_masks"),
         )
-        output_format = options.get("output_format", "PNG")
-        mime = "image/jpeg" if output_format == "JPEG" else "image/png"
-        buffer = BytesIO()
-        max_width = int(options.get("max_width", 0))
-        max_height = int(options.get("max_height", 0))
-        if max_width > 0 and max_height > 0:
-            result.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
-        if output_format == "JPEG":
-            save_options = {"format": "JPEG", "quality": int(options.get("quality", 92)), "optimize": True}
-            if result.info.get("exif") and not options.get("strip_metadata", False):
-                save_options["exif"] = result.info["exif"]
-            if result.info.get("icc_profile") and not options.get("strip_metadata", False):
-                save_options["icc_profile"] = result.info["icc_profile"]
-            result.save(buffer, **save_options)
-        else:
-            # compress_level=1, not optimize=True: a PNG response is only ever an internal lossless
-            # hand-off (process_via_backend() always requests PNG, and the frontend re-encodes the
-            # result itself on export), often re-uploaded straight back for Stage 2 -- on a large
-            # photo optimize=True spent seconds per edit squeezing out bytes nobody keeps.
-            save_options = {"format": "PNG", "compress_level": 1}
-            if result.info.get("icc_profile") and not options.get("strip_metadata", False):
-                save_options["icc_profile"] = result.info["icc_profile"]
-            result.save(buffer, **save_options)
-        buffer.seek(0)
-        return send_file(buffer, mimetype=mime, download_name="edited.jpg" if output_format == "JPEG" else "edited.png")
-    except (KeyError, ValueError, OSError, RuntimeError, json.JSONDecodeError, cv2.error) as error:
-        # cv2.error included alongside the usual set: apply_denoise()'s Non-Local Means step (a
-        # cv2 call, unlike the old flat median filter) can raise it for a degenerate input (e.g. an
-        # image smaller than its fixed 21px search window) -- without this it would fall through to
-        # Flask's generic HTML 500 instead of the same clean JSON error every other failure gets.
-        return jsonify({"error": str(error)}), 400
+        handle = _remember_stage(result) if options.get("stop_after") == "detail" else None
+        buffer, mime, download_name = _encode_response(result, options)
+        response = send_file(buffer, mimetype=mime, download_name=download_name)
+        if handle:
+            response.headers[STAGE_HANDLE_HEADER] = handle
+        return response
+    except PipelineCancelled:
+        return jsonify({"error": "Superseded by a newer edit", "superseded": True}), 409
     except Image.DecompressionBombError as error:
         return jsonify({"error": f"Image exceeds the configured pixel limit: {error}"}), 413
+    except CLIENT_ERRORS as error:
+        return jsonify({"error": str(error)}), 400
+    except MemoryError:
+        return jsonify({"error": "Not enough memory to process this image -- try a smaller image or fewer heavy adjustments", "request_id": request.request_id}), 507
 
 
 @app.errorhandler(413)
@@ -334,5 +282,26 @@ def request_too_large(error):
     return jsonify({"error": f"Upload exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit"}), 413
 
 
+@app.errorhandler(Exception)
+def unexpected_error(error):
+    """Anything not handled above is still a JSON body (never Flask's HTML 500 page), carrying the
+    request id so it can be matched against the audit log."""
+    if isinstance(error, HTTPException):
+        return jsonify({"error": error.description}), error.code
+    backend_logger.exception("Unhandled error", extra={"request_id": getattr(request, "request_id", None)})
+    return jsonify({"error": f"Internal error: {type(error).__name__}", "request_id": getattr(request, "request_id", None)}), 500
+
+
+def serve(host: str = BACKEND_HOST, port: int = BACKEND_PORT) -> None:
+    """Run the backend: on waitress (a production WSGI server, pure Python, fine on Windows) when it
+    is installed, else Flask's threaded development server as before."""
+    try:
+        from waitress import serve as waitress_serve
+    except ImportError:
+        app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
+    else:
+        waitress_serve(app, host=host, port=port, threads=8)
+
+
 if __name__ == "__main__":
-    app.run(host=BACKEND_HOST, port=BACKEND_PORT, debug=False, use_reloader=False)
+    serve()
