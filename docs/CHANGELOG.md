@@ -27,8 +27,8 @@ and open issues). Newest first.
   issue when the pinned WebView2 is over 90 days old. Dependabot raises bounds via PRs.
 - **Generated test images (T3/T6).** The tests no longer read the third-party wallpapers/Facebook
   photos in `tests/assets` (or the mangled `sample.png`); `tests/synthetic_assets.py` generates
-  photo-like images, a 16-bit gradient and a real CFA DNG. The files themselves are still in the
-  repository until someone deletes them (and, if the repo is public, purges them from history).
+  photo-like images, a 16-bit gradient and a real CFA DNG. The files themselves were then deleted
+  (they remain in git history).
 - **16-bit grayscale decode (B7).** `I;16`/`I`/`F` images are scaled to 8 bits instead of clipped
   (a 16-bit gradient PNG used to decode ~99.6 % white). RAW decodes with `HighlightMode.Blend`.
 - **One supported-format list (R3).** `app.raw_import.SUPPORTED_EXTENSIONS`/`uploader_types()` feed the

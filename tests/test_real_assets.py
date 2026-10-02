@@ -66,8 +66,8 @@ def test_feature_smoke_on_a_photo_like_image(tmp_path, feature):
 
 
 def test_no_test_reads_any_binary_fixture_but_the_public_domain_portrait():
-    """The third-party images still sitting in tests/assets (until they're deleted from the
-    repository) must not be needed by any test."""
+    """No test may depend on a binary fixture in tests/assets other than the public-domain
+    portrait (the old third-party images were deleted; this keeps new ones from creeping back)."""
     allowed = {"portrait_public_domain.jpg"}
     fixtures = {path.name for path in ASSET_DIR.iterdir() if path.suffix.lower() in SUPPORTED_EXTENSIONS} - allowed
     for test_file in Path(__file__).parent.glob("*.py"):
