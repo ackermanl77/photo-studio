@@ -173,6 +173,17 @@ try {
     }
     & $VenvPython -m pip install @requirements
     if ($LASTEXITCODE -ne 0) { throw "pip install failed (exit code $LASTEXITCODE)." }
+    if ($BuildProfile -eq "gpu") {
+        # basicsr/realesrgan/facexlib/gfpgan pull in opencv-python (with GUI), the app uses
+        # opencv-python-headless, and both install the same cv2 package -- whichever went in last
+        # owns the files, and removing either later breaks cv2. Keep only the headless build.
+        & $VenvPython -m pip uninstall -y opencv-python
+        if ($LASTEXITCODE -ne 0) { throw "pip uninstall opencv-python failed (exit code $LASTEXITCODE)." }
+        $headless = @("--force-reinstall", "--no-deps", "opencv-python-headless")
+        if (Test-Path $constraints) { $headless += @("-c", $constraints) }
+        & $VenvPython -m pip install @headless
+        if ($LASTEXITCODE -ne 0) { throw "Reinstalling opencv-python-headless failed (exit code $LASTEXITCODE)." }
+    }
     & $VenvPython -m PyInstaller --noconfirm --distpath $Dist --workpath $Build PhotoStudio.spec
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed (exit code $LASTEXITCODE)." }
 

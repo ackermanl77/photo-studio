@@ -75,6 +75,38 @@ def test_desktop_self_test_reports_modules_and_capabilities(tmp_path, monkeypatc
     assert code == (0 if report["capabilities"]["rawpy"] else 1)
 
 
+def test_desktop_startup_failure_shows_one_dialog_and_logs_the_traceback(monkeypatch):
+    """A failed start shows the app's own error box and exits with code 1 -- re-raising made the
+    windowed exe's PyInstaller bootloader show a second "Unhandled exception" box."""
+    from app import desktop
+    from app.config import user_data_dir
+
+    shown = []
+    monkeypatch.setattr(desktop.sys, "argv", ["PhotoStudio.exe"])
+    monkeypatch.setattr(desktop, "_acquire_single_instance", lambda: object())
+    monkeypatch.setattr(desktop, "_prepare_child_environment", lambda argv: None)
+    monkeypatch.setattr(desktop, "_start_backend", lambda: (_ for _ in ()).throw(RuntimeError("backend exploded")))
+    monkeypatch.setattr(desktop, "_show_error", shown.append)
+
+    with pytest.raises(SystemExit) as exit_info:
+        desktop.main()
+
+    assert exit_info.value.code == 1
+    assert len(shown) == 1 and "backend exploded" in shown[0]
+    log_text = (user_data_dir() / "logs" / "desktop-startup-error.log").read_text(encoding="utf-8")
+    assert "RuntimeError: backend exploded" in log_text and "Traceback" in log_text
+
+
+def test_gpu_build_keeps_only_the_headless_opencv():
+    """basicsr/realesrgan pull in opencv-python, which shares the cv2 package with the app's
+    opencv-python-headless; the gpu build must end with only the headless one installed."""
+    script = (Path(__file__).resolve().parent.parent / "scripts" / "build_release.ps1").read_text(encoding="utf-8")
+    uninstall = script.index("pip uninstall -y opencv-python")
+    reinstall = script.index('"--force-reinstall", "--no-deps", "opencv-python-headless"')
+    assert script.index("& $VenvPython -m pip install @requirements") < uninstall < reinstall < script.index("-m PyInstaller")
+    assert 'if ($BuildProfile -eq "gpu")' in script[uninstall - 600 : uninstall]
+
+
 # --- B6: face detection ---------------------------------------------------------------------------
 
 def test_face_detection_finds_a_real_face_on_the_installed_opencv():

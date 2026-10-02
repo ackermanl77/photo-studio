@@ -3,6 +3,16 @@
 Fix history moved out of `docs/PROJECT_STATUS.md` (which now holds only the current architecture
 and open issues). Newest first.
 
+## 2026-10-02 -- build-check follow-ups
+
+- **One error box on a failed desktop start.** `app/desktop.py::main()` re-raised after showing its
+  own message box, so the windowed exe's PyInstaller bootloader showed a second "Unhandled
+  exception" box. It now appends the traceback to `logs/desktop-startup-error.log` in the user data
+  folder and exits with code 1.
+- **GPU build keeps only `opencv-python-headless`.** basicsr/realesrgan pull in `opencv-python`,
+  which installs the same `cv2` package; `scripts/build_release.ps1 -BuildProfile gpu` now removes
+  it and force-reinstalls the pinned headless build after the main install.
+
 ## 2026-10 -- P2 items (and the remaining P1 work) of the 2026-09 improvement report
 
 `tests/test_p2_improvements.py`, `tests/test_parity_golden.py`, `tests/test_real_assets.py` and
