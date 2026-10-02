@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from dataclasses import asdict, dataclass
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
@@ -22,13 +23,21 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, sort_keys=True)
 
 
-def configure_json_logger(name: str = "photo-studio", path: str | Path = ".photo-studio/photo-studio.log") -> logging.Logger:
+def configure_json_logger(name: str = "photo-studio", path: str | Path | None = None) -> logging.Logger:
+    """`path` defaults to logs/photo-studio.log under app.config.user_data_dir() -- the one
+    per-user data folder -- rather than the old `.photo-studio/photo-studio.log` relative to the
+    *working directory*, which wrote into the source tree during tests and dev runs and grew
+    without bound. Rotates at 2 MB, keeping 5 old files."""
     logger = logging.getLogger(name)
     if logger.handlers:
         return logger
+    if path is None:
+        from app.config import user_data_dir
+
+        path = user_data_dir() / "logs" / "photo-studio.log"
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    handler = logging.FileHandler(destination, encoding="utf-8")
+    handler = RotatingFileHandler(destination, maxBytes=2 * 1024 * 1024, backupCount=5, encoding="utf-8")
     handler.setFormatter(JsonFormatter())
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)

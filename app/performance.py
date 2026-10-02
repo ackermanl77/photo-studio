@@ -9,9 +9,10 @@ from pathlib import Path
 from PIL import Image
 
 def preview_image(image, max_size=(1600, 1600)):
-    result = image.copy()
-    result.thumbnail(max_size, Image.Resampling.LANCZOS)
-    return result
+    """Kept for existing callers; the one implementation is app.professional_tools.preview_image."""
+    from app.professional_tools import preview_image as _preview_image
+
+    return _preview_image(image, max_size)
 
 
 @dataclass
