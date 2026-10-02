@@ -20,6 +20,8 @@ htmlcov/
 # Build & release output
 build-release/
 dist-release/
+build-venv/
+build-release-self-test.json
 dist/
 build/
 PhotoStudio-*-Windows/

@@ -1,0 +1,3 @@
+# Test/CI tooling -- never bundled into the desktop build.
+-r requirements.txt
+pytest>=8.0.0,<10
