@@ -22,7 +22,22 @@ def check_environment(storage_path: str | Path | None = None) -> list[Check]:
         checks.append(Check(package, "ok" if importlib.util.find_spec(package) else "missing", "installed" if importlib.util.find_spec(package) else "not installed"))
     checks.append(Check("RAW support", "ok" if importlib.util.find_spec("rawpy") else "optional", "rawpy installed" if importlib.util.find_spec("rawpy") else "optional rawpy package missing"))
     checks.append(Check("7-Zip", "ok" if shutil.which("7z") else "optional", "available" if shutil.which("7z") else "not found"))
-    path = Path(storage_path or (Path.home() / ".photo-studio"))
+    # The Portrait tab's face count depends on a detector that has already silently vanished once
+    # (OpenCV 5 dropped the Haar cascade API) -- an explicit line here makes that visible.
+    from app.portrait_tools import face_detection_backend
+
+    face_backend = face_detection_backend()
+    checks.append(
+        Check(
+            "Face detection", "ok" if face_backend != "none" else "error",
+            {"yunet": "YuNet (cv2.FaceDetectorYN)", "haar": "Haar cascade (fallback)"}.get(face_backend, "no detector available in this OpenCV build"),
+        )
+    )
+    if storage_path is None:
+        from app.config import user_data_dir
+
+        storage_path = user_data_dir()
+    path = Path(storage_path)
     try:
         path.mkdir(parents=True, exist_ok=True)
         probe = path / ".write-test"
