@@ -56,7 +56,9 @@ def validate_image_bytes(content: bytes, filename: str = "image", max_pixels: in
     return width, height, format_name
 
 
-def validate_project_archive(content: bytes, max_entries: int = 20, max_uncompressed_bytes: int = 250 * 1024 * 1024) -> dict:
+# Entries: project.json + source + legacy layers.json + layers/stack.json + one PNG per image layer +
+# masks. 200 leaves room for a large layer stack while still bounding a crafted archive.
+def validate_project_archive(content: bytes, max_entries: int = 200, max_uncompressed_bytes: int = 250 * 1024 * 1024) -> dict:
     try:
         archive = zipfile.ZipFile(io.BytesIO(content))
     except zipfile.BadZipFile as error:
@@ -123,6 +125,12 @@ def validate_project_archive(content: bytes, max_entries: int = 20, max_uncompre
         for mask_name in files.get("masks") or []:
             if f"masks/{mask_name}" not in namelist:
                 raise ValueError("Project manifest references a missing mask file")
+        stack_name = files.get("layer_stack")
+        if stack_name is not None and stack_name not in namelist:
+            raise ValueError("Project manifest references a missing layer stack")
+        for image_name in files.get("layer_images") or []:
+            if f"layers/{image_name}" not in namelist:
+                raise ValueError("Project manifest references a missing layer image")
         # The older, v1 PhotoProject format (app/project.py) uses these two keys instead of
         # ProjectBundle's "masks" list, and stores the full in-archive path directly rather than
         # a bare name under masks/ -- checked the same way as "source"/"layers" above.

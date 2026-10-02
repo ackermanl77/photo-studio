@@ -16,7 +16,7 @@ def test_photo_project_load_rejects_an_archive_with_too_many_entries():
     with zipfile.ZipFile(archive, "w") as bundle:
         bundle.writestr("project.json", json.dumps({"version": 1, "files": {"source": "source.png"}}))
         bundle.writestr("source.png", b"data")
-        for i in range(25):
+        for i in range(205):  # over the 200-entry cap
             bundle.writestr(f"junk{i}.txt", "x")
 
     with pytest.raises(ValueError, match="too many files"):
