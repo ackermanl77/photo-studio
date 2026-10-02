@@ -1,0 +1,412 @@
+"""The one place that knows what every edit option and every recipe control accepts.
+
+Two related but distinct contracts live here:
+
+- OPTION_SPECS / parse_options(): the `options` dict app.pipeline.run_pipeline() consumes -- the
+  /process API's JSON, the CLI's flags, a batch recipe. Validated strictly: an unknown key (a typo
+  like "exposre", which used to return 200 and silently do nothing), a wrong type (`{"exposure":
+  null}` used to be an HTML 500), or a value outside the option's valid *domain* is rejected with an
+  OptionsError (a ValueError, so every existing "bad request" handler already turns it into a 400)
+  that names the offending keys. Domain limits are deliberately wider than the UI's sliders: the
+  CLI and API have always accepted e.g. `--exposure 2.0`, and narrowing that would break callers.
+
+- RECIPE_CONTROLS / sanitize_recipe(): a saved recipe (Undo/Redo snapshot, custom preset, project,
+  imported preset file) about to be written back into the Streamlit widgets. Lenient on purpose: a
+  hand-edited, older, or newer file must never take the page down (a value above a slider's max
+  raised StreamlitValueAboveMaxError), so out-of-range values are clamped to the *widget's* range,
+  wrong types fall back to the control's default, and unknown keys are dropped.
+  tests/test_edit_schema.py checks these ranges against the real widgets through AppTest, so the
+  two can't drift apart silently.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+from app.lens_corrections import LENS_PROFILES
+from app.presets import PRESETS
+from app.professional_color import HSL_BAND_ORDER
+from app.recipe_options import ASPECT_RATIOS
+
+# Bumped whenever an option's meaning changes incompatibly; a request carrying a newer
+# "schema_version" than this build understands is rejected instead of being misread.
+SCHEMA_VERSION = 1
+# Same idea for saved recipes (presets/projects) -- see migrate_recipe().
+# 2: Exposure moved to EV ("exposure_ev"), Contrast/Saturation and the mask targets to -100..100
+# ("*_amount") -- see migrate_legacy_keys().
+RECIPE_VERSION = 2
+
+
+class OptionsError(ValueError):
+    """An invalid `options` payload -- a ValueError subclass so the backend's existing
+    ValueError -> JSON 400 handling (and the CLI's own error path) covers it unchanged."""
+
+
+@dataclass(frozen=True)
+class OptionSpec:
+    kind: str  # "number", "int", "bool", "choice", or a structured kind validated by name below
+    minimum: float | None = None
+    maximum: float | None = None
+    choices: tuple | None = None
+    nullable: bool = False
+    # Which half of the two-stage pipeline consumes it (see app.pipeline.run_pipeline): "detail"
+    # (Lens/Tone/Color/Detail), "finish" (Repair onward), or "request" (transport/output control).
+    stage: str = "finish"
+
+
+def _num(minimum: float, maximum: float, stage: str = "finish") -> OptionSpec:
+    return OptionSpec("number", minimum, maximum, stage=stage)
+
+
+def _int(minimum: int, maximum: int, stage: str = "finish") -> OptionSpec:
+    return OptionSpec("int", minimum, maximum, stage=stage)
+
+
+OPTION_SPECS: dict[str, OptionSpec] = {
+    # Geometry (app.geometry) -- orientation and straighten, applied with the Lens corrections
+    "rotate": OptionSpec("choice", choices=(0, 90, 180, 270), stage="detail"),
+    "flip_horizontal": OptionSpec("bool", stage="detail"),
+    "flip_vertical": OptionSpec("bool", stage="detail"),
+    "straighten": _num(-45, 45, "detail"),
+    "constrain_crop": OptionSpec("bool", stage="detail"),
+    # Lens
+    "lens_distortion": _num(-100, 100, "detail"),
+    "lens_vignette_amount": _num(-100, 100, "detail"),
+    "lens_vignette_midpoint": _num(0, 100, "detail"),
+    "lens_chromatic_aberration": _num(-100, 100, "detail"),
+    "lens_perspective_v": _num(-100, 100, "detail"),
+    "lens_perspective_h": _num(-100, 100, "detail"),
+    # Tone (brightness is CLI-only; the UI has no Brightness control)
+    "brightness": _num(0, 10, "detail"),
+    "exposure": _num(0, 10, "detail"),  # a multiplier on gamma-encoded values (the CLI/API's own)
+    "exposure_ev": _num(-5, 5, "detail"),  # stops, in linear light (the UI's Exposure slider)
+    "contrast": _num(0, 10, "detail"),
+    "highlights": _num(-255, 255, "detail"),
+    "shadows": _num(-255, 255, "detail"),
+    "preset": OptionSpec("choice", choices=("None", *sorted(PRESETS)), nullable=True, stage="detail"),
+    # Color
+    "temperature": _num(-100, 100, "detail"),
+    "tint": _num(-100, 100, "detail"),
+    "saturation": _num(0, 10, "detail"),
+    "vibrance": _num(-100, 100, "detail"),
+    "hsl_bands": OptionSpec("hsl_bands", nullable=True, stage="detail"),
+    "cg_shadows_hue": _num(0, 360, "detail"), "cg_shadows_intensity": _num(0, 100, "detail"),
+    "cg_midtones_hue": _num(0, 360, "detail"), "cg_midtones_intensity": _num(0, 100, "detail"),
+    "cg_highlights_hue": _num(0, 360, "detail"), "cg_highlights_intensity": _num(0, 100, "detail"),
+    "cg_balance": _num(-100, 100, "detail"),
+    "curve": OptionSpec("curve", nullable=True, stage="detail"),
+    # Detail
+    "texture": _num(-100, 100, "detail"),
+    "clarity": _num(-100, 100, "detail"),
+    "dehaze": _num(0, 100, "detail"),
+    "denoise": _int(0, 20, "detail"),
+    "denoise_color": _int(0, 20, "detail"),
+    "sharpen": OptionSpec("bool", stage="detail"),
+    # Repair / Masks / Portrait
+    "removal_radius": _num(1, 50),
+    "mask_exposure": _num(0, 10),
+    "mask_exposure_ev": _num(-5, 5),
+    # One adjustment set per selection that has its own (B8) -- paired, in order, with the masks in
+    # /process's "local_masks" file. See LOCAL_ADJUSTMENT_SPECS.
+    "local_adjustments": OptionSpec("local_adjustments", nullable=True),
+    "mask_contrast": _num(0, 10),
+    "mask_saturation": _num(0, 10),
+    "portrait_smoothing": _num(0, 1),
+    # Crop
+    "aspect": OptionSpec("aspect", nullable=True),
+    "crop_box": OptionSpec("crop_box", nullable=True),
+    # Effects
+    "effects_vignette_amount": _num(-100, 100),
+    "effects_vignette_midpoint": _num(0, 100),
+    "effects_grain_amount": _num(0, 100),
+    # AI Upscale (an export-time action in the UI -- see app/frontend_unified_app.py)
+    "ai_upscale": OptionSpec("bool"),
+    "ai_upscale_factor": OptionSpec("choice", choices=(2, 4)),
+    # Request / transport control
+    "schema_version": OptionSpec("int", 0, SCHEMA_VERSION, stage="request"),
+    "stop_after": OptionSpec("choice", choices=("detail",), nullable=True, stage="request"),
+    "resume_from_detail": OptionSpec("bool", stage="request"),
+    "preview_scale": OptionSpec("number", 0.01, 1.0, stage="request"),
+    "output_format": OptionSpec("choice", choices=("PNG", "JPEG"), stage="request"),
+    "quality": _int(1, 100, "request"),
+    "max_width": _int(0, 100_000, "request"),
+    "max_height": _int(0, 100_000, "request"),
+    "strip_metadata": OptionSpec("bool", stage="request"),
+    "export": OptionSpec("export", nullable=True, stage="request"),
+}
+
+# A selection's own adjustment set (Masks tab, "Own adjustments"): UI units throughout.
+LOCAL_ADJUSTMENT_SPECS = {
+    "exposure_ev": _num(-5, 5), "contrast": _num(-100, 100), "saturation": _num(-100, 100),
+    "temperature": _num(-100, 100), "tint": _num(-100, 100), "clarity": _num(-100, 100),
+}
+MAX_LOCAL_ADJUSTMENTS = 32
+
+DETAIL_STAGE_OPTION_KEYS = tuple(key for key, spec in OPTION_SPECS.items() if spec.stage == "detail")
+
+
+def parse_aspect(value: str) -> tuple[int, int] | None:
+    """"Original" (or empty) -> None; "W:H" with positive integers -> (W, H). Any ratio is
+    accepted, not only the Crop tab's named ones (see ASPECT_RATIOS), so the CLI's
+    `--aspect W H` and the backend share one parser instead of a duplicated lookup table."""
+    if value in (None, "", "Original"):
+        return None
+    parts = str(value).split(":")
+    if len(parts) != 2:
+        raise OptionsError(f"aspect must be 'Original' or 'W:H', got {value!r}")
+    try:
+        width, height = int(parts[0]), int(parts[1])
+    except ValueError as error:
+        raise OptionsError(f"aspect must be 'Original' or 'W:H', got {value!r}") from error
+    if width <= 0 or height <= 0:
+        raise OptionsError("aspect ratio values must be positive")
+    return width, height
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _check_value(key: str, spec: OptionSpec, value):
+    if value is None:
+        if spec.nullable:
+            return None
+        raise OptionsError(f"{key} must not be null")
+    kind = spec.kind
+    if kind in ("number", "int"):
+        if not _is_number(value) or (kind == "int" and float(value) != int(value)):
+            raise OptionsError(f"{key} must be {'an integer' if kind == 'int' else 'a number'}, got {value!r}")
+        if not spec.minimum <= value <= spec.maximum:
+            raise OptionsError(f"{key} must be between {spec.minimum:g} and {spec.maximum:g}, got {value!r}")
+        return int(value) if kind == "int" else float(value)
+    if kind == "bool":
+        if not isinstance(value, bool):
+            raise OptionsError(f"{key} must be true or false, got {value!r}")
+        return value
+    if kind == "choice":
+        if value not in spec.choices:
+            if key == "preset":
+                raise OptionsError(f"Unknown preset: {value} (choose from {', '.join(spec.choices)})")
+            raise OptionsError(f"{key} must be one of {', '.join(map(str, spec.choices))}; got {value!r}")
+        return value
+    if kind == "hsl_bands":
+        if not isinstance(value, dict):
+            raise OptionsError("hsl_bands must be an object mapping band names to {hue, sat, lum}")
+        unknown = sorted(set(value) - set(HSL_BAND_ORDER))
+        if unknown:
+            raise OptionsError(f"Unknown HSL band(s): {', '.join(map(str, unknown))} (expected {', '.join(HSL_BAND_ORDER)})")
+        bands = {}
+        for band, channels in value.items():
+            if not isinstance(channels, dict) or set(channels) - {"hue", "sat", "lum"}:
+                raise OptionsError(f"hsl_bands.{band} must be an object with only hue/sat/lum")
+            bands[band] = {name: _check_value(f"hsl_bands.{band}.{name}", _num(-100, 100), channels.get(name, 0)) for name in ("hue", "sat", "lum")}
+        return bands
+    if kind == "curve":
+        if not isinstance(value, (list, tuple)) or len(value) < 2:
+            raise OptionsError("curve must be a list of at least two [x, y] points")
+        points = []
+        for point in value:
+            if not isinstance(point, (list, tuple)) or len(point) != 2 or not all(_is_number(v) and 0 <= v <= 255 for v in point):
+                raise OptionsError(f"curve points must be [x, y] pairs within 0-255, got {point!r}")
+            points.append((int(point[0]), int(point[1])))
+        return points
+    if kind == "crop_box":
+        if not isinstance(value, (list, tuple)) or len(value) != 4 or not all(_is_number(v) for v in value):
+            raise OptionsError("crop_box must be [left, top, right, bottom]")
+        left, top, right, bottom = (int(v) for v in value)
+        if right <= left or bottom <= top:
+            raise OptionsError("crop_box must describe a non-empty region")
+        return [left, top, right, bottom]
+    if kind == "local_adjustments":
+        if not isinstance(value, list) or len(value) > MAX_LOCAL_ADJUSTMENTS:
+            raise OptionsError(f"local_adjustments must be a list of at most {MAX_LOCAL_ADJUSTMENTS} objects")
+        result = []
+        for index, entry in enumerate(value):
+            if not isinstance(entry, dict) or set(entry) - set(LOCAL_ADJUSTMENT_SPECS):
+                raise OptionsError(f"local_adjustments[{index}] must be an object with only {', '.join(LOCAL_ADJUSTMENT_SPECS)}")
+            result.append({name: _check_value(f"local_adjustments[{index}].{name}", spec, entry.get(name, 0)) for name, spec in LOCAL_ADJUSTMENT_SPECS.items()})
+        return result
+    if kind == "aspect":
+        parse_aspect(value)
+        return value
+    if kind == "export":
+        from app.export import validate_export_settings
+
+        return validate_export_settings(value)
+    raise AssertionError(f"unhandled option kind {kind}")
+
+
+def parse_options(raw) -> dict:
+    """Validate and normalize an `options` payload (see the module docstring). Returns a new dict
+    with only the keys that were given (defaults stay the pipeline's business), numbers normalized
+    to float/int. Raises OptionsError listing every unknown key at once."""
+    if not isinstance(raw, dict):
+        raise OptionsError(f"options must be a JSON object, got {type(raw).__name__}")
+    unknown = sorted(key for key in raw if key not in OPTION_SPECS)
+    if unknown:
+        raise OptionsError(f"Unknown option(s): {', '.join(map(str, unknown))}")
+    version = raw.get("schema_version")
+    if _is_number(version) and version > SCHEMA_VERSION:
+        raise OptionsError(f"options schema_version {version} is newer than this build supports ({SCHEMA_VERSION})")
+    return {key: _check_value(key, OPTION_SPECS[key], value) for key, value in raw.items()}
+
+
+# ----------------------------------------------------------------------------------------------
+# Recipe controls (the widget-facing contract -- see the module docstring)
+
+
+@dataclass(frozen=True)
+class RecipeControl:
+    kind: str  # "int", "float", "bool", "choice"
+    default: object
+    minimum: float | None = None
+    maximum: float | None = None
+    choices: tuple | None = None
+
+
+def _ri(minimum: int, maximum: int, default: int = 0) -> RecipeControl:
+    return RecipeControl("int", default, minimum, maximum)
+
+
+def _rf(minimum: float, maximum: float, default: float) -> RecipeControl:
+    return RecipeControl("float", default, minimum, maximum)
+
+
+# Ranges are the Streamlit widgets' own min/max in app/frontend_unified_app.py.
+RECIPE_CONTROLS: dict[str, RecipeControl] = {
+    "exposure_ev": _rf(-5.0, 5.0, 0.0), "contrast_amount": _ri(-100, 100),
+    "highlights": _ri(-100, 100), "shadows": _ri(-100, 100),
+    "preset": RecipeControl("choice", "None", choices=("None", *sorted(PRESETS))),
+    "temperature": _ri(-100, 100), "tint": _ri(-100, 100),
+    "saturation_amount": _ri(-100, 100), "vibrance": _ri(-100, 100),
+    "curve_enabled": RecipeControl("bool", False),
+    "curve_black": _ri(0, 64, 0), "curve_shadows": _ri(0, 128, 64), "curve_mid": _ri(64, 192, 128),
+    "curve_highlights": _ri(128, 255, 192), "curve_white": _ri(192, 255, 255),
+    "texture": _ri(-100, 100), "clarity": _ri(-100, 100),
+    "denoise": _ri(0, 9), "denoise_color": _ri(0, 9),
+    "sharpen": RecipeControl("bool", False), "dehaze": _ri(0, 100),
+    "effects_vignette_amount": _ri(-100, 100), "effects_vignette_midpoint": _ri(0, 100, 50),
+    "effects_grain_amount": _ri(0, 100),
+    "portrait_smoothing": _rf(0.0, 1.0, 0.0),
+    "mask_target_exposure_ev": _rf(-5.0, 5.0, 0.0), "mask_target_contrast_amount": _ri(-100, 100),
+    "mask_target_saturation_amount": _ri(-100, 100),
+    "crop_aspect": RecipeControl("choice", "Original", choices=("Original", "Free-form", "Custom", *ASPECT_RATIOS)),
+    "crop_custom_w": _ri(1, 100, 3), "crop_custom_h": _ri(1, 100, 2), "crop_swap": RecipeControl("bool", False),
+    "rotate": RecipeControl("choice", 0, choices=(0, 90, 180, 270)),
+    "flip_horizontal": RecipeControl("bool", False), "flip_vertical": RecipeControl("bool", False),
+    "straighten": _rf(-45.0, 45.0, 0.0), "constrain_crop": RecipeControl("bool", True),
+    "removal_radius": _ri(1, 15, 3),
+    "crop_free_x0": _rf(0.0, 1.0, 0.0), "crop_free_y0": _rf(0.0, 1.0, 0.0),
+    "crop_free_x1": _rf(0.0, 1.0, 1.0), "crop_free_y1": _rf(0.0, 1.0, 1.0),
+    "lens_profile": RecipeControl("choice", "None", choices=tuple(LENS_PROFILES)),
+    "lens_distortion": _ri(-100, 100), "lens_vignette_amount": _ri(-100, 100),
+    "lens_vignette_midpoint": _ri(0, 100, 50), "lens_chromatic_aberration": _ri(-100, 100),
+    "lens_perspective_v": _ri(-100, 100), "lens_perspective_h": _ri(-100, 100),
+    "cg_shadows_hue": _ri(0, 360), "cg_shadows_intensity": _ri(0, 100),
+    "cg_midtones_hue": _ri(0, 360), "cg_midtones_intensity": _ri(0, 100),
+    "cg_highlights_hue": _ri(0, 360), "cg_highlights_intensity": _ri(0, 100),
+    "cg_balance": _ri(-100, 100),
+}
+for _band in HSL_BAND_ORDER:
+    for _channel in ("hue", "sat", "lum"):
+        RECIPE_CONTROLS[f"hsl_{_band.lower()}_{_channel}"] = _ri(-100, 100)
+
+# Recipe entries that aren't single widgets -- lists of per-selection/per-layer dicts, validated
+# structurally by sanitize_recipe() rather than clamped.
+RECIPE_LIST_KEYS = ("mask_layers", "removal_mask_layers", "curve_extra_points", "layers")
+SELECTION_KINDS = ("Luminance", "Color", "Horizontal gradient", "Vertical gradient", "Radial", "Painted", "Magic Wand")
+
+
+def recipe_defaults() -> dict:
+    return {key: control.default for key, control in RECIPE_CONTROLS.items()}
+
+
+def _sanitize_control(control: RecipeControl, value):
+    if control.kind == "bool":
+        return value if isinstance(value, bool) else control.default
+    if control.kind == "choice":
+        return value if value in control.choices else control.default
+    if not _is_number(value):
+        return control.default
+    clamped = min(max(float(value), control.minimum), control.maximum)
+    return int(round(clamped)) if control.kind == "int" else float(clamped)
+
+
+def _sanitize_selection(entry) -> dict | None:
+    if not isinstance(entry, dict) or entry.get("kind") not in SELECTION_KINDS or not isinstance(entry.get("params", {}), dict):
+        return None
+    clean = dict(entry)
+    clean.setdefault("params", {})
+    clean["name"] = str(clean.get("name") or clean["kind"])
+    clean["enabled"] = clean.get("enabled", True) if isinstance(clean.get("enabled", True), bool) else True
+    clean["invert"] = clean.get("invert", False) if isinstance(clean.get("invert", False), bool) else False
+    clean["soften"] = _sanitize_control(_ri(0, 40), clean.get("soften", 0))
+    clean["opacity"] = _sanitize_control(_rf(0.0, 1.0, 1.0), clean.get("opacity", 1.0))
+    clean["combine"] = clean.get("combine") if clean.get("combine") in ("add", "subtract", "intersect") else "add"
+    clean["adjust"] = clean.get("adjust") if isinstance(clean.get("adjust"), bool) else False
+    adjustments = clean.get("adjustments") if isinstance(clean.get("adjustments"), dict) else {}
+    clean["adjustments"] = {
+        name: _sanitize_control(_rf(-5.0, 5.0, 0.0) if name == "exposure_ev" else _ri(-100, 100), adjustments.get(name, 0))
+        for name in LOCAL_ADJUSTMENT_SPECS
+    }
+    return clean
+
+
+# Recipe version 1 keys (multipliers) -> version 2 keys (EV / -100..100), see migrate_legacy_keys().
+_LEGACY_EV_KEYS = {"exposure": "exposure_ev", "mask_target_exposure": "mask_target_exposure_ev"}
+_LEGACY_AMOUNT_KEYS = {
+    "contrast": "contrast_amount", "saturation": "saturation_amount",
+    "mask_target_contrast": "mask_target_contrast_amount", "mask_target_saturation": "mask_target_saturation_amount",
+}
+
+
+def migrate_legacy_keys(recipe: dict) -> dict:
+    """Convert a version-1 recipe's multiplier controls to version 2's units: an exposure
+    multiplier m on gamma-encoded values is about 2.2*log2(m) stops (rounded to the slider's 0.05
+    step), a contrast/saturation multiplier c becomes (c - 1) * 100. Keys already in the new form
+    win; anything unconvertible is dropped (sanitize_recipe then falls back to the default)."""
+    clean = dict(recipe)
+    for old, new in _LEGACY_EV_KEYS.items():
+        value = clean.pop(old, None)
+        if new not in clean and _is_number(value) and value > 0:
+            clean[new] = round(round(2.2 * math.log2(value) / 0.05) * 0.05, 2)
+    for old, new in _LEGACY_AMOUNT_KEYS.items():
+        value = clean.pop(old, None)
+        if new not in clean and _is_number(value):
+            clean[new] = round((value - 1.0) * 100)
+    return clean
+
+
+def sanitize_recipe(recipe) -> dict:
+    """Make a recipe safe to write into the widgets (see the module docstring): keeps only known
+    keys, clamps each control to its widget's range and coerces its type, drops malformed
+    selection/curve-point entries. A key absent from `recipe` stays absent -- callers that want
+    "everything else back to default" (Reset, Load Project) merge over recipe_defaults() first."""
+    if not isinstance(recipe, dict):
+        return {}
+    recipe = migrate_legacy_keys(recipe)
+    clean: dict = {}
+    for key, value in recipe.items():
+        if key in RECIPE_CONTROLS:
+            clean[key] = _sanitize_control(RECIPE_CONTROLS[key], value)
+        elif key in ("mask_layers", "removal_mask_layers"):
+            entries = value if isinstance(value, list) else []
+            clean[key] = [entry for entry in map(_sanitize_selection, entries) if entry is not None]
+        elif key == "curve_extra_points":
+            points = value if isinstance(value, list) else []
+            clean[key] = [
+                [int(point[0]), int(point[1])] for point in points
+                if isinstance(point, (list, tuple)) and len(point) == 2 and all(_is_number(v) and 0 <= v <= 255 for v in point)
+            ]
+        elif key == "layers":
+            clean[key] = [layer for layer in value if isinstance(layer, dict)] if isinstance(value, list) else []
+    return clean
+
+
+def migrate_recipe(recipe: dict, version: int | None) -> dict:
+    """Bring a recipe saved at `version` (None = saved before recipes were versioned, which is
+    RECIPE_VERSION 1's shape) up to RECIPE_VERSION: version 1 -> 2 converts the multiplier controls
+    (migrate_legacy_keys). A recipe from a *newer* build is refused, not guessed at."""
+    if version is not None and (not _is_number(version) or version > RECIPE_VERSION):
+        raise ValueError(f"This file was saved by a newer version of Photo Studio (recipe version {version}); update the app to open it.")
+    return migrate_legacy_keys(recipe) if (version or 1) < 2 else dict(recipe)

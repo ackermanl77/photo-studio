@@ -1,11 +1,32 @@
 from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
+
+from PIL import Image
 
 from app.batch import process_folder
-from app.export import save_for_delivery
-from app.image_processor import PhotoProcessor
-from app.presets import PRESETS, apply_preset
+from app.edit_schema import OptionsError, migrate_recipe, parse_options, sanitize_recipe
+from app.export import METADATA_POLICIES, write_export
+from app.pipeline import decode_source, run_pipeline
+from app.presets import PRESETS
+from app.recipe_options import recipe_to_options, without_per_photo_only_keys
+
+# --auto-enhance sets exactly what the GUI's "Auto Enhance" button writes into the recipe (see
+# app/frontend_unified_app.py), so it now runs at those controls' normal pipeline positions
+# instead of as an extra pass after everything else. Any of these given explicitly as a flag wins.
+AUTO_ENHANCE_OPTIONS = {"exposure": 1.12, "contrast": 1.15, "saturation": 1.08, "denoise": 3, "sharpen": True}
+
+# flag attribute -> options key, for every flag that maps 1:1 onto an app.pipeline option.
+_FLAG_OPTIONS = {
+    "brightness": "brightness", "exposure": "exposure", "contrast": "contrast", "saturation": "saturation",
+    "highlights": "highlights", "shadows": "shadows", "texture": "texture", "clarity": "clarity",
+    "temperature": "temperature", "tint": "tint", "vibrance": "vibrance", "dehaze": "dehaze",
+    "denoise": "denoise", "denoise_color": "denoise_color", "preset": "preset",
+    "mask_exposure": "mask_exposure", "mask_contrast": "mask_contrast", "mask_saturation": "mask_saturation",
+    "exposure_ev": "exposure_ev", "rotate": "rotate", "straighten": "straighten",
+}
 
 
 def parse_curve(value: str) -> list[tuple[int, int]]:
@@ -16,34 +37,50 @@ def parse_curve(value: str) -> list[tuple[int, int]]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Professional photo editing pipeline")
+    parser = argparse.ArgumentParser(
+        description="Professional photo editing pipeline -- the same step order as the GUI (app/pipeline.py)",
+    )
     input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument("--input", help="Input image path")
-    input_group.add_argument("--input-dir", help="Folder of input images")
+    input_group.add_argument("--input", help="Input image path (JPG/PNG/TIFF/WEBP or camera RAW)")
+    input_group.add_argument("--input-dir", help="Folder of input images; every other flag applies to each one")
     output_group = parser.add_mutually_exclusive_group(required=True)
-    output_group.add_argument("--output", help="Output image path")
+    output_group.add_argument("--output", help="Output image path (.jpg/.png/.webp/.tif)")
     output_group.add_argument("--output-dir", help="Folder for processed images")
-    parser.add_argument("--brightness", type=float, default=1.0, help="Brightness multiplier (default: 1.0)")
-    parser.add_argument("--contrast", type=float, default=1.0, help="Contrast multiplier (default: 1.0)")
-    parser.add_argument("--saturation", type=float, default=1.0, help="Saturation multiplier (default: 1.0)")
-    parser.add_argument("--exposure", type=float, default=1.0, help="Exposure multiplier (default: 1.0)")
-    parser.add_argument("--highlights", type=float, default=0.0, help="Highlights adjustment from -255 to 255")
-    parser.add_argument("--shadows", type=float, default=0.0, help="Shadows adjustment from -255 to 255")
-    parser.add_argument("--texture", type=float, default=0.0, help="Texture adjustment from -100 to 100")
-    parser.add_argument("--clarity", type=float, default=0.0, help="Clarity adjustment from -100 to 100")
-    parser.add_argument("--temperature", type=float, default=0.0, help="Temperature from -100 cool to 100 warm")
-    parser.add_argument("--tint", type=float, default=0.0, help="Tint from -100 green to 100 magenta")
+    # Numeric defaults are None ("not given") so a --recipe's value or --auto-enhance's isn't
+    # overwritten by a flag the user never typed; the pipeline's own defaults apply otherwise.
+    parser.add_argument("--recipe", help="Saved look to apply: a custom preset recipe JSON, or a presets file exported from the app")
+    parser.add_argument("--recipe-name", help="Which preset to use when --recipe is an exported file holding several")
+    parser.add_argument("--options", help="JSON file holding a raw pipeline options object (the /process API's \"options\"); applied after --recipe, before the other flags")
+    parser.add_argument("--brightness", type=float, help="Brightness multiplier (default: 1.0)")
+    parser.add_argument("--contrast", type=float, help="Contrast multiplier (default: 1.0)")
+    parser.add_argument("--saturation", type=float, help="Saturation multiplier (default: 1.0)")
+    parser.add_argument("--exposure", type=float, help="Exposure multiplier on gamma-encoded values (default: 1.0)")
+    parser.add_argument("--exposure-ev", type=float, help="Exposure in stops, in linear light, -5 to 5 (the GUI's Exposure slider)")
+    parser.add_argument("--rotate", type=int, choices=(0, 90, 180, 270), help="Rotate clockwise by 90/180/270 degrees")
+    parser.add_argument("--straighten", type=float, help="Straighten angle in degrees, -45 to 45 (positive = clockwise)")
+    parser.add_argument("--constrain-crop", action="store_true", default=None, help="Crop away the borders lens/perspective/straighten corrections leave uncovered")
+    parser.add_argument("--highlights", type=float, help="Highlights adjustment from -255 to 255")
+    parser.add_argument("--shadows", type=float, help="Shadows adjustment from -255 to 255")
+    parser.add_argument("--texture", type=float, help="Texture adjustment from -100 to 100")
+    parser.add_argument("--clarity", type=float, help="Clarity adjustment from -100 to 100")
+    parser.add_argument("--temperature", type=float, help="Temperature from -100 cool to 100 warm")
+    parser.add_argument("--tint", type=float, help="Tint from -100 green to 100 magenta")
+    parser.add_argument("--vibrance", type=float, help="Vibrance from -100 to 100")
+    parser.add_argument("--dehaze", type=float, help="Dehaze strength from 0 to 100")
     parser.add_argument("--curve", type=parse_curve, help="RGB curve points such as 0:0,128:140,255:255")
-    parser.add_argument("--remove-mask", help="Grayscale mask path for CPU object removal")
-    parser.add_argument("--mask", help="Grayscale mask path for local adjustments")
-    parser.add_argument("--mask-exposure", type=float, default=1.0, help="Masked exposure multiplier")
-    parser.add_argument("--mask-contrast", type=float, default=1.0, help="Masked contrast multiplier")
-    parser.add_argument("--mask-saturation", type=float, default=1.0, help="Masked saturation multiplier")
-    parser.add_argument("--denoise", type=int, default=0, help="Median filter denoise strength (default: 0)")
-    parser.add_argument("--sharpen", action="store_true", help="Apply sharpening")
-    parser.add_argument("--auto-enhance", action="store_true", help="Apply a standard portrait-friendly enhancement pass")
+    parser.add_argument("--remove-mask", help="Grayscale mask path for CPU object removal (single image only)")
+    parser.add_argument("--mask", help="Grayscale mask path for local adjustments (single image only)")
+    parser.add_argument("--mask-exposure", type=float, help="Masked exposure multiplier")
+    parser.add_argument("--mask-contrast", type=float, help="Masked contrast multiplier")
+    parser.add_argument("--mask-saturation", type=float, help="Masked saturation multiplier")
+    parser.add_argument("--denoise", type=int, help="Non-Local Means denoise strength, 0-9 like the GUI slider (default: 0)")
+    parser.add_argument("--denoise-color", type=int, help="Separate color-noise strength for --denoise (default: same as --denoise)")
+    parser.add_argument("--sharpen", action="store_true", default=None, help="Apply sharpening")
+    parser.add_argument("--auto-enhance", action="store_true", help="Apply the GUI's Auto Enhance values (exposure/contrast/saturation/denoise/sharpen)")
     parser.add_argument("--preset", choices=sorted(PRESETS), help="Apply a named editing preset")
-    parser.add_argument("--quality", type=int, default=92, help="JPEG delivery quality from 1 to 100")
+    parser.add_argument("--quality", type=int, default=92, help="JPEG/WEBP delivery quality from 1 to 100")
+    parser.add_argument("--metadata", choices=METADATA_POLICIES, default="all", help="EXIF to keep: all, camera (copyright & camera only), or none")
+    parser.add_argument("--remove-gps", action="store_true", help="Drop GPS location from the kept EXIF")
     parser.add_argument("--crop", nargs=4, type=int, metavar=("LEFT", "TOP", "RIGHT", "BOTTOM"), help="Crop rectangle in pixels")
     parser.add_argument("--aspect", nargs=2, type=int, metavar=("WIDTH", "HEIGHT"), help="Center-crop to an aspect ratio")
     parser.add_argument(
@@ -55,66 +92,82 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def load_recipe(path: str | Path, name: str | None = None) -> dict:
+    """A recipe file is either a single recipe object (what the Presets tab stores per preset) or
+    an exported presets file ({"version": 1, "presets": {name: recipe}}) -- then `name` picks one,
+    optional when it holds exactly one. Migrated and sanitized like every other restore path."""
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("A recipe file must contain a JSON object")
+    version = payload.get("recipe_version")
+    if isinstance(payload.get("presets"), dict):
+        presets = payload["presets"]
+        if name is None:
+            if len(presets) != 1:
+                raise ValueError(f"{path} holds {len(presets)} presets -- pick one with --recipe-name ({', '.join(sorted(presets))})")
+            name = next(iter(presets))
+        if name not in presets:
+            raise ValueError(f"No preset named {name!r} in {path}")
+        payload = presets[name]
+    return sanitize_recipe(without_per_photo_only_keys(migrate_recipe(payload, version)))
+
+
+def options_from_args(args: argparse.Namespace) -> dict:
+    """The app.pipeline options dict for these flags: --recipe first, then --auto-enhance's
+    values, then every explicitly given flag on top. Validated (app.edit_schema.parse_options)."""
+    options: dict = {}
+    if args.recipe:
+        options.update(recipe_to_options(load_recipe(args.recipe, args.recipe_name)))
+    if args.options:
+        raw = json.loads(Path(args.options).read_text(encoding="utf-8"))
+        options.update(parse_options(raw))
+    if args.auto_enhance:
+        options.update(AUTO_ENHANCE_OPTIONS)
+    if args.constrain_crop:
+        options["constrain_crop"] = True
+    for attribute, key in _FLAG_OPTIONS.items():
+        value = getattr(args, attribute)
+        if value is not None:
+            options[key] = value
+    if args.sharpen:
+        options["sharpen"] = True
+    if args.curve:
+        options["curve"] = [list(point) for point in args.curve]
+    if args.crop:
+        options["crop_box"] = list(args.crop)
+    if args.aspect:
+        options["aspect"] = f"{args.aspect[0]}:{args.aspect[1]}"
+    if args.ai_upscale:
+        options["ai_upscale"] = True
+        options["ai_upscale_factor"] = args.ai_upscale
+    return parse_options(options)
+
+
 def main() -> None:
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
+    try:
+        options = options_from_args(args)
+    except (OptionsError, ValueError, OSError) as error:
+        parser.error(str(error))
+    export_settings = {"quality": max(1, min(100, args.quality)), "metadata": args.metadata, "remove_gps": args.remove_gps}
 
     if args.input_dir:
         if not args.output_dir:
             raise SystemExit("--output-dir is required when using --input-dir")
-        outputs = process_folder(args.input_dir, args.output_dir, preset=args.preset)
+        if args.mask or args.remove_mask:
+            parser.error("--mask/--remove-mask are drawn for one specific photo and can't be applied to a whole folder")
+        outputs = process_folder(args.input_dir, args.output_dir, options=options, export_settings=export_settings)
         print(f"Processed {len(outputs)} image(s) into: {args.output_dir}")
         return
+    if not args.output:
+        raise SystemExit("--output is required when using --input")
 
-    processor = PhotoProcessor(args.input)
-
-    processor.apply_brightness(args.brightness)
-    processor.apply_contrast(args.contrast)
-    processor.apply_saturation(args.saturation)
-    processor.apply_exposure(args.exposure)
-    processor.apply_highlights_shadows(args.highlights, args.shadows)
-    # Matches app/backend.py::process_image()'s pipeline order: preset is applied right after this
-    # Tone group and before Color/Detail/Crop, not last. A preset (app/presets.py) applies its own
-    # exposure/contrast/saturation/curve/sharpen adjustments, which are order-sensitive relative to
-    # every step below -- applying it last (as this used to) meant --preset combined with any other
-    # flag produced a visibly different result via the CLI than the same combination produced via
-    # the GUI/backend, on the exact same source image.
-    if args.preset:
-        apply_preset(processor, args.preset)
-    processor.apply_texture_clarity(args.texture, args.clarity)
-    processor.apply_temperature_tint(args.temperature, args.tint)
-    if args.curve:
-        processor.apply_curves(args.curve)
-    if args.remove_mask:
-        processor.remove_objects(args.remove_mask)
-    if args.mask:
-        processor.apply_masked_adjustments(
-            args.mask,
-            exposure=args.mask_exposure,
-            contrast=args.mask_contrast,
-            saturation=args.mask_saturation,
-        )
-
-    if args.denoise > 0:
-        processor.apply_denoise(args.denoise)
-
-    if args.sharpen:
-        processor.apply_sharpen()
-
-    if args.auto_enhance:
-        processor.auto_enhance()
-
-    if args.crop:
-        processor.crop(*args.crop)
-    if args.aspect:
-        processor.fit_aspect_ratio(*args.aspect)
-
-    # AI Upscale -- last, matching app/backend.py::process_image()'s pipeline position (after every
-    # other adjustment, including Crop): it upscales the final edited result rather than being
-    # undone by a later step operating at the original resolution.
-    if args.ai_upscale:
-        processor.apply_ai_upscale(args.ai_upscale)
-
-    output_path = save_for_delivery(processor, args.output, quality=args.quality)
+    image = decode_source(Path(args.input).read_bytes(), Path(args.input).name)
+    removal_mask = Image.open(args.remove_mask) if args.remove_mask else None
+    local_mask = Image.open(args.mask) if args.mask else None
+    result = run_pipeline(image, options, removal_mask=removal_mask, local_mask=local_mask)
+    output_path = write_export(result, args.output, export_settings)
     print(f"Saved edited image to: {output_path}")
 
 

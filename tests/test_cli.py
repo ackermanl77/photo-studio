@@ -74,6 +74,9 @@ def test_cli_applies_ai_upscale_last_after_crop(tmp_path, monkeypatch):
         return self
 
     monkeypatch.setattr(PhotoProcessor, "apply_ai_upscale", fake_apply_ai_upscale)
+    # The CLI now runs app.pipeline.run_pipeline(), which (like the backend always did) checks the
+    # optional packages are importable before upscaling.
+    monkeypatch.setattr("app.ai_upscale.ai_upscale_available", lambda: True)
     monkeypatch.setattr(
         sys,
         "argv",

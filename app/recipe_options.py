@@ -25,7 +25,7 @@ _DIRECT_PASSTHROUGH_KEYS = (
     "cg_midtones_hue", "cg_midtones_intensity",
     "cg_highlights_hue", "cg_highlights_intensity", "cg_balance",
     "lens_distortion", "lens_vignette_amount", "lens_vignette_midpoint", "lens_chromatic_aberration",
-    "lens_perspective_v", "lens_perspective_h",
+    "lens_perspective_v", "lens_perspective_h", "constrain_crop",
 )
 
 # Recipe keys that belong to one photo's export, never to a reusable look: AI Upscale is an
@@ -34,6 +34,17 @@ _DIRECT_PASSTHROUGH_KEYS = (
 # batch. Deliberately absent from _DIRECT_PASSTHROUGH_KEYS above, and stripped from a recipe before
 # it's saved as, or applied from, a custom preset (without_per_photo_only_keys()).
 PER_PHOTO_ONLY_KEYS = ("ai_upscale", "ai_upscale_factor")
+
+
+# Recipe controls that deliberately never become pipeline options when a saved recipe is applied
+# (batch "sync settings", CLI --recipe): one photo's framing (rotation, flips, straighten, the
+# free-form crop box) and UI-only state (which lens profile was picked -- its values are already
+# in the lens_* controls). tests/test_parity_golden.py checks every *other* control reaches the
+# pipeline.
+RECIPE_KEYS_NOT_IN_OPTIONS = frozenset({
+    "rotate", "flip_horizontal", "flip_vertical", "straighten",
+    "crop_free_x0", "crop_free_y0", "crop_free_x1", "crop_free_y1", "lens_profile",
+})
 
 
 def without_per_photo_only_keys(recipe: dict) -> dict:
@@ -45,6 +56,13 @@ _RENAMED_KEYS = {
     "mask_target_exposure": "mask_exposure",
     "mask_target_contrast": "mask_contrast",
     "mask_target_saturation": "mask_saturation",
+}
+
+
+# recipe -100..100 amount -> options multiplier (1 + amount / 100).
+_AMOUNT_KEYS = {
+    "contrast_amount": "contrast", "saturation_amount": "saturation",
+    "mask_target_contrast_amount": "mask_contrast", "mask_target_saturation_amount": "mask_saturation",
 }
 
 
@@ -89,7 +107,8 @@ def recipe_to_options(recipe: dict) -> dict:
     be translated into a per-photo pixel `crop_box` if a future caller had each batch photo's own
     dimensions on hand at conversion time; today's single call site (`process_files()`, called once
     per batch rather than once per file) doesn't, so it's left as an explicit gap rather than
-    solved partially.
+    solved partially. Rotate/flip/straighten are left out for the same reason (they fix one
+    photo's framing); "constrain crop" is a preference and carries over.
     """
     options: dict = {}
     for key in _DIRECT_PASSTHROUGH_KEYS:
@@ -98,6 +117,15 @@ def recipe_to_options(recipe: dict) -> dict:
     for recipe_key, options_key in _RENAMED_KEYS.items():
         if recipe_key in recipe:
             options[options_key] = recipe[recipe_key]
+    # Recipe version 2 units (the UI's): EV and -100..100 amounts. A version-1 recipe's multipliers
+    # (handled above, unchanged) keep their exact old meaning instead of a rounded conversion.
+    if "exposure_ev" in recipe:
+        options["exposure_ev"] = recipe["exposure_ev"]
+    if "mask_target_exposure_ev" in recipe:
+        options["mask_exposure_ev"] = recipe["mask_target_exposure_ev"]
+    for amount_key, options_key in _AMOUNT_KEYS.items():
+        if amount_key in recipe:
+            options[options_key] = max(0.0, 1.0 + float(recipe[amount_key]) / 100.0)
 
     if recipe.get("curve_enabled"):
         fixed_curve_points = [
@@ -121,8 +149,15 @@ def recipe_to_options(recipe: dict) -> dict:
         options["hsl_bands"] = hsl_bands
 
     crop_aspect = recipe.get("crop_aspect", "Original")
+    ratio = None
     if crop_aspect in ASPECT_RATIOS:
-        width_ratio, height_ratio = ASPECT_RATIOS[crop_aspect]
+        ratio = ASPECT_RATIOS[crop_aspect]
+    elif crop_aspect == "Custom":
+        ratio = (int(recipe.get("crop_custom_w", 3)), int(recipe.get("crop_custom_h", 2)))
+    if ratio:
+        width_ratio, height_ratio = ratio
+        if recipe.get("crop_swap"):
+            width_ratio, height_ratio = height_ratio, width_ratio
         options["aspect"] = f"{width_ratio}:{height_ratio}"
 
     return options
