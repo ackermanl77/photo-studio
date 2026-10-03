@@ -33,6 +33,8 @@ PhotoStudio-*-GPU-pack.7z
 PhotoStudio-*-GPU-pack.7z.sha256
 build-release-gpu-pack-self-test.json
 /release-gpu-pack/
+# Inno Setup output (installer/PhotoStudio.iss OutputDir)
+/installer-output/
 *.spec.bak
 
 # Fixed-name mirror of the current PhotoStudio-<version>-Windows/ build output (see
