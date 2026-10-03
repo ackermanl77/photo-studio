@@ -17,8 +17,13 @@ param(
     #        -ExtraIndexUrl, e.g. https://download.pytorch.org/whl/cu130
     # A constraints-<profile>.txt next to this repo's requirement files, when present, pins every
     # transitive version (pip -c) for a reproducible build.
+    #   With -GpuPack (cpu profile only): the CPU base package plus a separate GPU pack
+    #   (release-gpu-pack\gpu-pack\, archived as PhotoStudio-<version>-GPU-pack.7z) holding only
+    #   AI Upscale's torch/Real-ESRGAN stack -- extracted next to PhotoStudio.exe, the app finds it
+    #   (app/gpu_pack.py). The gpu profile stays available as the one-folder all-in-one flavour.
     [ValidateSet("cpu", "gpu")]
     [string]$BuildProfile = "cpu",
+    [switch]$GpuPack,
     [string]$ExtraIndexUrl = "",
     # The *base* interpreter the build venv is created from (not the one PyInstaller runs in).
     # Default: `py -3.14` when the Python launcher is present, else whatever `python` is on PATH.
@@ -80,6 +85,11 @@ $Archive = Join-Path $ProjectRoot "PhotoStudio-$Version-Windows.7z"
 # Older versions of this script also kept a version-named copy of release\ here -- a full duplicate
 # of a multi-GB GPU build. It's no longer created; a leftover one is removed after a successful build.
 $LegacyPackage = Join-Path $ProjectRoot "PhotoStudio-$Version-Windows"
+# The optional GPU pack (-GpuPack): its own folder and archive, never inside release\.
+$GpuPackRoot = Join-Path $ProjectRoot "release-gpu-pack"
+$GpuPackDir = Join-Path $GpuPackRoot "gpu-pack"
+$GpuPackArchive = Join-Path $ProjectRoot "PhotoStudio-$Version-GPU-pack.7z"
+$GpuPackSelfTestReport = Join-Path $ProjectRoot "build-release-gpu-pack-self-test.json"
 
 # Microsoft Edge WebView2 Runtime is required to open the app's window at all (pywebview's
 # edgechromium backend needs it) -- confirmed missing on a second, freshly-provisioned PC. Rather
@@ -107,6 +117,46 @@ $WebView2Cab = Join-Path $WebView2CacheDir $WebView2CabName
 $WebView2ExtractedRoot = Join-Path $WebView2CacheDir "extracted"
 $WebView2RuntimeSource = Join-Path $WebView2ExtractedRoot "Microsoft.WebView2.FixedVersionRuntime.$WebView2Version.x64"
 
+if ($GpuPack -and $BuildProfile -ne "cpu") {
+    throw "-GpuPack builds the CPU base package plus a separate GPU pack; use it with -BuildProfile cpu."
+}
+
+# basicsr 1.4.2 is sdist-only, its setup.py fails on Python 3.13+ ("KeyError: '__version__'",
+# PEP 667), and it imports the removed torchvision functional_tensor module -- see
+# requirements-gpu.txt. Extracts and patches a hash-verified copy of the sdist; returns its folder.
+function Get-PatchedBasicsr {
+    $basicsrCache = Join-Path $ProjectRoot "vendor\basicsr-cache"
+    $basicsrTarball = Join-Path $basicsrCache "basicsr-1.4.2.tar.gz"
+    $basicsrSource = Join-Path $basicsrCache "basicsr-1.4.2"
+    New-Item -ItemType Directory -Force -Path $basicsrCache | Out-Null
+    if (-not (Test-Path $basicsrTarball)) {
+        Invoke-WebRequest -UseBasicParsing -OutFile $basicsrTarball -Uri "https://files.pythonhosted.org/packages/86/41/00a6b000f222f0fa4c6d9e1d6dcc9811a374cabb8abb9d408b77de39648c/basicsr-1.4.2.tar.gz"
+    }
+    $basicsrHash = (Get-FileHash $basicsrTarball -Algorithm SHA256).Hash
+    if ($basicsrHash -ne "B89B595A87EF964CDA9913B4D99380DDB6554C965577C0C10CB7B78E31301E87") {
+        Remove-Item $basicsrTarball -Force
+        throw "basicsr-1.4.2.tar.gz failed its SHA-256 check (got $basicsrHash) -- deleted it; rerun to download again."
+    }
+    if (Test-Path $basicsrSource) { Remove-TreeWithRetry $basicsrSource }
+    # Windows' own bsdtar by full path: a Git-for-Windows tar earlier on PATH reads "C:" as a host.
+    & (Join-Path $env:SystemRoot "System32\tar.exe") -xzf $basicsrTarball -C $basicsrCache
+    if ($LASTEXITCODE -ne 0) { throw "Extracting basicsr failed (exit code $LASTEXITCODE)." }
+    $patches = @(
+        @{ File = "setup.py"; Old = "        exec(compile(f.read(), version_file, 'exec'))`n    return locals()['__version__']"; New = "        ns = {}`n        exec(compile(f.read(), version_file, 'exec'), ns)`n    return ns['__version__']" },
+        # torch/numpy/cython are only needed to compile the optional CUDA extensions, which this
+        # build doesn't use; dropping them lets setup.py run without build isolation.
+        @{ File = "setup.py"; Old = "        setup_requires=['cython', 'numpy', 'torch'],`n"; New = "" },
+        @{ File = "basicsr\data\degradations.py"; Old = "from torchvision.transforms.functional_tensor import rgb_to_grayscale"; New = "from torchvision.transforms.functional import rgb_to_grayscale" }
+    )
+    foreach ($patch in $patches) {
+        $path = Join-Path $basicsrSource $patch.File
+        $text = [IO.File]::ReadAllText($path).Replace("`r`n", "`n")
+        if (-not $text.Contains($patch.Old)) { throw "basicsr patch target not found in $($patch.File)." }
+        [IO.File]::WriteAllText($path, $text.Replace($patch.Old, $patch.New))
+    }
+    return $basicsrSource
+}
+
 if (-not $Python -or -not (Test-Path $Python)) {
     throw "Base Python interpreter not found. Install Python 3.14 (or pass -Python <path>)."
 }
@@ -128,39 +178,8 @@ try {
     if (Test-Path $constraints) { $requirements += @("-c", $constraints) } else { Write-Warning "No constraints-$BuildProfile.txt -- transitive versions are not pinned for this build." }
     if ($ExtraIndexUrl) { $requirements += @("--extra-index-url", $ExtraIndexUrl) }
     if ($BuildProfile -eq "gpu") {
-        # basicsr 1.4.2 is sdist-only and its setup.py fails on Python 3.13+ ("KeyError:
-        # '__version__'", PEP 667), and it imports the removed torchvision functional_tensor module
-        # -- see requirements-gpu.txt. Patch a hash-verified copy of the sdist and install it first;
-        # the main install below then finds basicsr already satisfied instead of building it.
-        $basicsrCache = Join-Path $ProjectRoot "vendor\basicsr-cache"
-        $basicsrTarball = Join-Path $basicsrCache "basicsr-1.4.2.tar.gz"
-        $basicsrSource = Join-Path $basicsrCache "basicsr-1.4.2"
-        New-Item -ItemType Directory -Force -Path $basicsrCache | Out-Null
-        if (-not (Test-Path $basicsrTarball)) {
-            Invoke-WebRequest -UseBasicParsing -OutFile $basicsrTarball -Uri "https://files.pythonhosted.org/packages/86/41/00a6b000f222f0fa4c6d9e1d6dcc9811a374cabb8abb9d408b77de39648c/basicsr-1.4.2.tar.gz"
-        }
-        $basicsrHash = (Get-FileHash $basicsrTarball -Algorithm SHA256).Hash
-        if ($basicsrHash -ne "B89B595A87EF964CDA9913B4D99380DDB6554C965577C0C10CB7B78E31301E87") {
-            Remove-Item $basicsrTarball -Force
-            throw "basicsr-1.4.2.tar.gz failed its SHA-256 check (got $basicsrHash) -- deleted it; rerun to download again."
-        }
-        if (Test-Path $basicsrSource) { Remove-TreeWithRetry $basicsrSource }
-        # Windows' own bsdtar by full path: a Git-for-Windows tar earlier on PATH reads "C:" as a host.
-        & (Join-Path $env:SystemRoot "System32\tar.exe") -xzf $basicsrTarball -C $basicsrCache
-        if ($LASTEXITCODE -ne 0) { throw "Extracting basicsr failed (exit code $LASTEXITCODE)." }
-        $patches = @(
-            @{ File = "setup.py"; Old = "        exec(compile(f.read(), version_file, 'exec'))`n    return locals()['__version__']"; New = "        ns = {}`n        exec(compile(f.read(), version_file, 'exec'), ns)`n    return ns['__version__']" },
-            # torch/numpy/cython are only needed to compile the optional CUDA extensions, which this
-            # build doesn't use; dropping them lets setup.py run without build isolation.
-            @{ File = "setup.py"; Old = "        setup_requires=['cython', 'numpy', 'torch'],`n"; New = "" },
-            @{ File = "basicsr\data\degradations.py"; Old = "from torchvision.transforms.functional_tensor import rgb_to_grayscale"; New = "from torchvision.transforms.functional import rgb_to_grayscale" }
-        )
-        foreach ($patch in $patches) {
-            $path = Join-Path $basicsrSource $patch.File
-            $text = [IO.File]::ReadAllText($path).Replace("`r`n", "`n")
-            if (-not $text.Contains($patch.Old)) { throw "basicsr patch target not found in $($patch.File)." }
-            [IO.File]::WriteAllText($path, $text.Replace($patch.Old, $patch.New))
-        }
+        # Install the patched basicsr first; the main install below then finds it satisfied.
+        $basicsrSource = Get-PatchedBasicsr
         $buildTools = @("setuptools")
         if (Test-Path $constraints) { $buildTools += @("-c", $constraints) }
         & $VenvPython -m pip install @buildTools
@@ -231,7 +250,47 @@ try {
     if ($selfTest.ExitCode -ne 0) { throw "PhotoStudio.exe --self-test failed (exit code $($selfTest.ExitCode)) -- see $SelfTestReport." }
     if ($BuildProfile -eq "gpu") {
         $report = Get-Content $SelfTestReport -Raw | ConvertFrom-Json
-        if (-not $report.capabilities.ai_upscale_installed) { throw "gpu profile build is missing the AI Upscale packages." }
+        if (-not $report.capabilities.ai_upscale_importable) { throw "gpu profile build can't import the AI Upscale packages." }
+    }
+
+    if ($GpuPack) {
+        # The pack: AI Upscale's packages installed with the same interpreter the base is frozen with
+        # (so their compiled modules match), into a plain folder, minus everything the base already
+        # bundles (scripts/gpu_pack_tools.py), with the gpu-pack.json manifest app/gpu_pack.py checks.
+        if (Test-Path $GpuPackRoot) { Remove-TreeWithRetry $GpuPackRoot }
+        $packSite = Join-Path $GpuPackDir "site-packages"
+        New-Item -ItemType Directory -Force -Path $packSite | Out-Null
+        $basicsrSource = Get-PatchedBasicsr
+        $wheelhouse = Join-Path $ProjectRoot "vendor\basicsr-cache\wheels"
+        New-Item -ItemType Directory -Force -Path $wheelhouse | Out-Null
+        & $VenvPython -m pip install setuptools wheel
+        if ($LASTEXITCODE -ne 0) { throw "Installing setuptools/wheel failed (exit code $LASTEXITCODE)." }
+        & $VenvPython -m pip wheel --no-build-isolation --no-deps -w $wheelhouse $basicsrSource
+        if ($LASTEXITCODE -ne 0) { throw "Building the patched basicsr wheel failed (exit code $LASTEXITCODE)." }
+        # --only-binary basicsr: the patched wheel above, never PyPI's unpatched sdist.
+        $packInstall = @("install", "--target", $packSite, "--find-links", $wheelhouse, "--only-binary", "basicsr", "-r", "requirements-gpu-pack.txt")
+        $gpuConstraints = Join-Path $ProjectRoot "constraints-gpu.txt"
+        if (Test-Path $gpuConstraints) { $packInstall += @("-c", $gpuConstraints) }
+        if ($ExtraIndexUrl) { $packInstall += @("--extra-index-url", $ExtraIndexUrl) }
+        & $VenvPython -m pip @packInstall
+        if ($LASTEXITCODE -ne 0) { throw "Installing the GPU pack failed (exit code $LASTEXITCODE)." }
+        & $VenvPython (Join-Path $ProjectRoot "scripts\gpu_pack_tools.py") finalize --pack $GpuPackDir --base-constraints (Join-Path $ProjectRoot "constraints-cpu.txt") --app-version $Version
+        if ($LASTEXITCODE -ne 0) { throw "Finishing the GPU pack failed (exit code $LASTEXITCODE)." }
+
+        # The base exe must find and use the pack: the same self-test, pointed at the new pack.
+        if (Test-Path $GpuPackSelfTestReport) { Remove-Item $GpuPackSelfTestReport -Force }
+        $env:PHOTO_STUDIO_GPU_PACK = $GpuPackDir
+        try {
+            $packTest = Start-Process -FilePath (Join-Path $ReleaseFolder "PhotoStudio.exe") -ArgumentList @("--self-test", "--self-test-report", "`"$GpuPackSelfTestReport`"") -Wait -PassThru
+        } finally {
+            Remove-Item Env:PHOTO_STUDIO_GPU_PACK -ErrorAction SilentlyContinue
+        }
+        if (Test-Path $GpuPackSelfTestReport) { Get-Content $GpuPackSelfTestReport | Write-Host }
+        if ($packTest.ExitCode -ne 0) { throw "PhotoStudio.exe --self-test with the GPU pack failed (exit code $($packTest.ExitCode))." }
+        $packReport = Get-Content $GpuPackSelfTestReport -Raw | ConvertFrom-Json
+        if (-not $packReport.capabilities.gpu_pack.active -or -not $packReport.capabilities.ai_upscale_importable) {
+            throw "The base build did not pick up the GPU pack -- see $GpuPackSelfTestReport."
+        }
     }
 
     if ($Sign) {
@@ -248,7 +307,7 @@ try {
     if ($SkipArchive) {
         # An archive left over from an earlier build no longer matches release\ -- remove it rather
         # than leave a stale copy that looks like this build's.
-        foreach ($stale in @($Archive, $hashPath)) {
+        foreach ($stale in @($Archive, $hashPath, $GpuPackArchive, "$GpuPackArchive.sha256")) {
             if (Test-Path $stale) { Remove-Item $stale -Force; Write-Host "Removed stale $stale" }
         }
         Write-Host "Skipping 7z archive (-SkipArchive)."
@@ -259,10 +318,20 @@ try {
         (Get-FileHash $Archive -Algorithm SHA256).Hash | Set-Content $hashPath
         Write-Host "Release archive: $Archive"
         Write-Host "SHA-256 file: $hashPath"
+        if ($GpuPack) {
+            if (Test-Path $GpuPackArchive) { Remove-Item $GpuPackArchive -Force }
+            # Archived from release-gpu-pack\, so it extracts as a gpu-pack\ folder to drop next to
+            # PhotoStudio.exe.
+            & $sevenZip.Source a -t7z -mx=7 -m0=lzma2 -ms=on $GpuPackArchive (Join-Path $GpuPackRoot "*")
+            if ($LASTEXITCODE -ne 0) { throw "7z (GPU pack) failed (exit code $LASTEXITCODE)." }
+            (Get-FileHash $GpuPackArchive -Algorithm SHA256).Hash | Set-Content "$GpuPackArchive.sha256"
+            Write-Host "GPU pack archive: $GpuPackArchive"
+        }
     } else {
         Write-Warning "7z was not found. The unpacked build is ready at $ReleaseFolder."
     }
     Write-Host "Release folder: $ReleaseFolder"
+    if ($GpuPack) { Write-Host "GPU pack folder: $GpuPackDir" }
 
     if ($Installer) {
         $iscc = Get-Command iscc -ErrorAction SilentlyContinue

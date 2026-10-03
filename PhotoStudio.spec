@@ -18,13 +18,35 @@ for package in ["streamlit", "pywebview"]:
     hiddenimports += package_hiddenimports
 
 hiddenimports += collect_submodules("app")
+
+# The optional GPU pack (K5, app/gpu_pack.py) is imported from a folder outside this bundle, so the
+# frozen base must already carry every standard-library module torch & co. might import -- the
+# app's own analysis only bundles the ones the app uses. Bundle the whole stdlib (a few MB) except
+# GUI/test/developer-only parts.
+import sys
+
+_STDLIB_SKIP = {"tkinter", "turtle", "turtledemo", "idlelib", "test", "ensurepip", "lib2to3", "pydoc_data", "venv", "__phello__", "antigravity", "this"}
+for _name in sorted(sys.stdlib_module_names):
+    if _name in _STDLIB_SKIP:
+        continue
+    try:
+        _spec = importlib.util.find_spec(_name)
+    except (ImportError, ValueError):
+        continue
+    if _spec is None:
+        continue
+    if _spec.submodule_search_locations:
+        hiddenimports += collect_submodules(_name, filter=lambda module: ".test" not in module and ".idle_test" not in module)
+    else:
+        hiddenimports.append(_name)
 # ("app", "app") also carries app/assets/ (the sample photo and the YuNet face-detection model
 # app/portrait_tools.py loads). The Streamlit config is bundled for standalone runs from the
 # release folder; the desktop launcher passes the same settings as command-line flags anyway
 # (app/desktop.py::_streamlit_server_flags), since its children run in the per-user data folder.
 datas += [("app", "app"), (".streamlit/config.toml", ".streamlit")]
 
-# Optional AI Upscale deps (requirements-gpu.txt). Only bundled when the interpreter running
+# Optional AI Upscale deps (requirements-gpu.txt) -- the all-in-one gpu profile only; the default
+# release ships them as the separate GPU pack instead. Only bundled when the interpreter running
 # PyInstaller actually has them -- a plain requirements.txt build is unchanged. basicsr and
 # realesrgan both build their architecture/dataset registries by scandir()-ing their own package
 # folders for *_arch.py/*_dataset.py files at import time, so their .py sources must exist on disk

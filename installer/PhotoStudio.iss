@@ -6,6 +6,12 @@
 #endif
 #define MyAppPublisher "Photo Studio"
 #define MyAppExeName "PhotoStudio.exe"
+; The optional GPU pack (AI Upscale's torch/Real-ESRGAN stack, app/gpu_pack.py) becomes an optional
+; component when build_release.ps1 -GpuPack has built it next to this repo's release folder.
+#define GpuPackManifest AddBackslash(SourcePath) + "..\release-gpu-pack\gpu-pack\gpu-pack.json"
+#if FileExists(GpuPackManifest)
+  #define WithGpuPack
+#endif
 
 [Setup]
 AppId={{A8D8F2C7-0F0A-4EB4-9A4F-5E4A42BC0C6D}
@@ -25,6 +31,17 @@ UninstallDisplayIcon={app}\PhotoStudio.exe
 ; .photoproject association below writes to HKA (per-machine when installed for all users).
 ChangesAssociations=yes
 
+#ifdef WithGpuPack
+[Types]
+Name: "base"; Description: "Photo Studio (CPU)"
+Name: "full"; Description: "Photo Studio with the GPU pack (AI Upscale)"
+Name: "custom"; Description: "Custom"; Flags: iscustom
+
+[Components]
+Name: "main"; Description: "Photo Studio"; Types: base full custom; Flags: fixed
+Name: "gpupack"; Description: "GPU pack: AI Upscale with Real-ESRGAN (several GB, an NVIDIA GPU recommended)"; Types: full
+#endif
+
 [Tasks]
 Name: "assocproject"; Description: "Open .photoproject files with Photo Studio"; GroupDescription: "File associations:"
 
@@ -40,18 +57,22 @@ Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project\shell\open\command"; Va
 ; WebView2Runtime -- packaging that left the installed app unable to open its window on any PC
 ; without the Evergreen WebView2 Runtime, the exact case the bundled copy exists for.
 Source: "..\release\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+#ifdef WithGpuPack
+; Lands as {app}\gpu-pack, where the app looks for it (app/gpu_pack.py).
+Source: "..\release-gpu-pack\gpu-pack\*"; DestDir: "{app}\gpu-pack"; Components: gpupack; Flags: recursesubdirs createallsubdirs ignoreversion
+#endif
 
 [Icons]
 Name: "{group}\Photo Studio"; Filename: "{app}\PhotoStudio.exe"
 Name: "{autodesktop}\Photo Studio"; Filename: "{app}\PhotoStudio.exe"
 
 [Code]
-; Settings, presets, the library catalog and logs live in %LOCALAPPDATA%\PhotoStudio (app.config.
-; user_data_dir()). They are kept on uninstall unless the user agrees here.
+// Settings, presets, the library catalog and logs live in %LOCALAPPDATA%\PhotoStudio
+// (app.config.user_data_dir()). They are kept on uninstall unless the user agrees here.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
-    if MsgBox('Also delete your Photo Studio presets, catalog, downloaded models and logs (' + ExpandConstant('{localappdata}\PhotoStudio') + ')?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+    if MsgBox('Also delete your Photo Studio presets, catalog, downloaded models, logs and any GPU pack kept there (' + ExpandConstant('{localappdata}\PhotoStudio') + ')?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
       DelTree(ExpandConstant('{localappdata}\PhotoStudio'), True, True, True);
 end;
 
