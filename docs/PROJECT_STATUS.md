@@ -3,7 +3,7 @@
 ## Architecture
 
 ```text
-Streamlit frontend (app/frontend_unified_app.py; editor HTML in app/ui_editors.py)
+Streamlit frontend (app/frontend_unified_app.py + the app/ui/ package; editor HTML in app/ui_editors.py)
         |  HTTP (multipart POST /process, JSON options, X-Photo-Token)
         v
 Flask processing backend (app/backend.py, 127.0.0.1, waitress when installed)
@@ -12,25 +12,33 @@ Flask processing backend (app/backend.py, 127.0.0.1, waitress when installed)
 app/pipeline.py::run_pipeline()  ->  PhotoProcessor + feature modules (app/geometry.py, ...)
         |
         v
-Pillow / NumPy / OpenCV / tifffile / optional rawpy / optional torch (AI Upscale only)
+Pillow / NumPy / OpenCV / tifffile / optional rawpy / optional torch (GPU pack: AI Upscale and opt-in export resize/sharpen)
 ```
 
-The frontend never edits images in-process: each tab captures control values into an `options`
-dict, and `app/backend_client.py` sends the source (or a 2048 px proxy for a large photo) plus mask,
+The frontend never edits images in-process: `app/frontend_unified_app.py` (about 240 lines, the
+only Streamlit entry point) composes the panels in `app/ui/` (`tabs/`, `canvas.py`, `export_panel.py`,
+`selections.py`, `layers.py`, `processing.py`, ...). Each panel records its widgets' values in an
+`EditorContext`, and the options are built from them through the one control registry,
+`app/controls.py::CONTROLS` (which also generates the widgets, the recipe sanitizer, the
+control-backed option specs and the stage split). The frontend and `app/backend_client.py` sends the source (or a 2048 px proxy for a large photo) plus mask,
 per-mask and layer payloads to `/process`. The step order lives only in
 `app/pipeline.py::run_pipeline()`: ICC -> sRGB, Geometry (rotate/flip, Lens, straighten, constrain
 crop -- `app/geometry.py`), Tone (+ preset), Color, Detail | Repair, Layers, Masks (shared mask, then
 per-selection adjustment sets), Portrait, Crop, Effects, AI Upscale. The backend, the CLI and both
 batch paths call it; options are validated by `app/edit_schema.py::parse_options()`.
 
-The frontend caches the two halves separately (`_cached_process_through_detail()` /
-`_cached_process_from_repair_onward()`); the backend keeps recent Stage 1 results so Stage 2 sends a
+The frontend caches the two halves separately (`app.ui.processing.cached_process_through_detail()` /
+`cached_process_from_repair_onward()`); the backend keeps recent Stage 1 results so Stage 2 sends a
 handle instead of the image. Interactive requests carry the Streamlit session and a generation, and the
 backend abandons a superseded render between steps. `PhotoProcessor` is still used locally only to
 decode the upload, to build mask geometry against the geometry-corrected source
-(`_lens_corrected_source()`, i.e. `app.geometry.apply_geometry()`), and for the Portrait tab's face
-count. The tool tabs are created with `on_change="rerun"`, and display-only work in hidden tabs is
-skipped (`_TAB_VISIBLE`); their widgets still render every run.
+(`lens_corrected_source()`, i.e. `app.geometry.apply_geometry()`), and for the Portrait face count.
+The nine tool tabs (grouped by workflow: Basic, Curves & Color, Detail, Geometry, Local, Layers,
+Effects, Export, Presets & Library) are created with `on_change="rerun"`, and display-only work in
+hidden tabs is skipped (`app.ui.state.tab_visible()`); their widgets still render every run. The
+canvas view and the scopes are `st.fragment`s, so panning or toggling a scope reruns only them.
+Logging is configured only by the entry points (backend `serve()`, desktop, CLI, the Streamlit
+script) into `logs/<component>.log` in the user data folder.
 
 `app/desktop.py` picks free ports and a per-launch backend token, starts the backend and waits for
 `/health`, then the Streamlit child, inside a pywebview window; a second launch focuses the first.
@@ -56,8 +64,19 @@ Earlier development iterations used additional per-feature Streamlit entry point
 ```text
 release/PhotoStudio.exe
 release/WebView2Runtime/   -- bundled Fixed Version WebView2 Runtime, see docs/CHANGELOG.md
-PhotoStudio-0.1.0-Windows.7z (+ .sha256)   -- the distributable, built from release/
+PhotoStudio-0.1.0-Windows.7z (+ .sha256)   -- the distributable CPU base, built from release/
+release-gpu-pack/gpu-pack/ -- the optional GPU pack (-GpuPack): torch for AI Upscale/export transforms, Real-ESRGAN
+PhotoStudio-0.1.0-GPU-pack.7z (+ .sha256)  -- extracts as gpu-pack/, to put next to PhotoStudio.exe
 ```
+
+The release is split (K5): the CPU base package carries the app without PyTorch, and the optional
+GPU pack carries torch (for AI Upscale and opt-in CUDA export resize/sharpen) plus Real-ESRGAN's
+packages and a `gpu-pack.json` manifest (Python version, torch version). `app/gpu_pack.py` looks for
+it in `$PHOTO_STUDIO_GPU_PACK`, next to the exe, then in the
+user data folder, checks the manifest and appends its `site-packages` to `sys.path` (the base's own
+packages stay first). The base bundles the whole standard library so the pack's packages can import
+what they need. The installer offers the pack as an optional component when it was built;
+`-BuildProfile gpu` still builds the older all-in-one folder.
 
 `scripts/build_release.ps1` cleans up after itself: PyInstaller's output is moved into `release/` (no second version-named copy anymore), and `build-release/`/`dist-release/` are deleted after a successful build (`-KeepBuildFiles` keeps them). Rebuild with `scripts/build_release.ps1`. Older release notes under `docs/workflows/desktop-exe/` (`current-all-features.md`, `latest-release.md`, `all-features-release.md`, `global-release.md`) reference earlier `dist-*` folder names and test counts from previous builds — they are historical and do not describe the current release.
 
@@ -75,6 +94,36 @@ the window uses the bundled `WebView2Runtime`, and a second launch exits in unde
 starting servers. The startup-failure dialog was checked by reading the code only, not by triggering it.
 Real CUDA Real-ESRGAN with 12 forced tiles matched an untiled run (PSNR 59 dB, no seams, no NaNs). The
 Inno Setup installer and the GitHub workflows have not been run.
+
+Clean-up round, 2026-10-02: a scratch PyInstaller build of the CPU base (from a fresh venv, outside
+`release/`; 331 MB / 2,585 files without WebView2) passed `--self-test`, and with
+`PHOTO_STUDIO_GPU_PACK` pointing at a pack folder whose `site-packages` was the dev venv's (CUDA torch,
+Real-ESRGAN) it found the pack and really imported torch + Real-ESRGAN (`ai_upscale_importable`). A
+full `build_release.ps1 -GpuPack` (CUDA torch download, pip `--target`, pruning) and the installer's
+GPU-pack component were not run; the pack finishing step is covered by `tests/test_gpu_pack.py`.
+
+### Streamlit upgrades
+
+`requirements.txt` pins `streamlit>=1.64.0,<2` and `constraints-cpu.txt` the exact version. Raising
+it means checking, in a real browser (`streamlit run app/frontend_unified_app.py`, desktop window
+too), the rules in `app/ui/static/theme.css` marked "Streamlit DOM" and the behaviours the app relies
+on:
+
+1. The default header/footer stay hidden and the page padding is unchanged.
+2. The nine tool tabs wrap onto a second row instead of scrolling (`[data-testid="stTab(s)"]`).
+3. At a window under 900 px the canvas column moves above the tools
+   (`.st-key-workspace-split > stLayoutWrapper > stHorizontalBlock > stColumn`), and rows nested
+   inside the canvas column (the header bar, the Save row) do not reorder.
+4. The editors' hidden commit text_areas stay invisible (`.st-key-*-hidden`, `[class*="-paint-hidden"]`)
+   and a commit still lands: drag the curve, paint and add a selection, drag the crop box, click the
+   white-balance picker, add Pen points, drag-pan at 200 %.
+5. Tab switching still reports `.open` (hidden tabs skip thumbnails/face detection), the Local and
+   Presets & Library sub-tabs too; keyed expanders keep their open state when a "●" mark appears.
+6. Fragments: panning at 200 % and toggling the waveform/clipping scopes rerun only the canvas; the
+   refine-on-pause status line still swaps in the full-resolution render.
+7. `shortcut=` buttons (Ctrl+Z, Ctrl+Shift+Z, Ctrl+E, Z, B, G) and the Library's 1-5/0/X/arrow keys.
+8. The `--ps-*` colours: header, canvas background, export footer, and the editors' panels/handles.
+9. Then run the whole suite (AppTest catches API changes, not layout ones).
 
 ## History
 
@@ -107,9 +156,17 @@ The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).
   Tone/Color result (that intermediate image only exists on the backend).
 - Film grain is unseeded, so two exports of the same settings don't carry an identical grain pattern
   (deliberate); it is generated on a fixed-size grid so it looks the same in the preview and the export.
-- The Export panel is an expander, not an `st.dialog` (a dialog's widgets only exist while it's open,
-  which would drop their state between reruns), and offers sRGB output only -- Display P3 would need a
-  bundled P3 ICC profile.
+- Export settings live in the ⬇ Export tab, not an `st.dialog` (a dialog's widgets only exist while
+  it's open, which would drop their state between reruns), and offer sRGB output only -- Display P3
+  would need a bundled P3 ICC profile.
+- Fragment-only reruns (panning, scopes) can't be exercised by AppTest, which always reruns the whole
+  script; they are covered by full-run tests plus a manual browser check. Streamlit's `persist_state=`
+  was evaluated as a way to stop rendering hidden widgets (e.g. one HSL band at a time) and not
+  adopted: under AppTest a persisted value was not restored when the widget reappeared and was lost
+  after an unrelated rerun.
+- The on-canvas editors are still Python f-string HTML builders (`app/ui_editors.py`), not static
+  component folders, and still commit through the hidden text_area channel rather than Streamlit's
+  bidirectional component API (F14's remaining part).
 - On-canvas editors take the keyboard (F11): arrow keys nudge the focused crop corner/box, Pen
   anchor (Alt: its handle; Delete removes it), curve point and the last radial/gradient; [ / ] size
   the brush; the zoomed canvas pans by drag or arrows (F3). Their JavaScript is exercised under Node
@@ -130,9 +187,9 @@ The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).
 - Layer Styles (Drop Shadow/Outer Glow/Stroke/Color Overlay) produce no visible effect on a layer that's fully opaque across the entire canvas (e.g. an uploaded photo used as a same-size overlay with no transparency) -- there's no "outside the shape" area within the canvas for a shadow/glow/stroke to occupy, and the layer's own opaque content covers whatever's drawn behind it regardless. This matches Photoshop's own behavior for the same underlying reason, not a defect specific to this implementation; it's meaningful on Text and Shape layers (which have real transparent padding) and on an Image layer with actual transparency (e.g. a PNG cutout).
 - Clicking "➕ Add Path Layer" doesn't reset the Closed Path checkbox back to unchecked for the next new path being drafted (see docs/CHANGELOG.md for why -- it's the checkbox's own widget key, which can't be written to directly). A minor carry-over, not a correctness issue: it only affects the *next* path's starting checkbox state, not any already-added layer.
 - ICC soft-proofing targets this app's own sRGB working space, not a real printer/press profile -- there's no profile database or bundled `.icc` file (see docs/CHANGELOG.md), the same limitation already true of Lens Profiles above.
-- The denoise algorithm (Non-Local Means, via OpenCV) is a real, meaningful upgrade over the flat median filter it replaced, but it is classical/non-learned, not a neural network -- see docs/CHANGELOG.md for why, given this app's CPU-first, no-GPU-dependency, no-heavy-new-dependency constraints.
+- The denoise algorithm (Non-Local Means, via OpenCV) is a real, meaningful upgrade over the flat median filter it replaced, but it is classical/non-learned, not a neural network -- see docs/CHANGELOG.md for why, given this app's CPU-first edit pipeline and no-heavy-new-dependency constraints. CUDA export transforms are a separate, optional final-output acceleration and do not change how denoise or other edits run.
 - Lens corrections aren't calibrated to any specific camera/lens model — there's no real profile database (see docs/CHANGELOG.md); `LENS_PROFILES`'s entries are generic starting points by lens category, not anything matched against a photo's actual EXIF lens metadata (which isn't read at all currently).
-- The HSL Color Mixer's "always render all 8 bands" fix for Streamlit's widget-garbage-collection-on-non-instantiation bug is architecturally different from `_request_rerun()`/`_rerun_pending` and the hidden-textarea commit pattern (both now sharing `_consume_new_commit()`, see docs/CHANGELOG.md) — an unconditional-rendering strategy rather than a guarded session_state write, so it isn't a natural fit for that same helper. Unifying it would mean redesigning how that panel renders, which is deliberately left as-is rather than forced.
+- The HSL Color Mixer still renders all 8 bands (collapsed, keyed expanders) on every run: a widget that isn't rendered loses its state, and `persist_state=` didn't hold up as the fix (see above). `request_rerun()` and the hidden-textarea commit guard (`consume_new_commit()`) are the other two state helpers, all in `app/ui/state.py`.
 - Face detection uses YuNet via `cv2.FaceDetectorYN`; an OpenCV build with neither it nor the Haar cascade reports "no detector" in System Health and the Portrait tab instead of a misleading 0. Skin smoothing is still a global skin-hue mask, not limited to detected faces.
 - Microsoft Edge WebView2 Runtime is required for the native desktop window.
 - The Library Catalog's keyboard shortcuts (rate/reject/navigate) only work while a real browser tab has the page focused — they reach into `window.parent.document` from a `components.html()` iframe, which `streamlit.testing.v1.AppTest` (a headless harness with no real DOM/JS) can't exercise, so that part is only covered by live manual verification, not the automated suite. The same limitation now also applies to the draggable free-form crop rectangle and the tone curve's click-to-add/drag/double-click-to-remove extra points — their JS interactions are covered by live verification and by driving the hidden commit field directly (the same wiring a real interaction ultimately depends on), not by an automated test that simulates an actual drag or double-click.
@@ -148,4 +205,4 @@ The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).
 - The tone curve's "extra" points can be added and dragged freely in both X and Y, but there's no visual warning while dragging one directly onto another point's exact X — the collision is only caught and silently resolved (the earlier-sorted point wins, the later one is dropped) when the curve is actually applied, in `app.recipe_options.merge_curve_points()`.
 - Post-Crop Vignette and the Lens tab's corrective vignette are independent controls that both run in the same pipeline (Lens's before Crop, Effects' after) — using both at once stacks their darkening/brightening rather than one overriding the other, which is the expected behavior for two conceptually different tools but can look like "double vignetting" if not intentional.
 - "Color Noise" has no effect while Denoise is 0 (the slider is disabled to make this visible) — it's a modifier to Non-Local Means' existing `hColor` parameter, not an independent chroma-only denoise pass, so it can't run without Denoise also being nonzero.
-- **AI Upscale (`app/ai_upscale.py`) is a deliberate, explicitly-scoped exception to this app's otherwise CPU-first, no-ML-dependency design** — every other "AI-ish" feature in this app (denoise, dehaze, lens corrections) was kept classical specifically because a real learned model needs a heavy new dependency (PyTorch) and runs meaningfully slower without a GPU (see the denoise entry above and docs/CHANGELOG.md for that reasoning in full). Real-ESRGAN was chosen anyway for this one feature because upscaling — unlike denoise/dehaze/lens-correction, which run on every edit of every photo — is an opt-in, occasional, expensive operation the user explicitly asks for once per export, so the CPU-first constraint's main justification (every edit round-trips through the backend on every slider nudge, per "Architecture" above) doesn't apply to it the same way. It is entirely optional: `torch`/`realesrgan` are never installed by `requirements.txt`/CI, only by the new `requirements-gpu.txt`; `app.ai_upscale.ai_upscale_available()` reports `False` (never raises) when they aren't importable, and the Export settings panel hides the control (showing "Install requirements-gpu.txt to enable AI Upscale on export" instead) in that case, so the rest of the app is completely unaffected on a machine without these packages. When available, it auto-detects CUDA (`torch.cuda.is_available()`) and uses float16 on GPU / float32 on CPU, the same device-selection pattern the sibling PixelFlow project already uses — confirmed against `torch==2.14.0+cu130` on an RTX 5080. Applied last in `app/backend.py::process_image()`'s pipeline (after Effects), since it upscales the final composited/edited result rather than being redone at the original resolution by a later step.
+- **AI Upscale (`app/ai_upscale.py`) is a deliberate, explicitly-scoped learned-processing exception to this app's otherwise CPU-first, no-ML-dependency design** — denoise, dehaze and lens corrections remain classical, and the edit pipeline still runs on CPU. Real-ESRGAN was chosen for upscaling because it is opt-in and occasional. It is entirely optional: `torch`/`realesrgan` are never installed by `requirements.txt`/CI, only by `requirements-gpu.txt`; `app.ai_upscale.ai_upscale_available()` reports `False` when they are not importable, and the Export tab explains how to get them. Separately, `app.gpu_export` optionally uses CUDA via PyTorch for final resize/output sharpening; it is opt-in, lazy-loaded, keeps encoding on CPU, and logs/falls back to the CPU transform if CUDA is unavailable or fails. When available, AI Upscale auto-detects CUDA and uses float16 on GPU / float32 on CPU, and is applied last in `app/backend.py::process_image()` after Effects.

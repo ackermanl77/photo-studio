@@ -10,9 +10,7 @@ Next integration step: expose a Layers panel in the Streamlit frontend and send 
 
 ## Healing and clone repair
 
-`heal_patch()` provides a CPU-friendly patch repair operation using OpenCV seamless cloning. It is intended for blemishes and small distractions, not large scene reconstruction.
-
-Next integration step: add source/target brush selection and preview in the frontend.
+Not implemented. An unused `heal_patch()` prototype (OpenCV seamless cloning) was removed as dead code (B12); a spot heal/clone tool would be rebuilt with a painted source/target UI (F13). Repair (inpainting) covers object removal today.
 
 ## Preview performance
 

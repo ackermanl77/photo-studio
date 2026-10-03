@@ -3,6 +3,84 @@
 Fix history moved out of `docs/PROJECT_STATUS.md` (which now holds only the current architecture
 and open issues). Newest first.
 
+## 2026-10-02 -- clean-up and polish items (F15, F14, F1, B12, R2, P5, T7, K5, F9, F12)
+
+`tests/test_ui_structure.py`, `tests/test_gpu_pack.py` and new tests in `tests/test_observability.py`
+and `tests/test_project.py` cover these. No golden image changed. Suite: 620 passed / 11 skipped in
+137 s before; 631 passed / 11 skipped in 77 s after (`.venv`), and in a fresh venv without
+torch 630 passed / 12 skipped in 67.7 s serially vs 12.7 s with `-n auto` (24 logical CPUs).
+
+- **One control registry (F15).** `app/controls.py::CONTROLS` declares every recipe control once
+  (label, kind, range, step, default, help, section, recipe key, widget key, its option with stage,
+  transform and API domain, or the composite option it feeds). The widgets are generated from it
+  (`app/ui/widgets.py::render_control()`), and `RECIPE_WIDGET_KEYS`, `edit_schema.RECIPE_CONTROLS`,
+  the control-backed `OPTION_SPECS` entries (hence the stage split), `recipe_to_options()` and the
+  live editor's options (`controls_to_options()`, one mapping for both), `RECIPE_KEYS_NOT_IN_OPTIONS`
+  and the section reset buttons all derive from it. The derived tables were checked equal to the old
+  hand-written ones; every widget key is unchanged (pinned by a test). The AppTest check now compares
+  each rendered widget's key, label, range, step and default with the registry.
+- **The UI split into `app/ui/` (F14).** `app/frontend_unified_app.py` went from 3,285 lines to about
+  240 and stays the only Streamlit entry point; tabs are section functions in `app/ui/tabs/`, with
+  `canvas.py`, `export_panel.py`, `selections.py`, `layers.py`, `processing.py`, `project_io.py`,
+  `state.py` and a per-run `EditorContext`. The stylesheet and the Library shortcut script are static
+  files (`app/ui/static/`). Long history comments moved here. Side effect: caches are defined once per
+  process instead of once per rerun, which roughly halved the AppTest suite's time. Not done: the
+  on-canvas editors stay f-string builders in `app/ui_editors.py` (not static `index.html` files),
+  and Streamlit's bidirectional component API was not adopted -- the hidden text_area commit channel
+  is unchanged.
+- **Fragments (F1).** The canvas view (navigator, pan, image) and the scopes (histogram, waveform,
+  clipping) run as `st.fragment`s through `app.ui.state.run_fragment()`, so panning or toggling a
+  scope no longer reruns the tool panels; `request_rerun()` inside a fragment becomes a full rerun
+  when the fragment ends; each fragment gets a distinct identity (two in one container used to share
+  one). `persist_state=` was evaluated and not adopted (under AppTest a hidden widget's persisted
+  value wasn't restored and was later dropped), so the "always render" rule and `request_rerun()`
+  stay.
+- **Dead code removed (B12).** `app/cached_processing.py`, `app/performance.py`,
+  `app/edit_stack.py`, `app/release_preflight.py`; `heal_patch`, `major_features.preview_image`,
+  `ColorSettings`, `apply_gamma_curve`, `save_16bit_tiff`, `profile_export`,
+  `PhotoProcessor.apply_white_balance`, `validate_project_bytes`, `save_for_delivery`,
+  `RequestReport`, `overall_status`, and unused imports; their tests and the workflow docs about
+  them. `app/project.py` (the v1 writer, used only by tests) moved to `tests/legacy_project.py`;
+  `ProjectBundle.load()` still opens v1 files (new test).
+- **Logging only from entry points (R2).** Importing `app.backend` no longer opens a log file. Modules
+  log through `app.observability.get_logger()`; the backend's `serve()`, the desktop launcher, the CLI
+  and the Streamlit script call `configure_logging("<component>")`, which writes
+  `logs/<component>.log` (rotating JSON) in the user data folder -- one file per process kind. The
+  desktop launcher also logs a startup failure there.
+- **Painted masks stored once (P5).** A painted selection keeps a content hash (`mask_ref`) and the
+  PNG lives once per session (`app/painted_masks.py`), so 200 Undo steps no longer copy every
+  painting; the same painting in Masks and Repair is one entry. Presets and projects are saved with
+  the masks inlined (file format unchanged); restored ones are interned.
+- **Faster tests (T7).** `pytest-xdist` in `requirements-dev.txt` and the dev extra; CI runs
+  `pytest -n auto`. The suite was already xdist-safe (per-test data folders, port 0 only); the
+  conftest now also closes log handlers a test's entry point opened.
+- **CPU base + optional GPU pack (K5).** `scripts/build_release.ps1 -GpuPack` builds the CPU base
+  plus `release-gpu-pack\gpu-pack\` (AI Upscale's packages from `requirements-gpu-pack.txt`, installed
+  with the build interpreter, pruned of everything the base ships by `scripts/gpu_pack_tools.py`, with
+  a `gpu-pack.json` manifest), archives it as `PhotoStudio-<version>-GPU-pack.7z`, and re-runs the
+  base exe's `--self-test` against it. `app/gpu_pack.py` finds a pack (`$PHOTO_STUDIO_GPU_PACK`, next
+  to the exe, or in the user data folder), refuses one built for another Python with a reason, and
+  appends its `site-packages` to `sys.path`. The base bundles the whole standard library so the
+  pack's packages find what they import. The self-test now really imports torch/Real-ESRGAN when
+  present (`ai_upscale_importable`); System Health shows the pack. The installer offers the pack as
+  an optional component when it exists; the release workflow can build it on a manual run (as an
+  artifact -- it can exceed GitHub's 2 GB release-asset limit). `-BuildProfile gpu` (all-in-one)
+  remains. Verified with a scratch PyInstaller build (331 MB without WebView2): the frozen base
+  imported torch + Real-ESRGAN from an external pack folder. A full `-GpuPack` build (CUDA torch
+  download) and the installer were not run.
+- **Tabs grouped by workflow, with "modified" marks (F9).** Eleven tabs became nine: ☼ Basic (Auto
+  Enhance, preset look, Tone, Color, Presence), 🎨 Curves & Color, 🔬 Detail, ⛶ Geometry (rotate,
+  Lens, Crop), ◉ Local (sub-tabs Masks/Repair/Portrait), ◈ Layers, ✨ Effects, ⬇ Export (export
+  settings, watermark, AI Upscale, export multiple sizes, Save Project -- moved out of the canvas
+  column and the Presets tab) and ✦ Presets & Library. Every section shows "● modified" while a
+  control differs from its default; section expanders are keyed so the mark doesn't collapse them.
+  New reset buttons for Presence and Crop. The custom crop ratio fields now always render (disabled
+  unless "Custom"), so their values survive switching ratios. Widget keys are unchanged.
+- **CSS variables and the Streamlit upgrade checklist (F12).** Colours are defined once
+  (`app/ui/theme.py::THEME`) as `--ps-*` variables; `app/ui/static/theme.css` and every on-canvas
+  editor (SVG strokes via `style=`) use `var(--ps-...)` only. Streamlit stays pinned `>=1.64,<2`;
+  `docs/PROJECT_STATUS.md` has the upgrade smoke checklist for the DOM-dependent rules.
+
 ## 2026-10-02 -- remaining "important" roadmap items (P1, F3, F11, B4)
 
 `tests/test_interaction_improvements.py` and `tests/test_high_bit.py` cover these. No golden image

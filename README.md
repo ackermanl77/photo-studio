@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/ackermanl77/photo-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/ackermanl77/photo-studio/actions/workflows/ci.yml)
 
-A CPU-first Python photo editor with a Streamlit interface, Windows desktop packaging, RAW import, layers, masks, presets, catalog tools, batch export, project sessions, and diagnostics.
+A CPU-first Python photo editor with a Streamlit interface, Windows desktop packaging, RAW import, layers, masks, presets, catalog tools, batch export, project sessions, and diagnostics. An optional CUDA path can accelerate final export resizing and sharpening; the edit pipeline and file encoders remain CPU-based.
 
 ## Current Status
 
@@ -34,7 +34,7 @@ python -m streamlit run app/frontend_unified_app.py
 
 `app/frontend_unified_app.py` is currently the **only** Streamlit entry point in the project. Earlier "specialized workspace" scripts (`frontend_project.py`, `frontend_layers.py`, `frontend_masking.py`, `frontend_batch.py`, `frontend_library_editor.py`, `frontend_portrait.py`, `frontend_release.py`, and others) were consolidated into it during development and no longer exist. If you find them mentioned elsewhere in `docs/workflows/`, that's a historical development note, not a current instruction — see the notice at the top of `docs/workflows/README.md`.
 
-The unified workspace includes Tone, Color, Detail, Layers, Masks, Portrait, and Presets tabs, plus a "More" tab for Library, Batch, and Diagnostics. The layout keeps the preview central with the tool tabs on the left.
+The unified workspace groups its tools by workflow in nine tabs -- ☼ Basic, 🎨 Curves & Color, 🔬 Detail, ⛶ Geometry, ◉ Local (Masks, Repair, Portrait), ◈ Layers, ✨ Effects, ⬇ Export and ✦ Presets & Library (Library, Batch, System Health) -- with a "● modified" mark on every section you have changed. The tool tabs sit on the left, the preview and the Save button on the right.
 
 ## Desktop App
 
@@ -53,18 +53,29 @@ Rebuild:
 
 The release script builds from a fresh virtual environment (`build-venv\<profile>`, pinned by `constraints-<profile>.txt`, `-BuildProfile cpu|gpu`), verifies the bundled WebView2 runtime's SHA-256, runs `PhotoStudio.exe --self-test`, and supports optional signing (`-Sign -CertificateThumbprint <sha1>`), 7-Zip compression, SHA-256 checksums, and the Inno Setup installer (`-Installer`).
 
+**CPU base + optional GPU pack.** The default release is the CPU base package (no PyTorch).
+`-GpuPack` (with `-ExtraIndexUrl https://download.pytorch.org/whl/cu130`) also builds the
+optional **GPU pack** for AI Upscale and export transforms (`release-gpu-pack\gpu-pack\`,
+archived as `PhotoStudio-<version>-GPU-pack.7z`), containing torch/Real-ESRGAN and their
+dependencies beyond the base; the build also re-runs the base exe's self-test against it. Users
+extract it next to `PhotoStudio.exe` and restart; the installer offers it as an optional component
+when it was built. In the Export tab, **Use GPU for export
+resize/sharpen** opts into CUDA with automatic CPU fallback. The CLI equivalent is
+`python -m app --input photo.jpg --output out.jpg --gpu-export`. Image encoding and the rest of the
+edit pipeline remain on the CPU. `-BuildProfile gpu` still produces the older all-in-one folder.
+
 **Or let CI build it for you**: pushing a tag like `v0.1.0` triggers `.github/workflows/release.yml`, which first runs the full test matrix and then runs this exact same script on a `windows-latest` runner and attaches `PhotoStudio-<version>-Windows.7z` + its `.sha256` to a new GitHub Release, plus keeps them as a build artifact on the workflow run either way. It can also be run on demand (Actions tab → "Release Build" → "Run workflow", enter a version) without needing a tag push or a real release at all, which just builds and uploads the artifact.
 
 **The native window needs Microsoft Edge WebView2 Runtime, and it's bundled — nothing to install on the target machine.** Confirmed missing on a second PC when the app was first tested there, so `build_release.ps1` now downloads a pinned "Fixed Version" copy of the WebView2 Runtime (cached under `vendor/webview2-cache/`, gitignored — first build needs internet access for this one-time ~300MB download) and copies it into the release folder as `WebView2Runtime`, a sibling of `PhotoStudio.exe`. `app/desktop.py` points pywebview at it via `webview.settings["WEBVIEW2_RUNTIME_PATH"]`, so the packaged app never depends on WebView2 being installed system-wide. Copy the whole `release` folder (or the `PhotoStudio-<version>-Windows.7z`) to another machine — extract and run, no installer, no Python. The one trade-off: a bundled Fixed Version copy doesn't auto-update with Chromium security patches the way a system install does, so `$WebView2Version` in `build_release.ps1` should be bumped deliberately every so often (see the comment above it for how to get a new version's download URL).
 
 `app/desktop.py` starts both the Streamlit frontend (`frontend_unified_app.py`) and the Flask processing backend (`app/backend.py`, on free local ports chosen per launch, with a per-launch access token) — the frontend sends its edit pipeline to the backend over HTTP rather than processing in-process. Running the frontend standalone (`streamlit run app/frontend_unified_app.py`, below) also works without `desktop.py`: the frontend starts the backend on demand the first time it's needed. See "Architecture" in `docs/PROJECT_STATUS.md` for the request flow and the latency trade-off that comes with it.
 
-There is currently no dedicated preflight UI. See [docs/workflows/secure-distribution/preflight.md](docs/workflows/secure-distribution/preflight.md) for how to run the preflight checks that exist today before building a release.
+The release script is its own preflight: it builds from a clean, pinned venv and refuses to finish unless the packaged `PhotoStudio.exe --self-test` passes; the release workflow additionally runs the whole CI test matrix first.
 
 ## Core Features
 
 - Exposure in EV (linear light, soft highlight roll-off), contrast, edge-aware highlights/shadows, temperature, tint, texture, local-contrast clarity, sharpening, and an image-adaptive "✨ Auto Enhance", all live in the unified UI. Rotate 90°, flip, straighten with auto-level and "constrain crop", plus a draggable free-form crop rectangle with numeric fields, a custom W:H ratio, or a named one.
-- Denoise via OpenCV's Non-Local Means — a real upgrade over a flat median filter (preserves edges/detail while smoothing noise), classical rather than a neural network (see `docs/PROJECT_STATUS.md` for why, given this app's CPU-first, no-GPU design). An independent "Color Noise" slider pushes chroma (color speckle) smoothing further than luminance/detail smoothing, without needing a second algorithm.
+- Denoise via OpenCV's Non-Local Means — a real upgrade over a flat median filter (preserves edges/detail while smoothing noise), classical rather than a neural network (see `docs/PROJECT_STATUS.md` for why, given this app's CPU-first edit pipeline). An independent "Color Noise" slider pushes chroma (color speckle) smoothing further than luminance/detail smoothing, without needing a second algorithm.
 - A draggable RGB tone curve — drag any of the 5 fixed Blacks/Shadows/Midtones/Highlights/Whites points vertically, or click an empty spot on the curve to add a fully free-form point (drag it anywhere, double-click to remove), or use the numeric sliders below it for exact values on the 5 fixed points.
 - Per-channel HSL color grading ("Color Mixer") — independent Hue/Saturation/Luminance adjustment for each of 8 named color bands (Red/Orange/Yellow/Green/Aqua/Blue/Purple/Magenta).
 - Vibrance — a smarter saturation boost than the plain Saturation slider: protects skin tones and already-saturated colors, pushing washed-out/pastel ones harder instead.
@@ -77,7 +88,7 @@ There is currently no dedicated preflight UI. See [docs/workflows/secure-distrib
 - Built-in presets with live thumbnail previews, plus custom presets you can save, load back onto a photo, delete, and export/import as a shareable `.json` file — a custom preset also gets its own live thumbnail preview (in "Load a Preset" and in the Batch Processor's preset picker), rendered by running its full recipe through the real pipeline on a small copy of the current photo. Saving captures the full set of adjustments (masks included), not just a handful of basic sliders.
 - Undo/Redo and a one-click Reset to defaults, always available in the bar above the canvas regardless of which tab is open, plus per-section "↺ Reset" buttons. Keyboard: Ctrl+Z / Ctrl+Shift+Z (undo/redo), Ctrl+E (save), Z (1:1 view), B (before/after), G (grid).
 - Combinable named masks (`app/advanced_masks.py::MaskStack`) — any number of Luminance/Color/gradient/Radial/Painted/Magic Wand selections, each with opacity/invert/soften, combined by add/subtract/intersect into one target adjustment — or each with its own adjustment set (exposure, contrast, saturation, clarity, temperature, tint). "Painted" selections are made on-canvas — freehand brush (with an eraser), a drag-out radial, or a drag-out gradient — instead of typing in parameters, and can be reopened later for a second pass at the canvas ("🎨 Edit Painting") instead of only delete-and-repaint; "Magic Wand" is a single click that samples a color and selects similar pixels around it.
-- Creative "✨ Effects" — a post-crop vignette (applied to the final, already-cropped frame, separate from the Lens tab's corrective one) and film grain, both on the Detail tab.
+- Creative "✨ Effects" — a post-crop vignette (applied to the final, already-cropped frame, separate from the Lens corrections' corrective one) and film grain, both on the ✨ Effects tab.
 - Any number of stacked layers, each with its own opacity, visibility, and blend mode — 23 Photoshop-matching modes (Multiply/Screen/Overlay/Soft Light/Hard Light/Color Dodge/Color Burn/Difference/Hue/Saturation/Color/Luminosity, and more), reorderable and duplicable, preserved through Save/Load Project. A layer can be an uploaded image, a Text layer (content, font size, color, alignment, position), a vector Shape layer (Rectangle/Ellipse/Line/Polygon/Star, with its own fill and outline), or a Pen tool path — click to place anchor points on the photo, drag a point to move it, drag its handle to curve the path through it, double-click to remove a point; open paths can be stroked, closed ones filled and/or stroked. Image layers keep their proportions and can be moved, scaled and rotated; Text/Shape/Path layers stay editable, including after saving and reopening a `.photoproject` file.
 - Layer Styles — Drop Shadow, Outer Glow, Stroke, and Color Overlay, any combination stackable on any layer (image, text, or shape), each independently computed from that layer's own silhouette so one effect's settings never bleed into another's shape.
 - Guides & Grid — a Rule of Thirds / 4x4 / Golden Ratio grid overlay plus any number of custom horizontal/vertical guides, shown on the canvas as a pure composition aid (never sent through the backend or included in an export). The free-form Crop tool's corner handles snap to whichever grid lines/guides are active.

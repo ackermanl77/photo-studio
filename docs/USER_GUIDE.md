@@ -1,8 +1,9 @@
 # Photo Studio — User Guide
 
-Photo Studio is a professional, CPU-only photo editor: RAW/JPEG/PNG/WEBP/TIFF import, a full
+Photo Studio is a professional, CPU-first photo editor: RAW/JPEG/PNG/WEBP/TIFF import, a full
 tone/color/detail pipeline, local masking, object removal, layers, batch processing, and a photo
-library — all running locally, no cloud, no GPU required.
+library — all running locally, no cloud. Core editing and file encoding need no GPU; an optional
+CUDA path can accelerate final export resizing and sharpening.
 
 This guide walks through every tab and control in the unified workspace. For what's changed
 recently and known limitations, see [`PROJECT_STATUS.md`](PROJECT_STATUS.md).
@@ -31,10 +32,25 @@ reopen a `.photoproject` file you saved earlier (see [Projects](#projects) below
 
 The screen is split in two:
 
-- **Left/Tool panel** — eleven tabs (Tone, Lens, Crop, Color, Detail, Repair, Layers, Masks,
-  Portrait, Presets, Batch & Library) covering every adjustment.
+- **Left/Tool panel** — nine tabs, grouped by how you work:
+
+  | Tab | What's in it |
+  |---|---|
+  | **☼ Basic** | ✨ Auto Enhance, 🎞️ Preset Look, Tone (exposure, contrast, highlights, shadows), Color (white balance, saturation, vibrance, 🎯 Pick White Balance) and Presence (texture, clarity, dehaze) |
+  | **🎨 Curves & Color** | RGB Tone Curve, Color Mixer (HSL), Color Grading, Soft Proof |
+  | **🔬 Detail** | Denoise, Color Noise, Sharpen |
+  | **⛶ Geometry** | Rotate & Straighten, Lens Corrections, Crop / Aspect Ratio |
+  | **◉ Local** | three sub-tabs: ◉ Masks, 🩹 Repair, ◌ Portrait |
+  | **◈ Layers** | image, text, shape and pen-path layers |
+  | **✨ Effects** | post-crop vignette, film grain |
+  | **⬇ Export** | export settings and presets, 🏷️ Watermark, GPU export transforms, AI Upscale, 📦 Export Multiple Sizes, 💾 Save Project |
+  | **✦ Presets & Library** | two sub-tabs: ✦ Presets, ☰ Library & Batch (Library Catalog, Batch Processor, System Health) |
+
+  Every section shows **● modified** next to its title (or a ● in its expander's title) as soon as
+  one of its controls differs from the default, so you can see at a glance where a photo has been
+  edited; most sections also have their own **↺ Reset** button.
 - **Right/Canvas** — the live preview, with Undo/Redo/Reset, zoom, Split View, a histogram, a
-  clipping warning, and export controls always available above and below it, regardless of which
+  clipping warning, and the Save button always available above and below it, regardless of which
   tool tab is open.
 
 On a narrow window the canvas moves above the tool panel so you always see the photo first.
@@ -44,7 +60,7 @@ sends the edit to the local processing backend and the canvas updates in place.
 
 ---
 
-## 3. Tone
+## 3. Tone (☼ Basic)
 
 The starting point for every edit.
 
@@ -64,7 +80,7 @@ The starting point for every edit.
 Older presets and projects (saved with the earlier 0.5–1.5 multiplier sliders) are converted
 automatically when you open them.
 
-## 4. Lens
+## 4. Lens (⛶ Geometry)
 
 Corrects distortion from the lens/shooting angle. Not calibrated to your specific camera or
 lens — the "Lens Profile" dropdown offers generic starting points by lens category (Wide-angle,
@@ -81,7 +97,7 @@ Standard zoom, Telephoto, Fisheye), which you fine-tune from there.
   building shot from below). Not part of a lens profile — this depends on how you held the camera,
   not what lens you used.
 
-## 5. Crop
+## 5. Crop, Rotate & Straighten (⛶ Geometry)
 
 **Rotate & Straighten** (top of the tab):
 
@@ -105,7 +121,10 @@ Standard zoom, Telephoto, Fisheye), which you fine-tune from there.
 Crop is applied last in the pipeline (after every other tab), but sits early in the tab order so
 you frame the shot before fine-tuning color — the same workflow most photo editors use.
 
-## 6. Color
+## 6. Color (☼ Basic, and 🎨 Curves & Color)
+
+Temperature, Tint, Saturation, Vibrance and the white-balance picker sit in **☼ Basic → Color**; the
+tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color**.
 
 - **Temperature** / **Tint** — the global white-balance sliders.
 - **Saturation** — a flat, whole-image saturation boost.
@@ -127,24 +146,24 @@ you frame the shot before fine-tuning color — the same workflow most photo edi
   magenta any pixel that gets clipped when converted into this app's sRGB working space. Not a
   simulation of a specific printer profile.
 
-## 7. Detail
+## 7. Detail (🔬 Detail), Presence (☼ Basic) and Effects (✨ Effects)
 
-- **Texture** / **Clarity** — local contrast and micro-detail sliders.
-- **Dehaze** — reduces atmospheric haze (a classical algorithm, not AI). Pushed high, it can crush
+- **Texture** / **Clarity** — local contrast and micro-detail sliders (☼ Basic → Presence).
+- **Dehaze** (☼ Basic → Presence) — reduces atmospheric haze (a classical algorithm, not AI). Pushed high, it can crush
   shadows or halo around strong edges.
 - **Denoise** — smooths sensor noise while preserving edges (Non-Local Means, a real upgrade over a
   flat blur).
 - **Color Noise** — an independent chroma-only denoise boost on top of Denoise, for cleaning up
   color speckle without softening detail as much. Has no effect while Denoise is 0.
 - **Sharpen (Unsharp Mask)** — a checkbox to enable output sharpening.
-- **✨ Effects** (expander):
+- **✨ Effects** (its own tab):
   - **Post-Crop Vignette** — a creative vignette applied to the final, already-cropped frame
-    (separate from the Lens tab's corrective one, which runs before Crop — using both at once
+    (separate from the Lens corrections' corrective one, which runs before Crop — using both at once
     stacks their effect, which is expected).
   - **Film Grain** — adds a monochromatic noise texture; a fresh random pattern every edit/export
     (so repeated exports don't look identically grainy).
 
-## 8. Repair (object removal)
+## 8. Repair — object removal (◉ Local → 🩹 Repair)
 
 Select a blemish or unwanted object with the same selection tools as Masks (see
 [Selection Types](#selection-types-masks--repair) below), and it's painted over by blending in
@@ -155,7 +174,7 @@ nearby texture (inpainting).
 - **👁️ Preview removal selection** — shows the selected region in yellow (Masks' own preview uses
   red, so the two are never confused).
 
-## 9. Layers
+## 9. Layers (◈ Layers)
 
 Build a stack of any number of layers — images, text, vector shapes, and freeform paths — each
 with its own opacity, blend mode, and optional effects, composited on the processing backend when
@@ -215,7 +234,7 @@ while you're working, but **Save Project flattens them into a plain image** — 
 An Image layer (an uploaded photo) doesn't have this limitation, since it was already a plain image
 to begin with.
 
-## 10. Masks (local adjustments)
+## 10. Masks — local adjustments (◉ Local → ◉ Masks)
 
 Build any number of named selections and combine them into one mask; the Target sliders below
 only affect pixels inside that combined selection. A selection can also have its **own
@@ -237,7 +256,7 @@ adjustments** instead (see below) — so you can brighten a face and darken the 
 
 ### Selection Types (Masks & Repair)
 
-Both the Masks tab and the Repair tab share the same six selection tools:
+Masks and Repair (both under ◉ Local) share the same selection tools:
 
 | Type | How it works |
 |---|---|
@@ -251,14 +270,14 @@ Both the Masks tab and the Repair tab share the same six selection tools:
 Every selection (except Painted/Magic Wand's own click-based commit) also gets a name, an edge-soften
 radius, and an invert checkbox.
 
-## 11. Portrait
+## 11. Portrait (◉ Local → ◌ Portrait)
 
 - **Skin Smoothing** — 0 leaves skin untouched (the default); increase to smooth detected skin
   tones.
 - The tab also reports how many faces it detected in the photo (informational only — not required
   for smoothing to work, which is tone-based rather than face-located).
 
-## 12. Presets
+## 12. Presets (✦ Presets & Library → ✦ Presets)
 
 - **Load a Preset** — pick a saved custom preset from the dropdown; a live thumbnail preview shows
   what it would look like on your current photo before you apply it. **📂 Apply** loads it,
@@ -274,7 +293,7 @@ radius, and an invert checkbox.
 Undo/Redo/Reset live in the canvas header bar above, not in this tab — see
 [Canvas Controls](#canvas-controls) below.
 
-## 13. Batch & Library
+## 13. Library & Batch (✦ Presets & Library → ☰ Library & Batch)
 
 Three modes, selected via the radio buttons at the top of the tab.
 
@@ -348,14 +367,15 @@ Always visible above/below the preview, on every tab:
   - **Grid overlay** — None, Rule of Thirds, Grid 4x4, or Golden Ratio.
   - **Custom guides** — add any number of horizontal or vertical guide lines at a chosen position
     (%), each removable individually.
-  - The free-form Crop rectangle's corner handles (see [Crop](#5-crop)) snap to whichever grid
+  - The free-form Crop rectangle's corner handles (see [Crop](#5-crop-rotate--straighten--geometry)) snap to whichever grid
     lines/guides are active.
 - **Histogram** — a live per-channel (Red/Green/Blue) chart of the current edited image.
 - **⚠️ Show clipping** — highlights blocked shadows (blue) and blown highlights (red) directly on
   the canvas.
-- **⚙️ Export settings** — resize by long edge, output sharpening (screen / matte / glossy), which
+- **⬇ Export tab → Export settings** — resize by long edge, output sharpening (screen / matte / glossy), which
   metadata to keep (all, copyright & camera only, or none, plus Remove GPS — on by default) and,
-  when requirements-gpu.txt is installed, AI Upscale 2x/4x. **File name** is a template:
+  when the optional **GPU pack** is installed (see [AI Upscale and the GPU pack](#ai-upscale-and-the-gpu-pack)),
+  AI Upscale 2x/4x. **File name** is a template:
   `{stem}` (the original's name), `{date}`, `{width}`, `{height}`, `{format}`. **Bit depth** (PNG and
   TIFF): **16-bit** writes a genuine 16-bit file — the edit is rendered at full resolution in floating
   point from the full-precision original (16-bit PNG/TIFF scans and camera RAW keep their extra
@@ -366,9 +386,10 @@ Always visible above/below the preview, on every tab:
   these settings under a name; pick one and **Apply** to restore them. The file is only produced when
   you click Save (or press **Ctrl+E**), and it carries the original photo's camera metadata and colour
   profile.
-- **Export Format / Quality / Save** — choose JPEG, PNG, WEBP, or TIFF (Quality only applies to
+- **🏷️ Watermark** (⬇ Export tab) — optional text stamped only on exported files.
+- **Export Format / Quality / Save** (under the canvas) — choose JPEG, PNG, WEBP, or TIFF (Quality only applies to
   JPEG/WEBP), then download the edited result.
-- **📦 Export Multiple Sizes** — check any combination of the named export profiles (Web, Social,
+- **📦 Export Multiple Sizes** (⬇ Export tab) — check any combination of the named export profiles (Web, Social,
   Print, Archive; Web and Social carry no EXIF, and **Remove GPS location** strips the location from
   Print/Archive too) and click **Prepare ZIP**, then **⬇️ Download ZIP** — gets you the current photo
   at several sizes/formats in one click, instead of downloading each one separately. This is
@@ -382,7 +403,7 @@ Always visible above/below the preview, on every tab:
 Save everything — the source photo, every adjustment, your full layer stack, and your mask/removal
 selections — into one `.photoproject` file you can reopen later:
 
-- **💾 Save Project (.photoproject)** (Presets tab) downloads the project in one click. If the
+- **💾 Save Project (.photoproject)** (⬇ Export tab) downloads the project in one click. If the
   project would be too large to reopen (very large image layers), the button is disabled with a
   warning.
 - **📁 Open a saved project** (top of the app, above the uploader) restores a `.photoproject` back
@@ -396,6 +417,29 @@ selections — into one `.photoproject` file you can reopen later:
 
 ---
 
+## AI Upscale and the GPU pack
+
+AI Upscale (Real-ESRGAN, 2x/4x on export) needs PyTorch, which is large, so the desktop release
+ships it separately:
+
+- **PhotoStudio-<version>-Windows.7z** — the CPU base app, with no PyTorch dependency.
+- **PhotoStudio-<version>-GPU-pack.7z** — optional. Extract it **next to PhotoStudio.exe** so a
+  `gpu-pack` folder sits beside the exe (or into `%LOCALAPPDATA%\PhotoStudio\gpu-pack`), then
+  restart the app. The installer offers the same pack as an optional "GPU pack" component when it
+  was built with one.
+- **⬇ Export → AI Upscale** appears once the pack is found; ☰ Library & Batch → System Health shows
+  where it was found, or why a pack was ignored (for example one built for a different version).
+  An NVIDIA GPU makes it fast; it also runs, slowly, on the CPU.
+- **Use GPU for export resize/sharpen** (⬇ Export) opts into CUDA for final export resizing and
+  output sharpening. It requires CUDA-enabled PyTorch from the GPU pack (or a compatible source
+  install); file encoding and the editing pipeline remain on the CPU. If CUDA is missing or a GPU
+  operation fails, the export logs a warning and retries on the CPU. The option is off by default.
+- The **Batch Processor** has a separate **Use GPU for profile resizing** option for its Web/Social
+  profiles. It uses the same optional CUDA support and CPU fallback; Print/Archive do not resize.
+- From source, install `requirements-gpu.txt` instead (see its header for the CUDA build of torch).
+
+---
+
 ## Keyboard Shortcuts Reference
 
 | Shortcut | Action | Where |
@@ -406,9 +450,9 @@ selections — into one `.photoproject` file you can reopen later:
 | Z | 1:1 / Fit | Anywhere |
 | B | Before / After | Anywhere |
 | G | Grid on/off | Anywhere |
-| ← ↑ → ↓ (Shift = 10×) | Nudge the focused crop corner or crop box (1 px steps) | Crop tab, free-form crop editor |
+| ← ↑ → ↓ (Shift = 10×) | Nudge the focused crop corner or crop box (1 px steps) | ⛶ Geometry → Crop, free-form crop editor |
 | ← ↑ → ↓ / Alt+arrows / Delete | Move the selected point / its curve handle / remove it | Layers tab, Pen editor |
-| ↑ / ↓ (Shift = 10×) | Raise / lower the focused curve point | Tone tab, curve editor (Tab to a point) |
+| ↑ / ↓ (Shift = 10×) | Raise / lower the focused curve point | 🎨 Curves & Color, curve editor (Tab to a point) |
 | [ / ] (Shift = 10×) | Smaller / larger brush | Masks & Repair, paint editor |
 | ← ↑ → ↓ / Alt+arrows | Move the last radial or gradient / only its end point | Masks & Repair, paint editor |
 | Drag, or ← ↑ → ↓ | Pan the zoomed view (Shift = half a screen) | Canvas at 100 % and above |
@@ -421,8 +465,9 @@ selections — into one `.photoproject` file you can reopen later:
 
 ## Known Limitations
 
-This app is CPU-first and offline by design — no cloud processing, no GPU dependency. That means a
-few things are deliberately simpler than a cloud/AI-powered tool: lens and denoise are classical
+This app is CPU-first and offline by design — no cloud processing or required GPU dependency. GPU
+export transforms and AI Upscale are optional. That means a few things are deliberately simpler
+than a cloud/AI-powered tool: lens and denoise are classical
 algorithms (not neural networks), color proofing checks against this app's own working space (not
 a specific printer profile), and there's no automatic subject/sky detection.
 
