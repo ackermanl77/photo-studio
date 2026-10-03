@@ -1,7 +1,31 @@
 # Changelog
 
 Fix history moved out of `docs/PROJECT_STATUS.md` (which now holds only the current architecture
-and open issues). Newest first.
+and open issues). Newest first. Entries describe the code as it was then: modules, entry points and
+docs they name may since have been removed (for example `app/frontend.py` and the other per-feature
+frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, and the old
+`docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
+`docs/PROJECT_STATUS.md`).
+
+## 2026-10-02 -- optional CUDA export, installer fixes
+
+- **Opt-in CUDA export resize/sharpen.** `app/gpu_export.py` resizes and output-sharpens the final
+  export on the GPU when the GPU pack's torch (or a CUDA torch in a source install) is available:
+  Export settings "Use GPU for export resize/sharpen", the Batch Processor's "Use GPU for profile
+  resizing", and the CLI's `--gpu-export`. Off by default; file encoding stays on the CPU, and a
+  missing or failing CUDA logs a warning and falls back to the CPU path. Tests cover the opt-in
+  validation, the CLI flag, 8- and 16-bit exports through the GPU transform, the CPU fallback and the
+  batch option; `resize_and_sharpen()` hands torch a writable array, silencing PyTorch's read-only
+  warning. Checked on an RTX 5080: a 4500x3000 -> 2048 px Screen-sharpened export matched the CPU
+  path to a mean of 0.35 levels (max 4), 202 ms vs 305 ms once warm; the first call pays ~8 s of
+  CUDA start-up.
+- **Installer fixes, found by building it and installing/uninstalling silently.**
+  `build_release.ps1 -Installer` also finds a per-user Inno Setup (`%LOCALAPPDATA%\Programs\Inno
+  Setup 6`). Setup always demanded admin rights; it now allows a per-user install
+  (`PrivilegesRequiredOverridesAllowed=commandline dialog`: an "all users / just me" choice in the
+  wizard, `/CURRENTUSER` on the command line). The "delete your data?" uninstall question used
+  `MsgBox`, which a silent uninstall can't suppress; `SuppressibleMsgBox` answers No (keep the data).
+  An empty `HKCU\Software\Classes\.photoproject` key is no longer left behind.
 
 ## 2026-10-02 -- clean-up and polish items (F15, F14, F1, B12, R2, P5, T7, K5, F9, F12)
 
