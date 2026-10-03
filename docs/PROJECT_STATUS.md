@@ -83,11 +83,26 @@ The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).
 ## Known Issues
 
 - Every interactive edit still costs an HTTP round trip to `app/backend.py` (with a proxy and a
-  Stage 1 handle it's small, but the first render after an edit is not instant), and nothing renders
-  a sharper version automatically when the user pauses. Non-Local Means denoise is not rescaled for
-  the proxy: judge it at 100 % (1:1), which renders at full resolution.
-- The working pipeline is 8-bit RGB except Exposure (linear light via a LUT); a float32 linear-light
-  pipeline and genuine 16-bit RAW/TIFF output are not implemented (B4).
+  Stage 1 handle it's small, but the first render after an edit is not instant). After a 1.2 s pause
+  a proxy preview is replaced by a full-resolution render (`app/refine_preview.py`, a background
+  thread; a newer edit supersedes it on the backend's "refine" lane). Until that lands, Non-Local
+  Means denoise is not rescaled for the proxy: judge it at 100 % (1:1) or after the pause. The
+  refine's polling fragment and its swap-in are covered by unit tests and AppTest with the job run
+  inline; the real thread + `run_every` polling in a browser needs a manual check.
+- The interactive preview and the default export stay 8-bit. A 16-bit PNG/TIFF export (Export
+  settings > Bit depth, CLI `--bit-depth 16`, API `bit_depth`/`export.bit_depth`) runs the pipeline
+  in float32 (`app/high_bit.py`, PhotoProcessor's high-precision mode) from a full-precision decode
+  (16-bit PNG/TIFF, RAW at 16 bits): Geometry/Lens, Exposure, Brightness, Contrast, Highlights/
+  Shadows, Temperature/Tint, Saturation, Curve, Clarity, mask blending (shared and per-selection),
+  Crop and the Effects vignette compute in float. HSL, Vibrance, Color Grading, Texture, Dehaze,
+  Denoise, Sharpen, Repair, Layers, Portrait, grain and the ICC conversion still run in 8 bits on the
+  quantized image and only their *change* is added to the float data, which keeps the sub-8-bit
+  detail but not their own precision; AI Upscale restarts from its 8-bit result. The working space
+  stays sRGB-encoded (Exposure alone works in linear light, as before) so the 16-bit file matches the
+  8-bit preview -- a full linear-light working space would change the look of every step (B4 remains
+  Partial). The 8-bit steps truncate after each operation, so a heavy 8-bit edit is ~1 % darker than
+  its 16-bit export. A 16-bit TIFF keeps the ICC profile and the IFD0 text tags but not the EXIF
+  sub-IFD (exposure details, GPS); a 16-bit PNG keeps both.
 - The mask overlay previews draw the selection over the geometry-corrected source, not the live
   Tone/Color result (that intermediate image only exists on the backend).
 - Film grain is unseeded, so two exports of the same settings don't carry an identical grain pattern
@@ -95,8 +110,12 @@ The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).
 - The Export panel is an expander, not an `st.dialog` (a dialog's widgets only exist while it's open,
   which would drop their state between reruns), and offers sRGB output only -- Display P3 would need a
   bundled P3 ICC profile.
-- On-canvas editors (crop, curve, paint, pen, pickers) are pointer-driven; the crop has numeric fields
-  and the zoom a click navigator, but there's no arrow-key nudging inside the iframes.
+- On-canvas editors take the keyboard (F11): arrow keys nudge the focused crop corner/box, Pen
+  anchor (Alt: its handle; Delete removes it), curve point and the last radial/gradient; [ / ] size
+  the brush; the zoomed canvas pans by drag or arrows (F3). Their JavaScript is exercised under Node
+  with a small fake DOM (`tests/js_fake_dom.js`; skipped without Node), not in a real browser --
+  focus handling, iframe key routing and the drag feel still need a manual check. The magic-wand/
+  white-balance pickers remain click-only. Split View and Original keep the slider/navigator pan.
 - Keyboard shortcuts use Streamlit's native `shortcut=`; their behaviour while a text field has focus
   is Streamlit's, and AppTest can't press keys, so they're covered by source checks and manual testing.
 - The third-party test images were deleted from `tests/assets/`, but they remain in git history; purge
@@ -114,7 +133,6 @@ The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).
 - The denoise algorithm (Non-Local Means, via OpenCV) is a real, meaningful upgrade over the flat median filter it replaced, but it is classical/non-learned, not a neural network -- see docs/CHANGELOG.md for why, given this app's CPU-first, no-GPU-dependency, no-heavy-new-dependency constraints.
 - Lens corrections aren't calibrated to any specific camera/lens model — there's no real profile database (see docs/CHANGELOG.md); `LENS_PROFILES`'s entries are generic starting points by lens category, not anything matched against a photo's actual EXIF lens metadata (which isn't read at all currently).
 - The HSL Color Mixer's "always render all 8 bands" fix for Streamlit's widget-garbage-collection-on-non-instantiation bug is architecturally different from `_request_rerun()`/`_rerun_pending` and the hidden-textarea commit pattern (both now sharing `_consume_new_commit()`, see docs/CHANGELOG.md) — an unconditional-rendering strategy rather than a guarded session_state write, so it isn't a natural fit for that same helper. Unifying it would mean redesigning how that panel renders, which is deliberately left as-is rather than forced.
-- The normal working pipeline is primarily 8-bit RGB; 16-bit TIFF export exists but does not make every adjustment operation 16-bit internally.
 - Face detection uses YuNet via `cv2.FaceDetectorYN`; an OpenCV build with neither it nor the Haar cascade reports "no detector" in System Health and the Portrait tab instead of a misleading 0. Skin smoothing is still a global skin-hue mask, not limited to detected faces.
 - Microsoft Edge WebView2 Runtime is required for the native desktop window.
 - The Library Catalog's keyboard shortcuts (rate/reject/navigate) only work while a real browser tab has the page focused — they reach into `window.parent.document` from a `components.html()` iframe, which `streamlit.testing.v1.AppTest` (a headless harness with no real DOM/JS) can't exercise, so that part is only covered by live manual verification, not the automated suite. The same limitation now also applies to the draggable free-form crop rectangle and the tone curve's click-to-add/drag/double-click-to-remove extra points — their JS interactions are covered by live verification and by driving the hidden commit field directly (the same wiring a real interaction ultimately depends on), not by an automated test that simulates an actual drag or double-click.
