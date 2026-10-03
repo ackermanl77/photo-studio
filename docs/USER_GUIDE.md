@@ -330,8 +330,14 @@ Always visible above/below the preview, on every tab:
   RAW source alone — only the slider/checkbox values reset.
 - **Zoom View** — **Fit** (the whole photo), **100% (1:1)** — the photo's real pixels, the view to
   judge sharpening, noise, grain and mask edges in (rendered at full resolution even for a large
-  photo) — and 200%/400%, which enlarge those pixels. While zoomed, click the small **navigator**
-  overview to center the view there, or use the Pan sliders.
+  photo) — and 200%/400%, which enlarge those pixels. While zoomed, **drag the photo** to pan (or
+  click it and use the arrow keys; Shift moves further), click the small **navigator** overview to
+  center the view there, or use the Pan sliders.
+- **Fast preview, then full resolution** — a large photo (long edge over 2560 px) is previewed from a
+  2048 px copy so sliders stay quick. When you stop adjusting for a moment, the canvas line under the
+  zoom buttons reads "Rendering full resolution…" and the preview is replaced by a full-resolution
+  render ("✨ Full-resolution view"); touching a control goes back to the fast preview. Save then
+  reuses that render instead of computing it again.
 - **🔍 1:1 / Fit (Z)**, **👁 Before / After (B)**, **# Grid (G)** — one-click toggles, also on the
   keyboard.
 - **⇄ Split View** — a draggable before/after comparison slider over the same zoomed/panned view.
@@ -350,7 +356,13 @@ Always visible above/below the preview, on every tab:
 - **⚙️ Export settings** — resize by long edge, output sharpening (screen / matte / glossy), which
   metadata to keep (all, copyright & camera only, or none, plus Remove GPS — on by default) and,
   when requirements-gpu.txt is installed, AI Upscale 2x/4x. **File name** is a template:
-  `{stem}` (the original's name), `{date}`, `{width}`, `{height}`, `{format}`. **Save preset** keeps
+  `{stem}` (the original's name), `{date}`, `{width}`, `{height}`, `{format}`. **Bit depth** (PNG and
+  TIFF): **16-bit** writes a genuine 16-bit file — the edit is rendered at full resolution in floating
+  point from the full-precision original (16-bit PNG/TIFF scans and camera RAW keep their extra
+  detail), so skies and gradients stay free of banding when you keep editing or print. It looks the
+  same as the preview (at most about 1 % brighter after very heavy edits). A 16-bit TIFF keeps the
+  colour profile and the camera make/model, date, artist and copyright, but not exposure details or
+  GPS; a 16-bit PNG keeps all of it. **Save preset** keeps
   these settings under a name; pick one and **Apply** to restore them. The file is only produced when
   you click Save (or press **Ctrl+E**), and it carries the original photo's camera metadata and colour
   profile.
@@ -394,6 +406,12 @@ selections — into one `.photoproject` file you can reopen later:
 | Z | 1:1 / Fit | Anywhere |
 | B | Before / After | Anywhere |
 | G | Grid on/off | Anywhere |
+| ← ↑ → ↓ (Shift = 10×) | Nudge the focused crop corner or crop box (1 px steps) | Crop tab, free-form crop editor |
+| ← ↑ → ↓ / Alt+arrows / Delete | Move the selected point / its curve handle / remove it | Layers tab, Pen editor |
+| ↑ / ↓ (Shift = 10×) | Raise / lower the focused curve point | Tone tab, curve editor (Tab to a point) |
+| [ / ] (Shift = 10×) | Smaller / larger brush | Masks & Repair, paint editor |
+| ← ↑ → ↓ / Alt+arrows | Move the last radial or gradient / only its end point | Masks & Repair, paint editor |
+| Drag, or ← ↑ → ↓ | Pan the zoomed view (Shift = half a screen) | Canvas at 100 % and above |
 | 1–5 | Rate current photo | Library Catalog, Rate & Flag panel |
 | 0 | Clear rating | Library Catalog, Rate & Flag panel |
 | X | Toggle Reject | Library Catalog, Rate & Flag panel |

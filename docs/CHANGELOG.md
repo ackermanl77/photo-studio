@@ -3,6 +3,44 @@
 Fix history moved out of `docs/PROJECT_STATUS.md` (which now holds only the current architecture
 and open issues). Newest first.
 
+## 2026-10-02 -- remaining "important" roadmap items (P1, F3, F11, B4)
+
+`tests/test_interaction_improvements.py` and `tests/test_high_bit.py` cover these. No golden image
+changed: the default 8-bit path is byte-identical (`tests/test_parity_golden.py` passes unregenerated).
+
+- **Refine-on-pause (P1).** A proxy-previewed photo is re-rendered at full resolution once the edit
+  has been unchanged for 1.2 s (`app/refine_preview.py::RefineTracker`). The render runs in a
+  background thread (so the next slider move isn't blocked behind it) on the backend's new "refine"
+  lane, which any newer interactive request of the same session supersedes (`app/backend.py`
+  `_cancellation_check()`), so an obsolete job stops at its next pipeline step. A small `st.fragment`
+  status line polls (`run_every`) only while a refine is pending and reruns the page when it lands
+  (deferred to the end of the script via `_request_rerun()` during a full run). The refined image then
+  drives the canvas, histogram and Save (no second full render). The two-stage cache is untouched;
+  ordinary reruns still render the proxy.
+- **Drag-to-pan (F3).** At 100 % and above the canvas is `ui_editors._pan_viewer_html()`: drag (or
+  arrow keys) and the new view center is committed through the zoom navigator's own hidden text_area,
+  so Python handles it exactly like a navigator click. Pan values keep 4 decimals (slider step
+  0.0001) -- a drag at 400 % moves a few source pixels, below the old 0.01 step.
+- **Keyboard in the editors (F11).** Crop: arrows nudge the focused corner or the box by one source
+  pixel (Shift 10). Pen: arrows move the selected anchor, Alt+arrows its handle, Delete removes it.
+  Curve: Up/Down on a focused point. Paint: `[`/`]` brush size, arrows move the last radial/gradient
+  (Alt: its end point; it is repainted from a snapshot of the mask taken before it). A burst of key
+  presses commits once (`KEY_COMMIT_DELAY_MS`) through the existing hidden text_area. All editors
+  have `role="application"` and aria labels. The JavaScript is tested under Node with a fake DOM
+  (`tests/js_fake_dom.js`).
+- **16-bit output and a float32 pipeline path (B4, partial).** New `bit_depth` option (8/16) and
+  export setting: `decode_source(..., high_bit=True)` decodes 16-bit PNG/TIFF (OpenCV, EXIF
+  orientation applied) and RAW (rawpy `output_bps=16`) to float32; `PhotoProcessor` gains a
+  high-precision mode (an `hdr` array behind an `image` property) where geometry/lens, exposure,
+  brightness, contrast, highlights/shadows, temperature/tint, saturation, curve, clarity, mask
+  blending, crop and the post-crop vignette compute in float, and every other step's 8-bit change is
+  carried onto the float data. `encode_export()` writes 16-bit PNG (OpenCV + spliced iCCP/eXIf
+  chunks) and 16-bit TIFF (tifffile, zlib, ICC + IFD0 text tags), with resize (Pillow Lanczos on
+  float channels), output sharpening and watermark. Wired through the backend (`export.bit_depth`
+  implies the float run), the Export panel ("Bit depth", saved in export presets), the CLI
+  (`--bit-depth 16`) and folder batch. Not done: a linear-light working space for every step and float
+  versions of HSL/vibrance/grading/texture/dehaze/denoise/sharpen/layers/portrait/grain.
+
 ## 2026-10-02 -- build-check follow-ups
 
 - **One error box on a failed desktop start.** `app/desktop.py::main()` re-raised after showing its
