@@ -125,6 +125,11 @@ def _session_headers(lane: str) -> dict:
     return {EDIT_SESSION_HEADER: session, EDIT_GENERATION_HEADER: str(generation), EDIT_LANE_HEADER: lane}
 
 
+REFINE_LANE = "refine"
+# A full-resolution refine-on-pause render (app.refine_preview) is a background job: generous timeout.
+REFINE_REQUEST_TIMEOUT_S = 300
+
+
 def _lane(request_options: dict) -> str:
     if request_options.get("export"):
         return "export"
@@ -139,7 +144,7 @@ def _send(files: dict, data: dict, headers: dict, timeout) -> requests.Response:
 
 def _post_process(
     image_bytes, filename, request_options, local_mask_bytes, layers_bytes, removal_mask_bytes, timeout,
-    stage_handle: str | None = None, local_masks_bytes: bytes | None = None,
+    stage_handle: str | None = None, local_masks_bytes: bytes | None = None, lane: str | None = None,
 ) -> requests.Response:
     files = {}
     if local_masks_bytes:
@@ -154,7 +159,7 @@ def _post_process(
     # A resume_from_detail request re-uploads the backend's own Stage 1 PNG, not the user's file --
     # the header tells app/backend.py to apply its internal-stage size cap instead of the user
     # upload cap (see INTERNAL_STAGE_MAX_BYTES there for why).
-    headers = _session_headers(_lane(request_options))
+    headers = _session_headers(lane or _lane(request_options))
     if backend_token():
         headers[TOKEN_HEADER] = backend_token()
     if request_options.get("resume_from_detail"):
@@ -234,6 +239,9 @@ def process_via_backend(
     removal_mask_bytes: bytes | None = None,
     stage_handle: str | None = None,
     local_masks_bytes: bytes | None = None,
+    *,
+    lane: str | None = None,
+    timeout: float | None = None,
 ) -> Image.Image:
     """POST an image plus the accumulated tab options to backend.py's /process endpoint and
     return the resulting decoded image.
@@ -247,6 +255,9 @@ def process_via_backend(
     frontend caches those bytes as-is instead of re-encoding). Passing that handle as
     `stage_handle` on the Stage 2 request makes it send the handle instead of the image; the image
     bytes are only uploaded if the backend no longer has it (P3 in the improvement report).
+
+    `lane`/`timeout` override the defaults -- the refine-on-pause render uses REFINE_LANE, which
+    any newer interactive request of the same session supersedes (app.backend), and a longer timeout.
     """
     request_options = dict(options)
     request_options["output_format"] = "PNG"
@@ -254,8 +265,9 @@ def process_via_backend(
     # AI Upscale's first request loads torch and downloads its ~64 MB model before inferring --
     # measured at ~20 s on a fast connection in the packaged build, so the normal 30 s budget
     # would time out on a slower one. Every other request keeps the short timeout.
-    timeout = AI_UPSCALE_REQUEST_TIMEOUT_S if request_options.get("ai_upscale") else REQUEST_TIMEOUT_S
-    response = _post_process(image_bytes, filename, request_options, local_mask_bytes, layers_bytes, removal_mask_bytes, timeout, stage_handle, local_masks_bytes)
+    if timeout is None:
+        timeout = AI_UPSCALE_REQUEST_TIMEOUT_S if request_options.get("ai_upscale") else REQUEST_TIMEOUT_S
+    response = _post_process(image_bytes, filename, request_options, local_mask_bytes, layers_bytes, removal_mask_bytes, timeout, stage_handle, local_masks_bytes, lane)
     content = response.content
     try:
         image = Image.open(BytesIO(content))

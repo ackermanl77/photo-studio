@@ -72,7 +72,7 @@ class _FakeFileStorage:
         return self.stream.read()
 
 
-def _fake_process_via_backend(image_bytes_, filename, options, local_mask_bytes=None, layers_bytes=None, removal_mask_bytes=None, stage_handle=None, local_masks_bytes=None):
+def _fake_process_via_backend(image_bytes_, filename, options, local_mask_bytes=None, layers_bytes=None, removal_mask_bytes=None, stage_handle=None, local_masks_bytes=None, lane=None, timeout=None):
     request_options = dict(options)
     request_options["output_format"] = "PNG"
     image_file = _FakeFileStorage(filename, image_bytes_)
