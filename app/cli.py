@@ -81,6 +81,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--quality", type=int, default=92, help="JPEG/WEBP delivery quality from 1 to 100")
     parser.add_argument("--metadata", choices=METADATA_POLICIES, default="all", help="EXIF to keep: all, camera (copyright & camera only), or none")
     parser.add_argument("--remove-gps", action="store_true", help="Drop GPS location from the kept EXIF")
+    parser.add_argument(
+        "--bit-depth", type=int, choices=(8, 16), default=8,
+        help="16 = process in float32 and write a genuine 16-bit PNG/TIFF (16-bit and RAW sources keep their extra precision); JPEG/WEBP outputs stay 8-bit",
+    )
     parser.add_argument("--crop", nargs=4, type=int, metavar=("LEFT", "TOP", "RIGHT", "BOTTOM"), help="Crop rectangle in pixels")
     parser.add_argument("--aspect", nargs=2, type=int, metavar=("WIDTH", "HEIGHT"), help="Center-crop to an aspect ratio")
     parser.add_argument(
@@ -140,6 +144,8 @@ def options_from_args(args: argparse.Namespace) -> dict:
     if args.ai_upscale:
         options["ai_upscale"] = True
         options["ai_upscale_factor"] = args.ai_upscale
+    if getattr(args, "bit_depth", 8) == 16:
+        options["bit_depth"] = 16
     return parse_options(options)
 
 
@@ -151,6 +157,8 @@ def main() -> None:
     except (OptionsError, ValueError, OSError) as error:
         parser.error(str(error))
     export_settings = {"quality": max(1, min(100, args.quality)), "metadata": args.metadata, "remove_gps": args.remove_gps}
+    if options.get("bit_depth") == 16:
+        export_settings["bit_depth"] = 16
 
     if args.input_dir:
         if not args.output_dir:
@@ -163,7 +171,7 @@ def main() -> None:
     if not args.output:
         raise SystemExit("--output is required when using --input")
 
-    image = decode_source(Path(args.input).read_bytes(), Path(args.input).name)
+    image = decode_source(Path(args.input).read_bytes(), Path(args.input).name, high_bit=options.get("bit_depth") == 16)
     removal_mask = Image.open(args.remove_mask) if args.remove_mask else None
     local_mask = Image.open(args.mask) if args.mask else None
     result = run_pipeline(image, options, removal_mask=removal_mask, local_mask=local_mask)

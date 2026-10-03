@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from io import BytesIO
 
 from PIL import Image
 
 from app.config import MAX_HEAVY_JOBS, MAX_UPSCALE_OUTPUT_PIXELS
 from app.edit_schema import parse_aspect, parse_options
-from app.geometry import apply_geometry, geometry_output_size
+from app.geometry import geometry_output_size
+from app.high_bit import attach, attached, decode_high_bit, to_image
 from app.image_processor import PhotoProcessor
 from app.layer_workspace import LayerWorkspace, WorkspaceLayer
 from app.portrait_tools import smooth_skin
@@ -44,14 +46,31 @@ class PipelineCancelled(Exception):
     ValueError on purpose: it isn't a bad request (app.backend answers 409)."""
 
 
-def decode_source(content: bytes, filename: str) -> Image.Image:
+def decode_source(content: bytes, filename: str, *, high_bit: bool = False) -> Image.Image:
     """Validate and decode an uploaded/source file (RAW included) into an RGB image whose .info
     still carries the file's EXIF (Orientation already applied and removed) and ICC profile.
     PIL (via validate_image_bytes) can't decode camera RAW -- PhotoProcessor.from_bytes() routes it
     through rawpy and raises its own RuntimeError on failure -- so RAW skips the PIL check and gets
-    the exact pixel limit applied to its decoded size instead."""
+    the exact pixel limit applied to its decoded size instead.
+
+    `high_bit=True` (a 16-bit export, B4): a source that really holds more than 8 bits (16-bit
+    PNG/TIFF, camera RAW) is decoded at full precision too; the returned 8-bit image is its
+    quantization and carries the float pixels (app.high_bit.attached()) for run_pipeline()."""
     if not is_raw_path(filename):
         validate_image_bytes(content, filename)
+    if high_bit:
+        array = decode_high_bit(content, filename)
+        if array is not None:
+            check_pixel_count(array.shape[1], array.shape[0])
+            info_source = None
+            if not is_raw_path(filename):
+                info_source = Image.open(BytesIO(content))  # EXIF (Orientation reset below) + ICC
+            image = to_image(array, info_source)
+            if info_source is not None and info_source.getexif().get(0x0112, 1) != 1:
+                exif = info_source.getexif()
+                exif[0x0112] = 1
+                image.info["exif"] = exif.tobytes()
+            return image
     image = PhotoProcessor.from_bytes(content, filename).image
     if is_raw_path(filename):
         check_pixel_count(*image.size)
@@ -136,6 +155,10 @@ def run_pipeline(
       the proxy looks like a downscaled copy of the full-resolution export would. Non-Local Means
       denoise and film grain are deliberately not scaled: the frontend renders the 1:1 zoom views
       at full resolution for judging those.
+    - `bit_depth=16` (B4): run in PhotoProcessor's high-precision mode -- a float32 working copy,
+      seeded from the input's attached 16-bit pixels (decode_source(high_bit=True)) or from its
+      8-bit values -- and attach the float result to the returned image for a 16-bit export
+      (app.export.encode_export). Off by default; the 8-bit path is unchanged byte for byte.
 
     `should_cancel`, when given, is polled between steps; once it returns True the run stops with
     PipelineCancelled (the backend's "latest wins" job model -- a step already running finishes).
@@ -149,6 +172,9 @@ def run_pipeline(
     scale = options.get("preview_scale", 1.0)
     processor = PhotoProcessor.from_image(image)
     processor.pixel_scale = scale
+    high_bit = options.get("bit_depth", 8) == 16
+    if high_bit:
+        processor.enable_high_precision(attached(image))
     strip = options.get("strip_metadata", False)
     source_exif = _exif_bytes(image)
     source_icc = image.info.get("icc_profile")
@@ -171,7 +197,7 @@ def run_pipeline(
         # first, before anything else touches pixel positions, and before Crop so the user frames
         # against corrected geometry. The frontend's Crop/Masks/Repair base image is built by the
         # same apply_geometry(), so a mask or crop box lands on the same pixels here.
-        processor.image = apply_geometry(processor.image, options)
+        processor.apply_geometry(options)
 
         checkpoint()
         # Tone (+ preset, right after the Tone group -- a preset applies its own order-sensitive
@@ -215,7 +241,7 @@ def run_pipeline(
             processor.apply_sharpen()
 
         if options.get("stop_after") == "detail":
-            return _with_metadata(processor.image, source_exif, source_icc, strip)
+            return _with_metadata(processor.image, source_exif, source_icc, strip, processor.hdr)
 
     checkpoint()
     # Repair
@@ -295,10 +321,12 @@ def run_pipeline(
         check_upscale_output(processor.image.size, factor)
         processor.apply_ai_upscale(factor)
 
-    return _with_metadata(processor.image, source_exif, source_icc, strip)
+    return _with_metadata(processor.image, source_exif, source_icc, strip, processor.hdr)
 
 
-def _with_metadata(image: Image.Image, exif: bytes | None, icc: bytes | None, strip: bool) -> Image.Image:
+def _with_metadata(image: Image.Image, exif: bytes | None, icc: bytes | None, strip: bool, high_bit=None) -> Image.Image:
+    if high_bit is not None:
+        attach(image, high_bit)
     image.info.pop("exif", None)
     image.info.pop("icc_profile", None)
     if not strip:

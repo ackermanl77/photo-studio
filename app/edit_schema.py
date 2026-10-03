@@ -132,6 +132,8 @@ OPTION_SPECS: dict[str, OptionSpec] = {
     "max_width": _int(0, 100_000, "request"),
     "max_height": _int(0, 100_000, "request"),
     "strip_metadata": OptionSpec("bool", stage="request"),
+    # 16 = run the pipeline in float32 high-precision mode for a genuine 16-bit PNG/TIFF export (B4).
+    "bit_depth": OptionSpec("choice", choices=(8, 16), stage="request"),
     "export": OptionSpec("export", nullable=True, stage="request"),
 }
 

@@ -17,6 +17,9 @@ from app.raw_import import open_image
 # Rec. 709 luma weights -- the luminance Clarity and Highlights/Shadows act on (the old
 # Highlights/Shadows used mean(R, G, B), which treats a saturated blue as darker than it looks).
 _LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+# ITU-R 601 -- the weights PIL's convert("L") (and so ImageEnhance.Contrast/Color) uses; the
+# 16-bit path's Contrast/Saturation use them too, so a 16-bit export matches the 8-bit preview.
+_LUMA_601 = np.array([0.299, 0.587, 0.114], dtype=np.float32)
 # Spatial scales as a fraction of the image's long edge, so a reduced-size preview proxy and the
 # full-resolution export get the same look (B5 in the improvement report).
 CLARITY_SIGMA_FRACTION = 0.012
@@ -54,12 +57,11 @@ def _linear_to_srgb(values: np.ndarray) -> np.ndarray:
 _SHOULDER_KNEE = 0.8
 
 
-def exposure_lut(ev: float) -> list[int]:
-    """256-entry LUT for an exposure change of `ev` stops: decode sRGB to linear light, multiply by
-    2**ev, roll the highlights off above _SHOULDER_KNEE, encode back. One stop = twice the light,
-    the way Lightroom/darktable define exposure (the old slider multiplied the gamma-encoded values,
-    and its 0.5-1.5 range was only about -1..+0.6 EV)."""
-    linear = _srgb_to_linear(np.arange(256, dtype=np.float64) / 255.0) * (2.0 ** float(ev))
+def exposure_curve(values: np.ndarray, ev: float) -> np.ndarray:
+    """Exposure of `ev` stops on sRGB-encoded values (0..1): decode to linear light, multiply by
+    2**ev, roll the highlights off above _SHOULDER_KNEE, encode back. Shared by the 8-bit LUT below
+    and the 16-bit path's float arrays, so both compute the same curve."""
+    linear = _srgb_to_linear(values) * (2.0 ** float(ev))
     over = linear > _SHOULDER_KNEE
     headroom = 1.0 - _SHOULDER_KNEE
     shouldered = _SHOULDER_KNEE + headroom * (1.0 - np.exp(-(linear[over] - _SHOULDER_KNEE) / headroom))
@@ -67,7 +69,25 @@ def exposure_lut(ev: float) -> list[int]:
     # change never jumps.
     weight = min(1.0, max(0.0, float(ev)))
     linear[over] = (1.0 - weight) * np.minimum(linear[over], 1.0) + weight * shouldered
-    return [int(v) for v in np.clip(np.round(_linear_to_srgb(linear) * 255.0), 0, 255)]
+    return _linear_to_srgb(linear)
+
+
+def exposure_lut(ev: float) -> list[int]:
+    """256-entry LUT for an exposure change of `ev` stops (exposure_curve()). One stop = twice the
+    light, the way Lightroom/darktable define exposure (the old slider multiplied the gamma-encoded
+    values, and its 0.5-1.5 range was only about -1..+0.6 EV)."""
+    curve = exposure_curve(np.arange(256, dtype=np.float64) / 255.0, ev)
+    return [int(v) for v in np.clip(np.round(curve * 255.0), 0, 255)]
+
+
+def _clarity_float(arr: np.ndarray, clarity: float) -> np.ndarray:
+    """_apply_clarity()'s math on a 0-255 float array, unclipped and unquantized (16-bit path)."""
+    luminance = _luminance(arr)
+    sigma = max(1.0, CLARITY_SIGMA_FRACTION * max(arr.shape[:2]))
+    blurred = cv2.GaussianBlur(luminance, (0, 0), sigma)
+    midtones = 4.0 * luminance * (1.0 - luminance)
+    new_luminance = np.clip(luminance + (clarity / 100.0) * 1.5 * (luminance - blurred) * midtones, 0.0, 1.0)
+    return arr + ((new_luminance - luminance) * 255.0)[..., None]
 
 
 def _apply_clarity(arr: np.ndarray, clarity: float) -> np.ndarray:
@@ -130,6 +150,67 @@ class PhotoProcessor:
     # rendering a reduced-size interactive proxy, so the proxy looks like a downscaled copy of the
     # export (and a built-in preset's own sharpen call scales with it too). 1.0 = unchanged.
     pixel_scale: float = 1.0
+    # High-precision mode (B4, app.high_bit): when not None, a float32 HxWx3 array (sRGB-encoded,
+    # 0..1) that is the real working image. The tone/colour/mask-blend/geometry/crop/vignette
+    # methods compute on it directly; every other step still runs on the 8-bit `image` and its
+    # *change* is added onto the array (see the `image` setter), so the float data keeps its
+    # precision through steps that have no float implementation. None (the default) = the plain
+    # 8-bit behaviour, byte for byte.
+    hdr: np.ndarray | None = None
+    _image_stale: bool = False
+
+    @property
+    def image(self) -> Image.Image:
+        if self.hdr is not None and self._image_stale:
+            from app.high_bit import quantize8
+
+            self._image = Image.fromarray(quantize8(self.hdr), mode="RGB")
+            self._image_stale = False
+        return self._image
+
+    @image.setter
+    def image(self, value: Image.Image) -> None:
+        if self.hdr is None:
+            self._image = value
+            return
+        current = self.image
+        if value is current:
+            return
+        value = value.convert("RGB")
+        new = np.asarray(value, dtype=np.float32)
+        if value.size == current.size:
+            # An 8-bit step on the quantized image: carry its change over to the float data.
+            self.hdr = np.clip(self.hdr + (new - np.asarray(current, dtype=np.float32)) / 255.0, 0.0, 1.0).astype(np.float32)
+        else:
+            # A size-changing 8-bit step (only AI Upscale) -- precision restarts from its result.
+            self.hdr = new / 255.0
+        self._image = value
+        self._image_stale = False
+
+    def enable_high_precision(self, array: np.ndarray | None = None) -> "PhotoProcessor":
+        """Switch to high-precision mode, from `array` (a 16-bit source's float pixels, same size)
+        or from the current 8-bit image."""
+        from app.high_bit import from_image
+
+        if array is None or array.shape[:2] != (self._image.height, self._image.width):
+            array = from_image(self._image)
+        self.hdr = np.ascontiguousarray(array, dtype=np.float32)
+        self._image_stale = True
+        return self
+
+    def _set_hdr(self, array: np.ndarray) -> "PhotoProcessor":
+        self.hdr = np.clip(array, 0.0, 1.0).astype(np.float32, copy=False)
+        self._image_stale = True
+        return self
+
+    def apply_geometry(self, options: dict) -> "PhotoProcessor":
+        """The pipeline's Geometry step (app.geometry.apply_geometry) on whichever data is real."""
+        from app.geometry import apply_geometry
+
+        if self.hdr is not None:
+            return self._set_hdr(apply_geometry(self.hdr, options))
+        self.image = apply_geometry(self.image, options)
+        return self
 
     def __init__(self, input_path: str | Path):
         self.input_path = Path(input_path)
@@ -145,27 +226,45 @@ class PhotoProcessor:
         return processor
 
     def apply_brightness(self, value: float) -> "PhotoProcessor":
+        if self.hdr is not None:
+            return self._set_hdr(self.hdr * float(value)) if value != 1.0 else self
         enhancer = ImageEnhance.Brightness(self.image)
         self.image = enhancer.enhance(value)
         return self
 
     def apply_contrast(self, value: float) -> "PhotoProcessor":
+        if self.hdr is not None:
+            # ImageEnhance.Contrast: blend toward the mean (ITU-R 601) luminance.
+            if value == 1.0:
+                return self
+            mean = float((self.hdr @ _LUMA_601).mean())
+            return self._set_hdr(mean + float(value) * (self.hdr - mean))
         enhancer = ImageEnhance.Contrast(self.image)
         self.image = enhancer.enhance(value)
         return self
 
     def apply_saturation(self, value: float) -> "PhotoProcessor":
+        if self.hdr is not None:
+            # ImageEnhance.Color: blend toward each pixel's (ITU-R 601) gray.
+            if value == 1.0:
+                return self
+            gray = (self.hdr @ _LUMA_601)[..., None]
+            return self._set_hdr(gray + float(value) * (self.hdr - gray))
         enhancer = ImageEnhance.Color(self.image)
         self.image = enhancer.enhance(value)
         return self
 
     def apply_exposure(self, value: float) -> "PhotoProcessor":
+        if self.hdr is not None:
+            return self._set_hdr(self.hdr * float(value)) if value != 1.0 else self
         arr = np.array(self.image, dtype=np.float32)
         self.image = Image.fromarray(np.clip(arr * value, 0, 255).astype(np.uint8), mode="RGB")
         return self
 
     def apply_exposure_ev(self, ev: float = 0.0) -> "PhotoProcessor":
         """Exposure in stops, in linear light (see exposure_lut)."""
+        if ev and self.hdr is not None:
+            return self._set_hdr(exposure_curve(self.hdr, ev))
         if ev:
             self.image = self.image.convert("RGB").point(exposure_lut(ev) * 3)
         return self
@@ -173,12 +272,16 @@ class PhotoProcessor:
     def apply_temperature_tint(self, temperature: float = 0.0, tint: float = 0.0) -> "PhotoProcessor":
         temperature = max(-100.0, min(100.0, float(temperature))) / 100.0
         tint = max(-100.0, min(100.0, float(tint))) / 100.0
-        arr = np.array(self.image, dtype=np.float32)
+        if self.hdr is not None and not temperature and not tint:
+            return self
+        arr = self.hdr * 255.0 if self.hdr is not None else np.array(self.image, dtype=np.float32)
         arr[:, :, 0] *= 1.0 + temperature * 0.25
         arr[:, :, 2] *= 1.0 - temperature * 0.25
         arr[:, :, 1] *= 1.0 - tint * 0.2
         arr[:, :, 0] *= 1.0 + tint * 0.1
         arr[:, :, 2] *= 1.0 + tint * 0.1
+        if self.hdr is not None:
+            return self._set_hdr(arr / 255.0)
         self.image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), mode="RGB")
         return self
 
@@ -230,6 +333,8 @@ class PhotoProcessor:
         y_values = np.array([point[1] for point in ordered], dtype=np.float32)
         if x_values[0] < 0 or x_values[-1] > 255 or np.any(np.diff(x_values) <= 0):
             raise ValueError("Curve input values must be unique and within 0-255")
+        if self.hdr is not None:
+            return self._set_hdr(np.interp(self.hdr * 255.0, x_values, y_values).astype(np.float32) / 255.0)
         lookup = np.interp(np.arange(256), x_values, y_values).clip(0, 255).astype(np.uint8)
         arr = np.array(self.image)
         self.image = Image.fromarray(lookup[arr], mode="RGB")
@@ -255,9 +360,15 @@ class PhotoProcessor:
     ) -> "PhotoProcessor":
         """Apply an adjustment set only where `mask` is selected (blended by the mask's value)."""
         mask_array = self._mask_array(mask).astype(np.float32) / 255.0
-        original = np.array(self.image)
         local = PhotoProcessor.from_image(self.image)
         local.pixel_scale = self.pixel_scale
+        if self.hdr is not None:
+            local.enable_high_precision(self.hdr)
+            local.apply_exposure(exposure).apply_exposure_ev(exposure_ev).apply_contrast(contrast).apply_saturation(saturation)
+            local.apply_temperature_tint(temperature, tint).apply_texture_clarity(0.0, clarity)
+            blend = mask_array[..., None]
+            return self._set_hdr(self.hdr * (1.0 - blend) + local.hdr * blend)
+        original = np.array(self.image)
         edited = (
             local
             .apply_exposure(exposure)
@@ -304,7 +415,7 @@ class PhotoProcessor:
         extreme of each range."""
         if not highlights and not shadows:
             return self
-        arr = np.array(self.image, dtype=np.float32)
+        arr = self.hdr * 255.0 if self.hdr is not None else np.array(self.image, dtype=np.float32)
         luminance = _luminance(arr)
         radius = max(1, int(round(TONE_BASE_RADIUS_FRACTION * max(self.image.size))))
         base = guided_filter(luminance, radius, 0.01)
@@ -317,6 +428,8 @@ class PhotoProcessor:
         new_base = np.clip(base + (float(shadows) / 255.0) * shadow_weight * 1.6 + (float(highlights) / 255.0) * highlight_weight * 1.6, 0.0, 1.0)
         delta = (new_base + detail - luminance) * 255.0
         arr += delta[..., None]
+        if self.hdr is not None:
+            return self._set_hdr(arr / 255.0)
         self.image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), mode="RGB")
         return self
 
@@ -330,7 +443,9 @@ class PhotoProcessor:
             detail = original - np.array(blurred, dtype=np.float32)
             original += detail * (texture / 100.0)
             self.image = Image.fromarray(np.clip(original, 0, 255).astype(np.uint8), mode="RGB")
-        if clarity:
+        if clarity and self.hdr is not None:
+            self._set_hdr(_clarity_float(self.hdr * 255.0, clarity) / 255.0)
+        elif clarity:
             self.image = Image.fromarray(_apply_clarity(np.array(self.image, dtype=np.float32), clarity), mode="RGB")
         return self
 
@@ -339,6 +454,8 @@ class PhotoProcessor:
         box = (max(0, left), max(0, top), min(width, right), min(height, bottom))
         if box[2] <= box[0] or box[3] <= box[1]:
             raise ValueError("Crop coordinates must describe a non-empty region")
+        if self.hdr is not None:
+            return self._set_hdr(self.hdr[box[1]:box[3], box[0]:box[2]])
         self.image = self.image.crop(box)
         return self
 
@@ -408,6 +525,8 @@ class PhotoProcessor:
         Reuses `correct_vignette()` unchanged -- it's the identical radial darken/brighten math,
         just applied at a different pipeline position and for a different (creative, not
         corrective) reason, so a second implementation would just be duplicated code."""
+        if self.hdr is not None:
+            return self._set_hdr(correct_vignette(self.hdr, amount, midpoint))
         self.image = correct_vignette(self.image, amount, midpoint)
         return self
 

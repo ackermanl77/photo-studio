@@ -14,6 +14,12 @@ EXIF is fixed up for the new file: Orientation is 1 (pixels are already upright 
 it), PixelXDimension/PixelYDimension are the exported size, and any embedded thumbnail (IFD1, which
 would show the *unedited* photo) is dropped. The ICC profile is always kept -- it's color
 information, not personal data, and dropping it changes how a viewer renders the colors.
+
+Bit depth (settings["bit_depth"], PNG and TIFF only): 16 writes a genuine 16-bit file from the
+float pixels app.pipeline attaches to its result in high-precision mode (app.high_bit -- B4); an
+image without them is widened from its 8 bits. A 16-bit PNG carries ICC and EXIF (iCCP/eXIf
+chunks); a 16-bit TIFF carries ICC and the IFD0 text tags (camera make/model, date, artist,
+copyright, software) but not the EXIF sub-IFD (exposure details, GPS) -- tifffile can't write it.
 """
 from __future__ import annotations
 
@@ -23,6 +29,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageFilter
 
 EXPORT_FORMATS = {
@@ -50,7 +57,10 @@ DEFAULT_EXPORT_SETTINGS = {
     "metadata": "all",
     "remove_gps": False,
     "watermark": None,
+    "bit_depth": 8,
 }
+# Formats that can hold 16 bits per channel.
+HIGH_BIT_FORMATS = ("PNG", "TIFF")
 
 _ORIENTATION = 0x0112
 _EXIF_IFD = 0x8769
@@ -90,6 +100,10 @@ def validate_export_settings(settings) -> dict:
         clean[key] = int(value)
     if not isinstance(clean["remove_gps"], bool):
         raise ValueError("export remove_gps must be true or false")
+    if clean["bit_depth"] not in (8, 16) or isinstance(clean["bit_depth"], bool):
+        raise ValueError("export bit_depth must be 8 or 16")
+    if clean["bit_depth"] == 16 and clean["format"] not in HIGH_BIT_FORMATS:
+        raise ValueError(f"16-bit export needs {' or '.join(HIGH_BIT_FORMATS)}, not {clean['format']}")
     watermark = clean["watermark"]
     if watermark is not None:
         if not isinstance(watermark, dict) or not str(watermark.get("text", "")).strip():
@@ -151,6 +165,8 @@ def encode_export(image: Image.Image, settings: dict | None = None, *, exif: byt
     settings = validate_export_settings(settings or {})
     exif = exif if exif is not None else image.info.get("exif")
     icc = icc if icc is not None else image.info.get("icc_profile")
+    if settings["bit_depth"] == 16:
+        return _encode_16bit(image, settings, exif, icc)
 
     result = _resize_long_edge(image, settings["long_edge"])
     sharpening = OUTPUT_SHARPENING[settings["sharpen"]]
@@ -181,6 +197,110 @@ def encode_export(image: Image.Image, settings: dict | None = None, *, exif: byt
     result.save(buffer, **save_kwargs)
     extension, mime = EXPORT_FORMATS[format_name]
     return buffer.getvalue(), extension, mime
+
+
+# --- 16-bit output (B4) -------------------------------------------------------------------------------
+
+def _resize_float(array: np.ndarray, long_edge: int) -> np.ndarray:
+    """_resize_long_edge() on float pixels: the same Pillow Lanczos filter, run per channel on 32-bit
+    float ("F") images, so the 16-bit file is resampled exactly like the 8-bit one."""
+    height, width = array.shape[:2]
+    if not long_edge or max(width, height) <= long_edge:
+        return array
+    scale = long_edge / max(width, height)
+    size = (max(1, round(width * scale)), max(1, round(height * scale)))
+    channels = [np.asarray(Image.fromarray(np.ascontiguousarray(array[..., index], dtype=np.float32), mode="F").resize(size, Image.Resampling.LANCZOS)) for index in range(3)]
+    return np.clip(np.stack(channels, axis=-1), 0.0, 1.0)
+
+
+def _unsharp_float(array: np.ndarray, radius: float, percent: int, threshold: int) -> np.ndarray:
+    """PIL's UnsharpMask (radius, percent, threshold in 8-bit levels) on float pixels."""
+    import cv2
+
+    blurred = cv2.GaussianBlur(array, (0, 0), radius)
+    detail = array - blurred
+    detail[np.abs(detail) * 255.0 < threshold] = 0.0
+    return np.clip(array + detail * (percent / 100.0), 0.0, 1.0)
+
+
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    import struct
+    import zlib
+
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+
+def _png16(array16: np.ndarray, exif: bytes | None, icc: bytes | None) -> bytes:
+    """A 16-bit RGB PNG (OpenCV writes the pixels), with iCCP/eXIf chunks spliced in after IHDR --
+    OpenCV writes no metadata, and Pillow can't write 16-bit RGB."""
+    import cv2
+    import zlib
+
+    ok, encoded = cv2.imencode(".png", np.ascontiguousarray(array16[..., ::-1]), [cv2.IMWRITE_PNG_COMPRESSION, 6])
+    if not ok:
+        raise ValueError("Could not encode the 16-bit PNG")
+    content = encoded.tobytes()
+    chunks = b""
+    if icc:
+        chunks += _png_chunk(b"iCCP", b"ICC Profile\x00\x00" + zlib.compress(icc))
+    if exif:
+        chunks += _png_chunk(b"eXIf", exif[6:] if exif.startswith(b"Exif\x00\x00") else exif)
+    ihdr_end = 8 + 4 + 4 + 13 + 4  # signature, then the IHDR chunk (length, type, 13 bytes, CRC)
+    return content[:ihdr_end] + chunks + content[ihdr_end:]
+
+
+# IFD0 text tags a 16-bit TIFF keeps from the prepared EXIF: Make, Model, Software, DateTime, Artist, Copyright.
+_TIFF_TEXT_TAGS = (0x010F, 0x0110, 0x0131, 0x0132, 0x013B, 0x8298)
+
+
+def _tiff16(array16: np.ndarray, exif: bytes | None, icc: bytes | None) -> bytes:
+    import tifffile
+
+    extratags, software = [], None
+    if exif:
+        parsed = Image.Exif()
+        parsed.load(exif)
+        for tag in _TIFF_TEXT_TAGS:
+            value = parsed.get(tag)
+            if not isinstance(value, str) or not value:
+                continue
+            if tag == 0x0131:
+                software = value  # tifffile owns the Software tag; it takes it as a parameter
+            else:
+                extratags.append((tag, "s", 0, value, True))
+    buffer = io.BytesIO()
+    tifffile.imwrite(
+        buffer, array16, photometric="rgb", compression="zlib", iccprofile=icc or None, extratags=extratags,
+        metadata=None, software=software,
+    )
+    return buffer.getvalue()
+
+
+def _encode_16bit(image: Image.Image, settings: dict, exif: bytes | None, icc: bytes | None) -> tuple[bytes, str, str]:
+    from app.high_bit import attached, from_image, quantize8
+
+    array = attached(image)
+    array = from_image(image) if array is None else np.asarray(array, dtype=np.float32)
+    array = _resize_float(array, settings["long_edge"])
+    sharpening = OUTPUT_SHARPENING[settings["sharpen"]]
+    if sharpening:
+        array = _unsharp_float(array, *sharpening)
+    watermark = settings["watermark"]
+    if watermark:
+        from app.professional_tools import apply_watermark
+
+        base = Image.fromarray(quantize8(array), mode="RGB")
+        marked = apply_watermark(base, watermark["text"], watermark["position"], watermark["opacity"], watermark["font_size"]).convert("RGB")
+        array = np.clip(array + (np.asarray(marked, dtype=np.float32) - np.asarray(base, dtype=np.float32)) / 255.0, 0.0, 1.0)
+    from app.high_bit import to_uint16
+
+    array16 = to_uint16(array)
+    size = (array16.shape[1], array16.shape[0])
+    exif_out = prepare_exif(exif, size, settings["metadata"], settings["remove_gps"])
+    format_name = settings["format"]
+    content = _png16(array16, exif_out, icc) if format_name == "PNG" else _tiff16(array16, exif_out, icc)
+    extension, mime = EXPORT_FORMATS[format_name]
+    return content, extension, mime
 
 
 _EXPORT_CACHE: "OrderedDict[str, bytes]" = OrderedDict()
@@ -235,7 +355,7 @@ class ExportPresetStore:
     under the user data folder -- F6's "saveable export presets". Written atomically; an unreadable
     file reads as empty rather than breaking the Export panel."""
 
-    FIELDS = ("format", "quality", "long_edge", "sharpen", "metadata", "remove_gps", "name_template")
+    FIELDS = ("format", "quality", "long_edge", "sharpen", "metadata", "remove_gps", "name_template", "bit_depth")
 
     def __init__(self, path: str | Path | None = None):
         if path is None:
@@ -281,10 +401,14 @@ def format_for_path(path: str | Path) -> str:
 
 
 def write_export(image: Image.Image, output_path: str | Path, settings: dict | None = None) -> Path:
-    """encode_export() straight to a file whose format follows its extension (CLI and batch)."""
+    """encode_export() straight to a file whose format follows its extension (CLI and batch). A
+    16-bit request applies where the format can hold it (PNG/TIFF); a JPEG/WEBP output stays 8-bit."""
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    content, _extension, _mime = encode_export(image, {**(settings or {}), "format": format_for_path(output)})
+    settings = {**(settings or {}), "format": format_for_path(output)}
+    if settings["format"] not in HIGH_BIT_FORMATS:
+        settings.pop("bit_depth", None)
+    content, _extension, _mime = encode_export(image, settings)
     output.write_bytes(content)
     return output
 
