@@ -18,7 +18,7 @@ Presets live in `app/presets.py` and are named pipelines:
 1. Start with a `PhotoProcessor` for one image.
 2. Call `apply_preset(processor, "portrait-natural")`.
 3. Inspect the result before saving.
-4. Save with `PhotoProcessor.save()` or `save_for_delivery()`.
+4. Save with `PhotoProcessor.save()` or `app.export.write_export()`.
 5. Add a test using a small fixture image when changing a preset.
 
 ## CLI checkpoint

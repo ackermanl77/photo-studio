@@ -8,7 +8,7 @@ Produce delivery files with predictable format, quality, and destination behavio
 
 1. Finish the edit pipeline.
 2. Select a destination extension that matches the delivery requirement.
-3. Call `save_for_delivery()` with a quality value from 1 to 100.
+3. Call `app.export.write_export(image, path, {"quality": 92})` (format follows the extension; see `encode_export()` for every setting).
 4. Confirm the destination exists.
 5. Re-open the file and verify its format and dimensions.
 6. Keep the source file unchanged.
