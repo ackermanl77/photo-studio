@@ -30,6 +30,9 @@ SetupIconFile=..\app\assets\photostudio.ico
 UninstallDisplayIcon={app}\PhotoStudio.exe
 ; .photoproject association below writes to HKA (per-machine when installed for all users).
 ChangesAssociations=yes
+; Lets a non-admin user install "for me only" ({autopf} -> %LOCALAPPDATA%\Programs, HKA -> HKCU),
+; from the wizard's dialog or with /CURRENTUSER; without it Setup always demanded elevation.
+PrivilegesRequiredOverridesAllowed=commandline dialog
 
 #ifdef WithGpuPack
 [Types]
@@ -46,7 +49,7 @@ Name: "gpupack"; Description: "GPU pack: AI Upscale with Real-ESRGAN (several GB
 Name: "assocproject"; Description: "Open .photoproject files with Photo Studio"; GroupDescription: "File associations:"
 
 [Registry]
-Root: HKA; Subkey: "Software\Classes\.photoproject"; ValueType: string; ValueName: ""; ValueData: "PhotoStudio.Project"; Flags: uninsdeletevalue; Tasks: assocproject
+Root: HKA; Subkey: "Software\Classes\.photoproject"; ValueType: string; ValueName: ""; ValueData: "PhotoStudio.Project"; Flags: uninsdeletevalue uninsdeletekeyifempty; Tasks: assocproject
 Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project"; ValueType: string; ValueName: ""; ValueData: "Photo Studio Project"; Flags: uninsdeletekey; Tasks: assocproject
 Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\PhotoStudio.exe,0"; Tasks: assocproject
 Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\PhotoStudio.exe"" ""%1"""; Tasks: assocproject
@@ -69,10 +72,12 @@ Name: "{autodesktop}\Photo Studio"; Filename: "{app}\PhotoStudio.exe"
 [Code]
 // Settings, presets, the library catalog and logs live in %LOCALAPPDATA%\PhotoStudio
 // (app.config.user_data_dir()). They are kept on uninstall unless the user agrees here.
+// SuppressibleMsgBox, not MsgBox: a /SUPPRESSMSGBOXES silent uninstall answers IDNO (keep the data)
+// instead of blocking on a dialog nobody sees.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
-    if MsgBox('Also delete your Photo Studio presets, catalog, downloaded models, logs and any GPU pack kept there (' + ExpandConstant('{localappdata}\PhotoStudio') + ')?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+    if SuppressibleMsgBox('Also delete your Photo Studio presets, catalog, downloaded models, logs and any GPU pack kept there (' + ExpandConstant('{localappdata}\PhotoStudio') + ')?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then
       DelTree(ExpandConstant('{localappdata}\PhotoStudio'), True, True, True);
 end;
 
