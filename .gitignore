@@ -29,6 +29,10 @@ PhotoStudio-*-Windows/
 PhotoStudio-*-Windows.zip
 PhotoStudio-*-Windows.7z
 PhotoStudio-*-Windows.7z.sha256
+PhotoStudio-*-GPU-pack.7z
+PhotoStudio-*-GPU-pack.7z.sha256
+build-release-gpu-pack-self-test.json
+/release-gpu-pack/
 *.spec.bak
 
 # Fixed-name mirror of the current PhotoStudio-<version>-Windows/ build output (see

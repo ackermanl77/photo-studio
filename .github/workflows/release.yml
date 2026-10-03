@@ -10,6 +10,10 @@ on:
         description: "Version number to build (e.g. 0.1.0) -- no leading 'v'"
         required: true
         default: "0.1.0"
+      gpu_pack:
+        description: "Also build the optional GPU pack (AI Upscale; a multi-GB CUDA torch download) as a workflow artifact"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -62,9 +66,15 @@ jobs:
       # requirements-desktop.txt, PyInstaller, bundle the cached WebView2 Fixed Version runtime,
       # then archive to .7z + write its .sha256 sidecar (see that script's own comments for why
       # each piece exists -- this workflow is deliberately just "run the same script in CI").
+      # The CPU base package (K5). The GPU pack is optional (manual runs only): it downloads CUDA
+      # torch, and its archive can exceed GitHub's 2 GB release-asset limit, so it is kept as a
+      # workflow artifact rather than attached to the release.
       - name: Build release
         shell: pwsh
-        run: .\scripts\build_release.ps1 -Version "${{ steps.version.outputs.value }}"
+        run: |
+          $extra = @()
+          if ("${{ github.event.inputs.gpu_pack }}" -eq "true") { $extra = @("-GpuPack", "-ExtraIndexUrl", "https://download.pytorch.org/whl/cu130") }
+          .\scripts\build_release.ps1 -Version "${{ steps.version.outputs.value }}" @extra
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -73,6 +83,16 @@ jobs:
           path: |
             PhotoStudio-*-Windows.7z
             PhotoStudio-*-Windows.7z.sha256
+          if-no-files-found: error
+
+      - name: Upload GPU pack
+        if: github.event.inputs.gpu_pack == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhotoStudio-${{ steps.version.outputs.value }}-GPU-pack
+          path: |
+            PhotoStudio-*-GPU-pack.7z
+            PhotoStudio-*-GPU-pack.7z.sha256
           if-no-files-found: error
 
       - name: Publish GitHub Release
