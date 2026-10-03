@@ -4,7 +4,8 @@ import zipfile
 
 import pytest
 
-from app.project import PhotoProject
+from app.project_bundle import ProjectBundle
+from tests.legacy_project import PhotoProject
 
 
 def test_photo_project_load_rejects_an_archive_with_too_many_entries():
@@ -20,7 +21,7 @@ def test_photo_project_load_rejects_an_archive_with_too_many_entries():
             bundle.writestr(f"junk{i}.txt", "x")
 
     with pytest.raises(ValueError, match="too many files"):
-        PhotoProject.load(archive.getvalue())
+        ProjectBundle.load(archive.getvalue())
 
 
 def test_photo_project_load_rejects_an_unsafe_path():
@@ -31,7 +32,7 @@ def test_photo_project_load_rejects_an_unsafe_path():
         bundle.writestr("../outside.txt", "bad")
 
     with pytest.raises(ValueError, match="unsafe path"):
-        PhotoProject.load(archive.getvalue())
+        ProjectBundle.load(archive.getvalue())
 
 
 def test_photo_project_load_rejects_a_manifest_referencing_a_missing_removal_mask():
@@ -48,7 +49,7 @@ def test_photo_project_load_rejects_a_manifest_referencing_a_missing_removal_mas
         # masks/removal.png is deliberately never written
 
     with pytest.raises(ValueError, match="missing removal_mask file"):
-        PhotoProject.load(archive.getvalue())
+        ProjectBundle.load(archive.getvalue())
 
 
 def test_photo_project_round_trip_still_works_through_the_new_validation(tmp_path):
@@ -64,3 +65,16 @@ def test_photo_project_round_trip_still_works_through_the_new_validation(tmp_pat
     assert restored.removal_mask == b"remove"
     assert restored.local_mask == b"local"
     assert restored.recipe == {"exposure": 1.2}
+
+
+def test_project_bundle_opens_a_version_1_project(tmp_path):
+    """The app's only loader (ProjectBundle.load) still opens the old v1 format, migrating its
+    multiplier recipe keys."""
+    project_path = tmp_path / "legacy.photoproject"
+    PhotoProject("input.png", b"source-bytes", {"contrast": 1.2}).save(project_path)
+
+    restored = ProjectBundle.load(project_path)
+
+    assert restored.source_name == "input.png"
+    assert restored.source_bytes == b"source-bytes"
+    assert restored.recipe == {"contrast_amount": 20}

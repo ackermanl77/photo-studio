@@ -3,10 +3,9 @@ from __future__ import annotations
 import base64
 import io
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from app.major_features import Layer, LayerStack

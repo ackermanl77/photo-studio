@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import io
-import json
-from pathlib import Path
 
 import cv2
 import numpy as np
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 # Fractional (0..1) line positions each named grid style draws on BOTH axes -- shared between
 # draw_guides_and_grid()'s display overlay and the free-form crop editor's on-canvas snapping (see
@@ -266,6 +264,7 @@ def export_profile(
     watermark_font_size: int = 32,
     exif: bytes | None = None,
     remove_gps: bool = False,
+    gpu_export: bool = False,
 ) -> tuple[bytes, str, str]:
     """`remove_gps` drops the GPS block from a profile that keeps EXIF (Print/Archive; Web and
     Social strip all EXIF anyway). `exif` overrides `image.info["exif"]` -- the frontend passes the *source* photo's EXIF,
@@ -276,7 +275,23 @@ def export_profile(
     profile = EXPORT_PROFILES[profile_name]
     result = image.copy()
     if profile["max_size"]:
-        result.thumbnail(profile["max_size"], Image.Resampling.LANCZOS)
+        if gpu_export and result.size != (
+            min(result.width, profile["max_size"][0]),
+            min(result.height, profile["max_size"][1]),
+        ):
+            from app.export import gpu_export_transform
+
+            width, height = result.size
+            max_width, max_height = profile["max_size"]
+            scale = min(1.0, max_width / width, max_height / height)
+            output_size = (max(1, round(width * scale)), max(1, round(height * scale)))
+            pixels = gpu_export_transform(np.asarray(result.convert("RGB")), output_size)
+            if pixels is not None:
+                result = Image.fromarray(pixels)
+            else:
+                result.thumbnail(profile["max_size"], Image.Resampling.LANCZOS)
+        else:
+            result.thumbnail(profile["max_size"], Image.Resampling.LANCZOS)
     if watermark_text and watermark_text.strip():
         # Applied after the resize above (not before) so position/margin/font-size are relative
         # to the actual exported pixel dimensions of each profile, not the source's.
@@ -304,13 +319,3 @@ def export_profile(
     result.save(output, **save_kwargs)
     extension = {"JPEG": ".jpg", "TIFF": ".tif", "PNG": ".png"}[format_name]
     return output.getvalue(), extension, "image/jpeg" if format_name == "JPEG" else "image/" + format_name.lower()
-
-
-def validate_project_bytes(content: bytes) -> dict:
-    try:
-        payload = json.loads(content)
-    except (TypeError, json.JSONDecodeError) as error:
-        raise ValueError("Project manifest is not valid JSON") from error
-    if payload.get("version") not in (1, 2) or not isinstance(payload.get("recipe", {}), dict):
-        raise ValueError("Unsupported or invalid project manifest")
-    return payload

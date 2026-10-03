@@ -9,7 +9,7 @@ from app.backend import app
 from app.config import MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES
 from app.image_processor import PhotoProcessor
 from app.layer_workspace import WorkspaceLayer, layers_to_json
-from app.project import PhotoProject
+from tests.legacy_project import PhotoProject
 from app.raw_import import is_raw_path
 
 

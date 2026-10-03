@@ -15,18 +15,16 @@ Two related but distinct contracts live here:
   hand-edited, older, or newer file must never take the page down (a value above a slider's max
   raised StreamlitValueAboveMaxError), so out-of-range values are clamped to the *widget's* range,
   wrong types fall back to the control's default, and unknown keys are dropped.
-  tests/test_edit_schema.py checks these ranges against the real widgets through AppTest, so the
-  two can't drift apart silently.
+  Both tables' control entries are derived from app.controls.CONTROLS (F15), the one registry the
+  widgets are generated from too, so a widget's range and its sanitizer can't drift apart.
 """
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
 
-from app.lens_corrections import LENS_PROFILES
-from app.presets import PRESETS
+from app.controls import CONTROLS
 from app.professional_color import HSL_BAND_ORDER
-from app.recipe_options import ASPECT_RATIOS
 
 # Bumped whenever an option's meaning changes incompatibly; a request carrying a newer
 # "schema_version" than this build understands is rejected instead of being misread.
@@ -62,64 +60,36 @@ def _int(minimum: int, maximum: int, stage: str = "finish") -> OptionSpec:
     return OptionSpec("int", minimum, maximum, stage=stage)
 
 
-OPTION_SPECS: dict[str, OptionSpec] = {
-    # Geometry (app.geometry) -- orientation and straighten, applied with the Lens corrections
-    "rotate": OptionSpec("choice", choices=(0, 90, 180, 270), stage="detail"),
-    "flip_horizontal": OptionSpec("bool", stage="detail"),
-    "flip_vertical": OptionSpec("bool", stage="detail"),
-    "straighten": _num(-45, 45, "detail"),
-    "constrain_crop": OptionSpec("bool", stage="detail"),
-    # Lens
-    "lens_distortion": _num(-100, 100, "detail"),
-    "lens_vignette_amount": _num(-100, 100, "detail"),
-    "lens_vignette_midpoint": _num(0, 100, "detail"),
-    "lens_chromatic_aberration": _num(-100, 100, "detail"),
-    "lens_perspective_v": _num(-100, 100, "detail"),
-    "lens_perspective_h": _num(-100, 100, "detail"),
-    # Tone (brightness is CLI-only; the UI has no Brightness control)
+def _control_option_spec(control) -> OptionSpec:
+    """The /process option a registry control sets (app.controls): its kind and its validation
+    domain -- the control's own range carried through its transform, unless the control declares a
+    wider API domain (the CLI and API have always accepted e.g. `--contrast 2.0`)."""
+    kind = control.option_kind or {"int": "number", "float": "number"}.get(control.kind, control.kind)
+    if kind == "choice":
+        return OptionSpec("choice", choices=control.choices, nullable=control.option_nullable, stage=control.stage)
+    if kind == "bool":
+        return OptionSpec("bool", nullable=control.option_nullable, stage=control.stage)
+    low, high = control.option_domain or (control.to_option(control.minimum), control.to_option(control.maximum))
+    return OptionSpec(kind, low, high, nullable=control.option_nullable, stage=control.stage)
+
+
+# Options no single registry control maps to: CLI/API-only knobs, the composite options several
+# controls feed (curve, hsl_bands, aspect, crop_box), per-selection data, and request control.
+_OTHER_OPTION_SPECS: dict[str, OptionSpec] = {
+    # Tone (brightness and the multiplier exposure are CLI/API-only; the UI's Exposure is exposure_ev)
     "brightness": _num(0, 10, "detail"),
-    "exposure": _num(0, 10, "detail"),  # a multiplier on gamma-encoded values (the CLI/API's own)
-    "exposure_ev": _num(-5, 5, "detail"),  # stops, in linear light (the UI's Exposure slider)
-    "contrast": _num(0, 10, "detail"),
-    "highlights": _num(-255, 255, "detail"),
-    "shadows": _num(-255, 255, "detail"),
-    "preset": OptionSpec("choice", choices=("None", *sorted(PRESETS)), nullable=True, stage="detail"),
-    # Color
-    "temperature": _num(-100, 100, "detail"),
-    "tint": _num(-100, 100, "detail"),
-    "saturation": _num(0, 10, "detail"),
-    "vibrance": _num(-100, 100, "detail"),
+    "exposure": _num(0, 10, "detail"),
     "hsl_bands": OptionSpec("hsl_bands", nullable=True, stage="detail"),
-    "cg_shadows_hue": _num(0, 360, "detail"), "cg_shadows_intensity": _num(0, 100, "detail"),
-    "cg_midtones_hue": _num(0, 360, "detail"), "cg_midtones_intensity": _num(0, 100, "detail"),
-    "cg_highlights_hue": _num(0, 360, "detail"), "cg_highlights_intensity": _num(0, 100, "detail"),
-    "cg_balance": _num(-100, 100, "detail"),
     "curve": OptionSpec("curve", nullable=True, stage="detail"),
-    # Detail
-    "texture": _num(-100, 100, "detail"),
-    "clarity": _num(-100, 100, "detail"),
-    "dehaze": _num(0, 100, "detail"),
-    "denoise": _int(0, 20, "detail"),
-    "denoise_color": _int(0, 20, "detail"),
-    "sharpen": OptionSpec("bool", stage="detail"),
-    # Repair / Masks / Portrait
-    "removal_radius": _num(1, 50),
+    # Repair / Masks
     "mask_exposure": _num(0, 10),
-    "mask_exposure_ev": _num(-5, 5),
     # One adjustment set per selection that has its own (B8) -- paired, in order, with the masks in
     # /process's "local_masks" file. See LOCAL_ADJUSTMENT_SPECS.
     "local_adjustments": OptionSpec("local_adjustments", nullable=True),
-    "mask_contrast": _num(0, 10),
-    "mask_saturation": _num(0, 10),
-    "portrait_smoothing": _num(0, 1),
     # Crop
     "aspect": OptionSpec("aspect", nullable=True),
     "crop_box": OptionSpec("crop_box", nullable=True),
-    # Effects
-    "effects_vignette_amount": _num(-100, 100),
-    "effects_vignette_midpoint": _num(0, 100),
-    "effects_grain_amount": _num(0, 100),
-    # AI Upscale (an export-time action in the UI -- see app/frontend_unified_app.py)
+    # AI Upscale (an export-time action in the UI)
     "ai_upscale": OptionSpec("bool"),
     "ai_upscale_factor": OptionSpec("choice", choices=(2, 4)),
     # Request / transport control
@@ -135,6 +105,11 @@ OPTION_SPECS: dict[str, OptionSpec] = {
     # 16 = run the pipeline in float32 high-precision mode for a genuine 16-bit PNG/TIFF export (B4).
     "bit_depth": OptionSpec("choice", choices=(8, 16), stage="request"),
     "export": OptionSpec("export", nullable=True, stage="request"),
+}
+
+OPTION_SPECS: dict[str, OptionSpec] = {
+    **{control.option: _control_option_spec(control) for control in CONTROLS if control.option},
+    **_OTHER_OPTION_SPECS,
 }
 
 # A selection's own adjustment set (Masks tab, "Own adjustments"): UI units throughout.
@@ -274,44 +249,11 @@ def _rf(minimum: float, maximum: float, default: float) -> RecipeControl:
     return RecipeControl("float", default, minimum, maximum)
 
 
-# Ranges are the Streamlit widgets' own min/max in app/frontend_unified_app.py.
+# One entry per registry control (app.controls) -- the widgets' own kind, range and default.
 RECIPE_CONTROLS: dict[str, RecipeControl] = {
-    "exposure_ev": _rf(-5.0, 5.0, 0.0), "contrast_amount": _ri(-100, 100),
-    "highlights": _ri(-100, 100), "shadows": _ri(-100, 100),
-    "preset": RecipeControl("choice", "None", choices=("None", *sorted(PRESETS))),
-    "temperature": _ri(-100, 100), "tint": _ri(-100, 100),
-    "saturation_amount": _ri(-100, 100), "vibrance": _ri(-100, 100),
-    "curve_enabled": RecipeControl("bool", False),
-    "curve_black": _ri(0, 64, 0), "curve_shadows": _ri(0, 128, 64), "curve_mid": _ri(64, 192, 128),
-    "curve_highlights": _ri(128, 255, 192), "curve_white": _ri(192, 255, 255),
-    "texture": _ri(-100, 100), "clarity": _ri(-100, 100),
-    "denoise": _ri(0, 9), "denoise_color": _ri(0, 9),
-    "sharpen": RecipeControl("bool", False), "dehaze": _ri(0, 100),
-    "effects_vignette_amount": _ri(-100, 100), "effects_vignette_midpoint": _ri(0, 100, 50),
-    "effects_grain_amount": _ri(0, 100),
-    "portrait_smoothing": _rf(0.0, 1.0, 0.0),
-    "mask_target_exposure_ev": _rf(-5.0, 5.0, 0.0), "mask_target_contrast_amount": _ri(-100, 100),
-    "mask_target_saturation_amount": _ri(-100, 100),
-    "crop_aspect": RecipeControl("choice", "Original", choices=("Original", "Free-form", "Custom", *ASPECT_RATIOS)),
-    "crop_custom_w": _ri(1, 100, 3), "crop_custom_h": _ri(1, 100, 2), "crop_swap": RecipeControl("bool", False),
-    "rotate": RecipeControl("choice", 0, choices=(0, 90, 180, 270)),
-    "flip_horizontal": RecipeControl("bool", False), "flip_vertical": RecipeControl("bool", False),
-    "straighten": _rf(-45.0, 45.0, 0.0), "constrain_crop": RecipeControl("bool", True),
-    "removal_radius": _ri(1, 15, 3),
-    "crop_free_x0": _rf(0.0, 1.0, 0.0), "crop_free_y0": _rf(0.0, 1.0, 0.0),
-    "crop_free_x1": _rf(0.0, 1.0, 1.0), "crop_free_y1": _rf(0.0, 1.0, 1.0),
-    "lens_profile": RecipeControl("choice", "None", choices=tuple(LENS_PROFILES)),
-    "lens_distortion": _ri(-100, 100), "lens_vignette_amount": _ri(-100, 100),
-    "lens_vignette_midpoint": _ri(0, 100, 50), "lens_chromatic_aberration": _ri(-100, 100),
-    "lens_perspective_v": _ri(-100, 100), "lens_perspective_h": _ri(-100, 100),
-    "cg_shadows_hue": _ri(0, 360), "cg_shadows_intensity": _ri(0, 100),
-    "cg_midtones_hue": _ri(0, 360), "cg_midtones_intensity": _ri(0, 100),
-    "cg_highlights_hue": _ri(0, 360), "cg_highlights_intensity": _ri(0, 100),
-    "cg_balance": _ri(-100, 100),
+    control.key: RecipeControl(control.kind, control.default, control.minimum, control.maximum, control.choices)
+    for control in CONTROLS
 }
-for _band in HSL_BAND_ORDER:
-    for _channel in ("hue", "sat", "lum"):
-        RECIPE_CONTROLS[f"hsl_{_band.lower()}_{_channel}"] = _ri(-100, 100)
 
 # Recipe entries that aren't single widgets -- lists of per-selection/per-layer dicts, validated
 # structurally by sanitize_recipe() rather than clamped.

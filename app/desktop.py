@@ -142,9 +142,8 @@ def _log_path(name: str) -> Path:
 def _child_cwd() -> Path:
     """Working directory for both child processes. Dev mode needs the project root so
     `python -m app.backend` / the relative frontend path resolve. A frozen build doesn't (its
-    children import from the bundle), and must not use the install folder: app/backend.py's audit
-    log (app.observability.configure_json_logger()'s default) is a path *relative to the working
-    directory*, which under Program Files is unwritable -- the backend child crashed on import."""
+    children import from the bundle), and must not use the install folder, which under Program
+    Files is unwritable for anything a child might write relative to its working directory."""
     if getattr(sys, "frozen", False):
         from app.config import user_data_dir
 
@@ -273,6 +272,8 @@ _SELF_TEST_MODULES = (
     "app.backend", "app.pipeline", "app.edit_schema", "app.export", "app.image_processor",
     "app.professional_color", "app.lens_corrections", "app.portrait_tools", "app.layer_workspace",
     "app.project_bundle", "app.custom_presets", "app.batch_release", "app.cli",
+    # The UI package the Streamlit script composes (F14), and the registry/static theme it reads.
+    "app.controls", "app.gpu_pack", "app.ui.canvas", "app.ui.export_panel", "app.ui.tabs.library",
 )
 
 
@@ -281,7 +282,8 @@ def self_test_report() -> dict:
     PyInstaller): every module in _SELF_TEST_MODULES imports, the Streamlit script is bundled, and
     the capabilities every build profile promises are present -- rawpy (both profiles install
     requirements-raw.txt) and a working face detector for the Portrait tab. Whether AI Upscale's
-    torch stack is installed is reported but not required (only the gpu profile ships it)."""
+    torch stack is installed is reported but not required (it ships in the optional GPU pack, or in
+    the all-in-one gpu profile)."""
     import importlib
     import importlib.util
 
@@ -294,13 +296,23 @@ def self_test_report() -> dict:
             modules[name] = f"error: {error}"
     modules["app.frontend_unified_app"] = "ok" if importlib.util.find_spec("app.frontend_unified_app") else "missing"
 
-    from app.ai_upscale import ai_upscale_installed
+    from app.ai_upscale import ai_upscale_available, ai_upscale_installed
+    from app.gpu_pack import gpu_pack_status
     from app.portrait_tools import face_detection_backend
+    from app.ui.theme import page_style
 
+    modules["app/ui/static"] = "ok" if "--ps-" in page_style() else "missing"
+    installed = ai_upscale_installed()
     capabilities = {
         "rawpy": importlib.util.find_spec("rawpy") is not None,
         "face_detection": face_detection_backend(),
-        "ai_upscale_installed": ai_upscale_installed(),
+        "ai_upscale_installed": installed,
+        # A real import of torch + Real-ESRGAN (seconds) when the packages are present -- a GPU pack
+        # can be found on sys.path yet fail to import in the frozen interpreter.
+        "ai_upscale_importable": ai_upscale_available() if installed else False,
+        # The optional GPU pack (K5): found and on sys.path? (PHOTO_STUDIO_GPU_PACK points the
+        # build's second self-test at a freshly built pack.)
+        "gpu_pack": gpu_pack_status(),
     }
     ok = (
         all(status == "ok" for status in modules.values())
@@ -340,6 +352,9 @@ def main() -> None:
         _run_backend_child()
         return
 
+    from app.observability import configure_logging
+
+    logger = configure_logging("desktop").getChild("desktop")
     instance = _acquire_single_instance()
     if instance is None:
         return  # another copy is running; its window was brought to the front
@@ -361,6 +376,7 @@ def main() -> None:
         webview.create_window(_WINDOW_TITLE, _frontend_url(), width=1440, height=960, min_size=(1024, 700))
         webview.start(gui="edgechromium")
     except Exception as error:  # noqa: BLE001 -- every startup failure gets a visible message
+        logger.exception("Desktop startup failed")
         details = _log_path("desktop-startup-error.log")
         _write_startup_error(details)
         _show_error(f"Photo Studio could not start: {error}\n\nDetails are in the log files in:\n{details.parent}")

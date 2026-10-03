@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw
 from app.batch import process_folder
 from app.image_processor import PhotoProcessor
 from app.presets import PRESETS, apply_preset
-from app.export import save_for_delivery
+from app.export import write_export
 from app.edit_history import EditHistory
 
 
@@ -31,7 +31,7 @@ def test_default_image_pipeline(tmp_path):
     assert img.size == (10, 10)
 
 
-def test_exposure_and_white_balance_controls(tmp_path):
+def test_exposure_and_denoise_controls(tmp_path):
     source = tmp_path / "portrait.png"
     destination = tmp_path / "enhanced.png"
 
@@ -40,7 +40,6 @@ def test_exposure_and_white_balance_controls(tmp_path):
     result = (
         PhotoProcessor(source)
         .apply_exposure(1.2)
-        .apply_white_balance(1.1, 0.0)
         .apply_denoise(8)
     )
 
@@ -251,7 +250,7 @@ def test_delivery_export_converts_to_requested_format(tmp_path):
     source = tmp_path / "sample.png"
     Image.new("RGB", (32, 32), color=(120, 110, 100)).save(source)
 
-    output = save_for_delivery(PhotoProcessor(source), destination, quality=90)
+    output = write_export(PhotoProcessor(source).image, destination, {"quality": 90})
 
     assert output == destination
     assert Image.open(output).format == "JPEG"

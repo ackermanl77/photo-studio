@@ -5,20 +5,11 @@ import io
 import json
 import uuid
 import zipfile
-from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from PIL import Image, UnidentifiedImageError
 
 from app.config import MAX_IMAGE_PIXELS
-
-
-@dataclass
-class RequestReport:
-    request_id: str
-    status: str
-    message: str
-    source_name: str | None = None
 
 
 def new_request_id() -> str:

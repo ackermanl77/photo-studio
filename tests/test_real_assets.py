@@ -13,11 +13,11 @@ import pytest
 from PIL import Image
 
 from app.edit_history import EditHistory
-from app.export import save_for_delivery
+from app.export import write_export
 from app.image_processor import PhotoProcessor
 from app.pipeline import decode_source
 from app.presets import apply_preset
-from app.project import PhotoProject
+from tests.legacy_project import PhotoProject
 from app.raw_import import SUPPORTED_EXTENSIONS, open_bytes, uploader_types
 from tests.synthetic_assets import dng_bytes, encode, gray16_png, photo_like
 
@@ -54,7 +54,7 @@ def test_feature_smoke_on_a_photo_like_image(tmp_path, feature):
         processor.apply_masked_adjustments(mask, exposure=1.08)
 
     output = tmp_path / f"{feature}.jpg"
-    save_for_delivery(processor, output, quality=88, max_size=(1600, 1600))
+    write_export(processor.image, output, {"quality": 88, "long_edge": 1600})
     result = Image.open(output)
 
     assert result.format == "JPEG"

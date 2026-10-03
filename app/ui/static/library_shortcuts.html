@@ -1,0 +1,32 @@
+<script>
+  // Keyboard shortcuts for the Library's "Rate & Flag" panel: 1-5 rate, 0 clears, X toggles reject,
+  // arrows move Prev/Next. The iframe is same-origin (srcdoc), so it reaches the real page and
+  // clicks the buttons inside st.container(key="lib-rate-controls") by position -- keep this
+  // order in sync with app/ui/tabs/library.py. Skips typing targets and acts only while the panel
+  // is visible (every tab renders on every rerun).
+  (function() {
+    const KEY_TO_BUTTON_INDEX = {
+      'ArrowLeft': 0, 'ArrowRight': 1,
+      '1': 2, '2': 3, '3': 4, '4': 5, '5': 6,
+      '0': 7, 'x': 8, 'X': 8,
+    };
+    function handler(e) {
+      const active = window.parent.document.activeElement;
+      const tag = active && active.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const idx = KEY_TO_BUTTON_INDEX[e.key];
+      if (idx === undefined) return;
+      const container = window.parent.document.querySelector('.st-key-lib-rate-controls');
+      if (!container || container.offsetParent === null) return;
+      const buttons = container.querySelectorAll('button');
+      const target = buttons[idx];
+      if (!target) return;
+      target.click();
+      e.preventDefault();
+    }
+    if (!window.parent._photoStudioLibraryShortcutsBound) {
+      window.parent.document.addEventListener('keydown', handler);
+      window.parent._photoStudioLibraryShortcutsBound = true;
+    }
+  })();
+</script>

@@ -1,69 +1,27 @@
 from __future__ import annotations
 
-from app.professional_color import HSL_BAND_ORDER
+from app.controls import ASPECT_RATIOS, RECIPE_KEYS_NOT_IN_OPTIONS, aspect_code_from, controls_to_options, curve_fixed_points, hsl_bands_from
 
-# Aspect ratios offered on the unified UI's Crop tab (width, height) -- the canonical definition,
-# imported by app.frontend_unified_app (for the dropdown) and used here (to translate a saved
-# recipe's crop_aspect label into the short "W:H" code app.backend.process_image() expects).
-ASPECT_RATIOS = {
-    "1:1 Square": (1, 1),
-    "4:5 Portrait": (4, 5),
-    "5:4 Landscape": (5, 4),
-    "3:2 Landscape": (3, 2),
-    "16:9 Widescreen": (16, 9),
-    "9:16 Story": (9, 16),
-}
-
-# recipe key -> options key, for every field that carries over unchanged (same name, same value).
-_DIRECT_PASSTHROUGH_KEYS = (
-    "exposure", "contrast", "highlights", "shadows", "preset",
-    "temperature", "tint", "saturation", "vibrance",
-    "texture", "clarity", "denoise", "denoise_color", "sharpen", "dehaze",
-    "effects_vignette_amount", "effects_vignette_midpoint", "effects_grain_amount",
-    "portrait_smoothing", "removal_radius",
-    "cg_shadows_hue", "cg_shadows_intensity",
-    "cg_midtones_hue", "cg_midtones_intensity",
-    "cg_highlights_hue", "cg_highlights_intensity", "cg_balance",
-    "lens_distortion", "lens_vignette_amount", "lens_vignette_midpoint", "lens_chromatic_aberration",
-    "lens_perspective_v", "lens_perspective_h", "constrain_crop",
-)
+__all__ = ["ASPECT_RATIOS", "PER_PHOTO_ONLY_KEYS", "RECIPE_KEYS_NOT_IN_OPTIONS", "merge_curve_points", "recipe_to_options", "without_per_photo_only_keys"]
 
 # Recipe keys that belong to one photo's export, never to a reusable look: AI Upscale is an
 # expensive (Real-ESRGAN, seconds to minutes per photo) change of output resolution, not a style --
 # carried through a preset it silently ran on every preset thumbnail render and every photo of a
-# batch. Deliberately absent from _DIRECT_PASSTHROUGH_KEYS above, and stripped from a recipe before
-# it's saved as, or applied from, a custom preset (without_per_photo_only_keys()).
+# batch. Stripped from a recipe before it's saved as, or applied from, a custom preset
+# (without_per_photo_only_keys()).
 PER_PHOTO_ONLY_KEYS = ("ai_upscale", "ai_upscale_factor")
 
-
-# Recipe controls that deliberately never become pipeline options when a saved recipe is applied
-# (batch "sync settings", CLI --recipe): one photo's framing (rotation, flips, straighten, the
-# free-form crop box) and UI-only state (which lens profile was picked -- its values are already
-# in the lens_* controls). tests/test_parity_golden.py checks every *other* control reaches the
-# pipeline.
-RECIPE_KEYS_NOT_IN_OPTIONS = frozenset({
-    "rotate", "flip_horizontal", "flip_vertical", "straighten",
-    "crop_free_x0", "crop_free_y0", "crop_free_x1", "crop_free_y1", "lens_profile",
-})
+# Version-1 recipe keys (multipliers, from before recipes were versioned) that still pass straight
+# through as options, keeping their exact old meaning instead of a rounded conversion. Version-2
+# keys (the app.controls registry) are mapped by controls_to_options().
+_LEGACY_OPTION_KEYS = {
+    "exposure": "exposure", "contrast": "contrast", "saturation": "saturation",
+    "mask_target_exposure": "mask_exposure", "mask_target_contrast": "mask_contrast", "mask_target_saturation": "mask_saturation",
+}
 
 
 def without_per_photo_only_keys(recipe: dict) -> dict:
     return {key: value for key, value in recipe.items() if key not in PER_PHOTO_ONLY_KEYS}
-
-
-# recipe key -> differently-named options key.
-_RENAMED_KEYS = {
-    "mask_target_exposure": "mask_exposure",
-    "mask_target_contrast": "mask_contrast",
-    "mask_target_saturation": "mask_saturation",
-}
-
-
-# recipe -100..100 amount -> options multiplier (1 + amount / 100).
-_AMOUNT_KEYS = {
-    "contrast_amount": "contrast", "saturation_amount": "saturation",
-    "mask_target_contrast_amount": "mask_contrast", "mask_target_saturation_amount": "mask_saturation",
-}
 
 
 def merge_curve_points(fixed_points: list[tuple[int, int]], extra_points: list) -> list[tuple[int, int]]:
@@ -88,10 +46,8 @@ def recipe_to_options(recipe: dict) -> dict:
     preset or a .photoproject's recipe field actually stores) into the flat `options` dict
     app.backend.process_image()/process_via_backend() expect. Used to apply a *saved* preset to a
     batch of photos (app.batch_release.process_files()'s `recipe` parameter) -- distinct from the
-    live single-photo editor's own `options = {...}` construction in frontend_unified_app.py, which
-    reads directly from each tab's widget return values rather than from a serialized recipe dict,
-    so the two aren't natural candidates to unify into one function without a much larger rework of
-    how that script's tabs are wired.
+    live editor's options, which are built from the same registry (app.controls.controls_to_options)
+    out of the widgets' values plus the photo-specific pieces (framing, the pixel crop box, masks).
 
     Deliberately excludes `mask_layers`/`removal_mask_layers` (and a project's optional overlay
     `layer`, which `_build_recipe()` doesn't even include) -- those reference pixel coordinates
@@ -111,53 +67,17 @@ def recipe_to_options(recipe: dict) -> dict:
     photo's framing); "constrain crop" is a preference and carries over.
     """
     options: dict = {}
-    for key in _DIRECT_PASSTHROUGH_KEYS:
-        if key in recipe:
-            options[key] = recipe[key]
-    for recipe_key, options_key in _RENAMED_KEYS.items():
-        if recipe_key in recipe:
-            options[options_key] = recipe[recipe_key]
-    # Recipe version 2 units (the UI's): EV and -100..100 amounts. A version-1 recipe's multipliers
-    # (handled above, unchanged) keep their exact old meaning instead of a rounded conversion.
-    if "exposure_ev" in recipe:
-        options["exposure_ev"] = recipe["exposure_ev"]
-    if "mask_target_exposure_ev" in recipe:
-        options["mask_exposure_ev"] = recipe["mask_target_exposure_ev"]
-    for amount_key, options_key in _AMOUNT_KEYS.items():
-        if amount_key in recipe:
-            options[options_key] = max(0.0, 1.0 + float(recipe[amount_key]) / 100.0)
-
+    for legacy_key, options_key in _LEGACY_OPTION_KEYS.items():
+        if legacy_key in recipe:
+            options[options_key] = recipe[legacy_key]
+    # Every registry control with a direct option (app.controls), photo-specific framing excluded.
+    options.update(controls_to_options(recipe, include_photo_specific=False))
     if recipe.get("curve_enabled"):
-        fixed_curve_points = [
-            (0, recipe.get("curve_black", 0)),
-            (64, recipe.get("curve_shadows", 64)),
-            (128, recipe.get("curve_mid", 128)),
-            (192, recipe.get("curve_highlights", 192)),
-            (255, recipe.get("curve_white", 255)),
-        ]
-        options["curve"] = merge_curve_points(fixed_curve_points, recipe.get("curve_extra_points", []))
-
-    hsl_bands = {}
-    for band in HSL_BAND_ORDER:
-        band_key = band.lower()
-        hue_key, sat_key, lum_key = f"hsl_{band_key}_hue", f"hsl_{band_key}_sat", f"hsl_{band_key}_lum"
-        if hue_key in recipe or sat_key in recipe or lum_key in recipe:
-            hsl_bands[band] = {
-                "hue": recipe.get(hue_key, 0), "sat": recipe.get(sat_key, 0), "lum": recipe.get(lum_key, 0),
-            }
+        options["curve"] = merge_curve_points(curve_fixed_points(recipe), recipe.get("curve_extra_points", []))
+    hsl_bands = hsl_bands_from(recipe)
     if hsl_bands:
         options["hsl_bands"] = hsl_bands
-
-    crop_aspect = recipe.get("crop_aspect", "Original")
-    ratio = None
-    if crop_aspect in ASPECT_RATIOS:
-        ratio = ASPECT_RATIOS[crop_aspect]
-    elif crop_aspect == "Custom":
-        ratio = (int(recipe.get("crop_custom_w", 3)), int(recipe.get("crop_custom_h", 2)))
-    if ratio:
-        width_ratio, height_ratio = ratio
-        if recipe.get("crop_swap"):
-            width_ratio, height_ratio = height_ratio, width_ratio
-        options["aspect"] = f"{width_ratio}:{height_ratio}"
-
+    aspect = aspect_code_from(recipe)
+    if aspect:
+        options["aspect"] = aspect
     return options

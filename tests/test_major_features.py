@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from app.major_features import BLEND_MODE_LABELS, Layer, LayerStack, PhotoCatalog, heal_patch, preview_image
+from app.major_features import BLEND_MODE_LABELS, Layer, LayerStack, PhotoCatalog
+from app.professional_tools import preview_image
 
 
 def test_layer_stack_composites_opacity_and_blend_modes():
@@ -137,14 +138,6 @@ def test_every_registered_blend_mode_composites_without_error_and_stays_in_range
         result = np.asarray(LayerStack(base).add(Layer("X", overlay, opacity=0.7, blend_mode=mode)).composite())
         assert result.shape == (6, 6, 4)
         assert result.dtype == np.uint8
-
-
-def test_healing_patch_preserves_dimensions():
-    image = Image.new("RGB", (40, 20), (120, 120, 120))
-
-    result = heal_patch(image, (0, 0, 10, 10), (20, 5, 30, 15))
-
-    assert result.size == image.size
 
 
 def test_photo_catalog_supports_rating_tags_and_search(tmp_path):

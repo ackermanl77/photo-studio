@@ -50,6 +50,7 @@ def process_files(
     should_cancel=None,
     recipe: dict | None = None,
     on_output=None,
+    gpu_export: bool = False,
 ) -> tuple[list[tuple[str, bytes]], list[BatchResult]]:
     """`recipe`, when given, takes priority over `preset`: it's a saved custom preset's full recipe
     (app.custom_presets.PresetStore.get()'s return value -- every global tone/color/lens/detail
@@ -85,7 +86,7 @@ def process_files(
             run_options = dict(options) if options is not None else ({"preset": preset} if preset and preset != "None" else {})
             content_bytes = raw_path.read() if in_memory else source.read_bytes()
             result_image = run_pipeline(decode_source(content_bytes, source.name), run_options)
-            content, suffix, _ = export_profile(result_image, profile)
+            content, suffix, _ = export_profile(result_image, profile, gpu_export=gpu_export)
             output_name = render_name(source, name_template, suffix)
             original_name = output_name
             counter = 2
@@ -154,6 +155,7 @@ def export_multiple(
     watermark_font_size: int = 32,
     exif: bytes | None = None,
     remove_gps: bool = False,
+    gpu_export: bool = False,
 ) -> bytes:
     """One photo, several export variants (Web/Social/Print/Archive -- see EXPORT_PROFILES) in a
     single ZIP -- the "Export As" multi-size workflow every major editor offers, distinct from
@@ -176,6 +178,7 @@ def export_multiple(
             watermark_font_size=watermark_font_size,
             exif=exif,
             remove_gps=remove_gps,
+            gpu_export=gpu_export,
         )
         outputs.append((f"{base_filename}-{name.lower()}{extension}", content))
     return make_zip(outputs)

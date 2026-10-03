@@ -1,3 +1,6 @@
+"""The original (version 1) .photoproject writer/loader, kept only as a test fixture: the app no
+longer writes this format (app.project_bundle.ProjectBundle does), but ProjectBundle.load() must
+keep opening files saved by it. Moved out of app/ (B12) since nothing in the app used it."""
 from __future__ import annotations
 
 import io

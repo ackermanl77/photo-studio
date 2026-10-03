@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-import cv2
 import numpy as np
 from PIL import Image
 
@@ -197,28 +196,6 @@ class LayerStack:
             blended = np.clip(blended, 0.0, 1.0)
             result[:, :, :3] = base_rgb * (1.0 - alpha[:, :, None]) + blended * alpha[:, :, None]
         return Image.fromarray(np.clip(result * 255.0, 0, 255).astype(np.uint8), mode="RGBA")
-
-
-def heal_patch(image: Image.Image, source_box: tuple[int, int, int, int], target_box: tuple[int, int, int, int]) -> Image.Image:
-    """Copy a clean source patch over a target region with soft OpenCV blending."""
-    source = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
-    sx1, sy1, sx2, sy2 = source_box
-    tx1, ty1, tx2, ty2 = target_box
-    width, height = tx2 - tx1, ty2 - ty1
-    if width <= 0 or height <= 0 or sx2 - sx1 != width or sy2 - sy1 != height:
-        raise ValueError("Source and target boxes must have equal positive dimensions")
-    patch = source[sy1:sy2, sx1:sx2]
-    mask = np.full((height, width), 255, dtype=np.uint8)
-    center = (tx1 + width // 2, ty1 + height // 2)
-    repaired = cv2.seamlessClone(patch, source, mask, center, cv2.NORMAL_CLONE)
-    return Image.fromarray(cv2.cvtColor(repaired, cv2.COLOR_BGR2RGB), mode="RGB")
-
-
-def preview_image(image, max_size=(1600, 1600)):
-    """Kept for existing callers; the one implementation is app.professional_tools.preview_image."""
-    from app.professional_tools import preview_image as _preview_image
-
-    return _preview_image(image, max_size)
 
 
 class PhotoCatalog:

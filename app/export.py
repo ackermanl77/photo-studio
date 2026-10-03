@@ -24,6 +24,7 @@ copyright, software) but not the EXIF sub-IFD (exposure details, GPS) -- tifffil
 from __future__ import annotations
 
 import io
+import logging
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
@@ -31,6 +32,8 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageFilter
+
+_logger = logging.getLogger(__name__)
 
 EXPORT_FORMATS = {
     "JPEG": (".jpg", "image/jpeg"),
@@ -58,6 +61,7 @@ DEFAULT_EXPORT_SETTINGS = {
     "remove_gps": False,
     "watermark": None,
     "bit_depth": 8,
+    "gpu_export": False,
 }
 # Formats that can hold 16 bits per channel.
 HIGH_BIT_FORMATS = ("PNG", "TIFF")
@@ -100,6 +104,8 @@ def validate_export_settings(settings) -> dict:
         clean[key] = int(value)
     if not isinstance(clean["remove_gps"], bool):
         raise ValueError("export remove_gps must be true or false")
+    if not isinstance(clean["gpu_export"], bool):
+        raise ValueError("export gpu_export must be true or false")
     if clean["bit_depth"] not in (8, 16) or isinstance(clean["bit_depth"], bool):
         raise ValueError("export bit_depth must be 8 or 16")
     if clean["bit_depth"] == 16 and clean["format"] not in HIGH_BIT_FORMATS:
@@ -158,6 +164,32 @@ def _resize_long_edge(image: Image.Image, long_edge: int) -> Image.Image:
     return image.resize(size, Image.Resampling.LANCZOS)
 
 
+def _resized_size(size: tuple[int, int], long_edge: int) -> tuple[int, int]:
+    width, height = size
+    if not long_edge or max(width, height) <= long_edge:
+        return size
+    scale = long_edge / max(width, height)
+    return max(1, round(width * scale)), max(1, round(height * scale))
+
+
+def gpu_export_transform(
+    pixels: np.ndarray,
+    output_size: tuple[int, int],
+    sharpening: tuple[float, int, int] | None = None,
+) -> np.ndarray | None:
+    """Try the optional CUDA export path; return None and log when it must fall back to CPU."""
+    try:
+        from app.gpu_export import resize_and_sharpen
+
+        result = resize_and_sharpen(pixels, output_size, sharpening)
+        if result is None:
+            _logger.warning("CUDA export requested but unavailable; using the CPU export path.")
+        return result
+    except Exception:
+        _logger.warning("CUDA export failed; using the CPU export path.", exc_info=True)
+        return None
+
+
 def encode_export(image: Image.Image, settings: dict | None = None, *, exif: bytes | None = None, icc: bytes | None = None) -> tuple[bytes, str, str]:
     """Encode `image` for delivery: resize (long edge), output sharpening, watermark, then the
     chosen format with the metadata policy applied. `exif`/`icc` default to `image.info`'s own.
@@ -168,11 +200,21 @@ def encode_export(image: Image.Image, settings: dict | None = None, *, exif: byt
     if settings["bit_depth"] == 16:
         return _encode_16bit(image, settings, exif, icc)
 
-    result = _resize_long_edge(image, settings["long_edge"])
     sharpening = OUTPUT_SHARPENING[settings["sharpen"]]
-    if sharpening:
-        radius, percent, threshold = sharpening
-        result = result.convert("RGB").filter(ImageFilter.UnsharpMask(radius=radius, percent=percent, threshold=threshold))
+    output_size = _resized_size(image.size, settings["long_edge"])
+    result = None
+    if settings["gpu_export"] and (output_size != image.size or sharpening):
+        gpu_input = image.convert("RGB") if sharpening else image
+        if gpu_input.mode not in ("RGB", "RGBA", "L"):
+            gpu_input = gpu_input.convert("RGB")
+        pixels = gpu_export_transform(np.asarray(gpu_input), output_size, sharpening)
+        if pixels is not None:
+            result = Image.fromarray(pixels)
+    if result is None:
+        result = _resize_long_edge(image, settings["long_edge"])
+        if sharpening:
+            radius, percent, threshold = sharpening
+            result = result.convert("RGB").filter(ImageFilter.UnsharpMask(radius=radius, percent=percent, threshold=threshold))
     watermark = settings["watermark"]
     if watermark:
         from app.professional_tools import apply_watermark
@@ -281,10 +323,17 @@ def _encode_16bit(image: Image.Image, settings: dict, exif: bytes | None, icc: b
 
     array = attached(image)
     array = from_image(image) if array is None else np.asarray(array, dtype=np.float32)
-    array = _resize_float(array, settings["long_edge"])
     sharpening = OUTPUT_SHARPENING[settings["sharpen"]]
-    if sharpening:
-        array = _unsharp_float(array, *sharpening)
+    output_size = _resized_size((array.shape[1], array.shape[0]), settings["long_edge"])
+    gpu_array = None
+    if settings["gpu_export"] and (output_size != (array.shape[1], array.shape[0]) or sharpening):
+        gpu_array = gpu_export_transform(array, output_size, sharpening)
+    if gpu_array is not None:
+        array = gpu_array
+    else:
+        array = _resize_float(array, settings["long_edge"])
+        if sharpening:
+            array = _unsharp_float(array, *sharpening)
     watermark = settings["watermark"]
     if watermark:
         from app.professional_tools import apply_watermark
@@ -355,7 +404,7 @@ class ExportPresetStore:
     under the user data folder -- F6's "saveable export presets". Written atomically; an unreadable
     file reads as empty rather than breaking the Export panel."""
 
-    FIELDS = ("format", "quality", "long_edge", "sharpen", "metadata", "remove_gps", "name_template", "bit_depth")
+    FIELDS = ("format", "quality", "long_edge", "sharpen", "metadata", "remove_gps", "name_template", "bit_depth", "gpu_export")
 
     def __init__(self, path: str | Path | None = None):
         if path is None:
@@ -411,19 +460,3 @@ def write_export(image: Image.Image, output_path: str | Path, settings: dict | N
     content, _extension, _mime = encode_export(image, settings)
     output.write_bytes(content)
     return output
-
-
-def save_for_delivery(
-    processor,
-    output_path: str | Path,
-    quality: int = 92,
-    max_size: tuple[int, int] | None = None,
-    strip_metadata: bool = False,
-) -> Path:
-    """Kept for existing callers: now a thin wrapper over write_export(), so a JPEG keeps its EXIF
-    too (the old JPEG branch dropped it even with strip_metadata=False)."""
-    image = processor.image.copy()
-    if max_size:
-        image.thumbnail(max_size, Image.Resampling.LANCZOS)
-    settings = {"quality": min(100, max(1, int(quality))), "metadata": "none" if strip_metadata else "all"}
-    return write_export(image, output_path, settings)
