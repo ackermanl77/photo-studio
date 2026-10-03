@@ -282,12 +282,12 @@ def test_camera_only_policy_keeps_copyright_and_capture_time():
 
 
 def test_cli_jpeg_delivery_keeps_exif(tmp_path):
-    from app.export import save_for_delivery
+    from app.export import write_export
     from app.image_processor import PhotoProcessor
 
     source = tmp_path / "in.jpg"
     source.write_bytes(_jpeg_with_exif())
-    output = save_for_delivery(PhotoProcessor(source), tmp_path / "out.jpg")
+    output = write_export(PhotoProcessor(source).image, tmp_path / "out.jpg", {"metadata": "all"})
     assert Image.open(output).getexif()[0x010F] == "TestMaker"
 
 
@@ -308,35 +308,43 @@ def test_sanitize_recipe_clamps_coerces_and_drops_unknown_keys():
 
 
 def test_recipe_controls_match_the_real_widgets():
-    """app.edit_schema.RECIPE_CONTROLS duplicates each slider's min/max -- checked against the
-    widgets AppTest actually renders, so the sanitizer can't drift from the UI."""
-    import ast
-
+    """Every widget is generated from the app.controls registry (F15) -- checked against what
+    AppTest actually renders: same key, label, range, step and default, so the sanitizer
+    (app.edit_schema.RECIPE_CONTROLS, derived from the same registry) can't drift from the UI."""
+    from app.controls import CONTROLS
     from app.edit_schema import RECIPE_CONTROLS
-    from app.professional_color import HSL_BAND_ORDER
-
-    # The frontend is a Streamlit script (importing it would render it), so read its
-    # RECIPE_WIDGET_KEYS literal from source, plus the HSL keys it generates in a loop.
-    tree = ast.parse(Path(APP_PATH).read_text(encoding="utf-8"))
-    node = next(n for n in tree.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", None) == "RECIPE_WIDGET_KEYS")
-    RECIPE_WIDGET_KEYS = ast.literal_eval(node.value)
-    for band in HSL_BAND_ORDER:
-        for channel, suffix in (("hue", "h"), ("sat", "s"), ("lum", "l")):
-            RECIPE_WIDGET_KEYS[f"hsl_{band.lower()}_{channel}"] = f"hsl-{band.lower()}-{suffix}"
 
     at = AppTest.from_file(APP_PATH)
     at.run(timeout=30)
     at.file_uploader[0].set_value(("photo.jpg", _jpeg_with_exif(), "image/jpeg"))
     at.run(timeout=30)
+    assert not at.exception
     sliders = {slider.key: slider for slider in at.slider}
+    checkboxes = {checkbox.key: checkbox for checkbox in at.checkbox}
+    selectboxes = {selectbox.key: selectbox for selectbox in at.selectbox}
+    number_inputs = {number.key: number for number in at.number_input}
     checked = 0
-    for recipe_key, widget_key in RECIPE_WIDGET_KEYS.items():
-        control = RECIPE_CONTROLS[recipe_key]
-        if widget_key in sliders:
-            assert (sliders[widget_key].min, sliders[widget_key].max) == (control.minimum, control.maximum), recipe_key
-            checked += 1
-    assert set(RECIPE_WIDGET_KEYS) == set(RECIPE_CONTROLS)
-    assert checked > 40
+    for control in CONTROLS:
+        assert RECIPE_CONTROLS[control.key].default == control.default
+        if control.widget_type == "slider":
+            widget = sliders[control.widget_key]
+            assert (widget.min, widget.max, widget.value, widget.label) == (control.minimum, control.maximum, control.default, control.label), control.key
+            if control.step is not None:
+                assert widget.step == control.step, control.key
+        elif control.widget_type == "checkbox":
+            assert checkboxes[control.widget_key].value == control.default, control.key
+            assert checkboxes[control.widget_key].label == control.label, control.key
+        elif control.widget_type == "selectbox":
+            assert selectboxes[control.widget_key].value == control.default, control.key
+        elif control.widget_type == "number_input":
+            widget = number_inputs[control.widget_key]
+            assert (widget.min, widget.max, widget.value) == (control.minimum, control.maximum, control.default), control.key
+        else:
+            assert control.widget_type == "state"  # the free-form crop box, set by the crop editor
+            continue
+        checked += 1
+    assert set(RECIPE_CONTROLS) == {control.key for control in CONTROLS}
+    assert checked > 60
 
 
 def test_applying_an_out_of_range_preset_no_longer_crashes_the_page(monkeypatch, tmp_path):

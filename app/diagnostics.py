@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 import shutil
 import sys
 from dataclasses import dataclass
@@ -33,6 +32,16 @@ def check_environment(storage_path: str | Path | None = None) -> list[Check]:
             {"yunet": "YuNet (cv2.FaceDetectorYN)", "haar": "Haar cascade (fallback)"}.get(face_backend, "no detector available in this OpenCV build"),
         )
     )
+    # AI Upscale's optional torch stack: from the GPU pack in a packaged build (K5), or
+    # requirements-gpu.txt in a source checkout.
+    from app.ai_upscale import ai_upscale_install_hint, ai_upscale_installed
+    from app.gpu_pack import gpu_pack_status
+
+    pack = gpu_pack_status()
+    if ai_upscale_installed():
+        checks.append(Check("AI Upscale", "ok", f"GPU pack at {pack['path']}" if pack["active"] else "torch / Real-ESRGAN installed"))
+    else:
+        checks.append(Check("AI Upscale", "warning" if pack["problem"] else "optional", ai_upscale_install_hint()))
     if storage_path is None:
         from app.config import user_data_dir
 
@@ -49,5 +58,3 @@ def check_environment(storage_path: str | Path | None = None) -> list[Check]:
     return checks
 
 
-def overall_status(checks: list[Check]) -> str:
-    return "error" if any(check.status == "error" for check in checks) else "ok"

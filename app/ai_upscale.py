@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-"""AI Upscale -- the one deliberate, explicitly-scoped exception to this app's CPU-first,
+"""AI Upscale -- the one learned image-processing exception to this app's CPU-first,
 no-ML-dependency design (see "Known Issues" in docs/PROJECT_STATUS.md for why denoise/dehaze/lens
-corrections stay classical). Real-ESRGAN (via the `realesrgan` PyPI package, itself built on
-PyTorch) is an optional dependency -- see requirements-gpu.txt, never installed by
+corrections stay classical). Final export resize/sharpen can also opt into a separate, non-ML CUDA
+path (app.gpu_export). Real-ESRGAN (via the `realesrgan` PyPI package, itself built on PyTorch) is
+an optional dependency -- see requirements-gpu.txt, never installed by
 requirements.txt/CI -- so importing this module must never fail or slow down app startup just
 because `torch`/`realesrgan` aren't installed. Every import of either lives inside a function body
 (a "lazy import"), not at module scope, and `ai_upscale_available()` is the one function the rest
@@ -45,11 +46,30 @@ def ai_upscale_installed() -> bool:
     on that made every Streamlit server process pay for torch just to decide whether to draw a
     checkbox. A broken-but-present install still shows the control here; the backend's own
     ai_upscale_available() check then reports it as a clean error when the upscale is requested.
-    Never raises."""
+    Never raises. A packaged build finds the packages in the optional GPU pack (app.gpu_pack),
+    which this activates first."""
+    from app.gpu_pack import activate_gpu_pack
+
+    activate_gpu_pack()
     try:
         return all(importlib.util.find_spec(name) is not None for name in _REQUIRED_PACKAGES)
     except (ImportError, ValueError):
         return False
+
+
+def ai_upscale_install_hint() -> str:
+    """What the Export panel says when AI Upscale isn't installed: the packaged app takes the
+    optional GPU pack (app.gpu_pack); a source checkout installs requirements-gpu.txt."""
+    import sys
+
+    from app.gpu_pack import gpu_pack_status
+
+    problem = gpu_pack_status()["problem"]
+    if problem:
+        return f"AI Upscale is off: {problem}."
+    if getattr(sys, "frozen", False):
+        return "AI Upscale needs the optional GPU pack: extract it next to PhotoStudio.exe (a gpu-pack folder) and restart."
+    return "Install requirements-gpu.txt to enable AI Upscale on export."
 
 
 def weights_dir():
@@ -71,6 +91,9 @@ def ai_upscale_available() -> bool:
     treated the same as "not installed," which is what lets the frontend and the pipeline both
     treat AI Upscale as a plain optional feature rather than something that can crash the rest of
     the app."""
+    from app.gpu_pack import activate_gpu_pack
+
+    activate_gpu_pack()
     try:
         import torch  # noqa: F401
         import realesrgan  # noqa: F401

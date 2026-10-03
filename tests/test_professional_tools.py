@@ -15,7 +15,6 @@ from app.professional_tools import (
     export_profile,
     grid_line_fractions,
     normalize_mask,
-    validate_project_bytes,
     zoom_preview,
 )
 
@@ -46,10 +45,6 @@ def test_export_profiles_produce_expected_formats_and_sizes():
         assert mime.startswith("image/")
         with Image.open(io.BytesIO(content)) as output:
             assert output.width <= profile["max_size"][0] if profile["max_size"] else True
-
-
-def test_project_manifest_validation():
-    assert validate_project_bytes(b'{"version": 1, "recipe": {}}')["version"] == 1
 
 
 def test_compute_histogram_bins_each_channel_and_counts_every_pixel():

@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+LOGGER_NAME = "photo-studio"
+
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
@@ -23,11 +25,10 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, sort_keys=True)
 
 
-def configure_json_logger(name: str = "photo-studio", path: str | Path | None = None) -> logging.Logger:
-    """`path` defaults to logs/photo-studio.log under app.config.user_data_dir() -- the one
-    per-user data folder -- rather than the old `.photo-studio/photo-studio.log` relative to the
-    *working directory*, which wrote into the source tree during tests and dev runs and grew
-    without bound. Rotates at 2 MB, keeping 5 old files."""
+def configure_json_logger(name: str = LOGGER_NAME, path: str | Path | None = None) -> logging.Logger:
+    """Attach a rotating JSON file handler to logger `name` (once). `path` defaults to
+    logs/photo-studio.log under app.config.user_data_dir() -- the one per-user data folder, never a
+    path relative to the working directory. Rotates at 2 MB, keeping 5 old files."""
     logger = logging.getLogger(name)
     if logger.handlers:
         return logger
@@ -43,6 +44,26 @@ def configure_json_logger(name: str = "photo-studio", path: str | Path | None = 
     logger.setLevel(logging.INFO)
     logger.propagate = False
     return logger
+
+
+# Every module logs through a child of LOGGER_NAME (get_logger("backend") -> "photo-studio.backend")
+# and attaches no handler itself: importing a module must never open a log file (R2). Only an entry
+# point -- the backend server, the desktop launcher, the CLI, the Streamlit app -- calls
+# configure_logging() once, which writes that process's records to logs/<component>.log.
+def get_logger(component: str) -> logging.Logger:
+    return logging.getLogger(f"{LOGGER_NAME}.{component}")
+
+
+def configure_logging(component: str, path: str | Path | None = None) -> logging.Logger:
+    """Entry points only: route every "photo-studio.*" record of this process to a rotating JSON
+    file, logs/<component>.log under app.config.user_data_dir() (one file per process kind, so the
+    backend and the Streamlit process never rotate the same file under each other). Idempotent --
+    a second call in the same process (a Streamlit rerun) keeps the first handler."""
+    if path is None:
+        from app.config import user_data_dir
+
+        path = user_data_dir() / "logs" / f"{component}.log"
+    return configure_json_logger(LOGGER_NAME, path)
 
 
 @dataclass

@@ -1,0 +1,136 @@
+/* Photo Studio page styling. Loaded by app/ui/theme.py, which prepends the :root CSS variables
+   (--ps-*) from app.ui.theme.THEME -- the same palette the on-canvas editors (app/ui_editors.py)
+   read inside their iframes. Colours live only in that table; this file uses var(--ps-...).
+
+   DOM-dependent rules (marked "Streamlit DOM") target Streamlit's own data-testid markup, which a
+   Streamlit upgrade can change: re-check them with the upgrade smoke checklist in
+   docs/PROJECT_STATUS.md ("Streamlit upgrades"). Streamlit is pinned to >=1.64,<2. */
+
+/* Streamlit DOM: hide the default header/footer so the app's own header sits at the top. */
+header[data-testid="stHeader"] { display: none !important; }
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+
+/* Streamlit DOM: page padding and a tight vertical rhythm. */
+.block-container {
+    max-width: 1800px;
+    padding: 1.2rem 1.5rem 1.5rem !important;
+}
+[data-testid="stVerticalBlock"] { gap: 0.35rem; }
+
+/* Top header bar */
+.top-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid var(--ps-border-soft);
+    padding: 0.2rem 0 0.5rem 0;
+    margin-bottom: 0.6rem;
+}
+.brand-title {
+    font: 800 1.5rem/1.1 var(--ps-font);
+    color: var(--ps-text-strong);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.brand-badge {
+    background: linear-gradient(135deg, var(--ps-brand), var(--ps-brand-dark));
+    color: var(--ps-on-brand);
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+.header-info {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--ps-text);
+    background: var(--ps-surface-soft);
+    padding: 0.3rem 0.8rem;
+    border-radius: 20px;
+    border: 1px solid var(--ps-border-soft);
+}
+
+/* Small uppercase panel headings ("Tool Workspace", the canvas's file/size label). */
+.panel-header-title {
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ps-text-muted);
+    margin-bottom: 0.35rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+/* The canvas label carries a variable-length file name: one truncated line, full text on hover
+   (its title attribute). */
+.canvas-live-view {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.canvas-live-view span { text-transform: none; letter-spacing: normal; }
+
+/* Image canvas */
+.canvas-container {
+    background: var(--ps-canvas);
+    border-radius: 8px;
+    padding: 0.5rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border: 1px solid var(--ps-border);
+    margin-bottom: 0.35rem;
+}
+.canvas-container img {
+    max-width: 100%;
+    max-height: 60vh;
+    object-fit: contain;
+    border-radius: 4px;
+}
+
+/* Export footer */
+.export-panel {
+    background: var(--ps-surface-faint);
+    border: 1px solid var(--ps-border-soft);
+    border-radius: 8px;
+    padding: 0.55rem 0.85rem;
+}
+
+/* Streamlit DOM: tool tabs wrap onto a second row instead of hiding behind a scroll arrow.
+   Streamlit 1.6x renders tabs with React Aria (role="tablist"/"tab", data-testid="stTab(s)"). */
+[data-testid="stTab"] {
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    padding: 0.35rem 0.6rem !important;
+}
+[data-testid="stTabs"] [role="tablist"] {
+    flex-wrap: wrap !important;
+    overflow-x: visible !important;
+    row-gap: 0.2rem;
+}
+
+/* Streamlit DOM: on a narrow window the two-column workspace stacks; show the canvas first. Only
+   the one immediate child chain of the keyed "workspace-split" container is matched
+   (stVerticalBlock > stLayoutWrapper > stHorizontalBlock), so rows nested deeper keep their order. */
+@media (max-width: 900px) {
+    .st-key-workspace-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+    }
+    .st-key-workspace-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-of-type(1) { order: 2; }
+    .st-key-workspace-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-of-type(2) { order: 1; }
+}
+
+/* Streamlit DOM (.st-key-<key> classes): the hidden text_areas the on-canvas editors commit
+   through (app/ui_editors.py) -- plumbing, never shown. The substring selectors cover the
+   per-selection and per-layer ones, whose keys contain a uuid. */
+.st-key-curve-hidden, .st-key-crop-editor-hidden, .st-key-cv-nav-wand-hidden,
+.st-key-m-wand-hidden, .st-key-rm-wand-hidden, .st-key-wb-wand-hidden,
+[class*="-paint-hidden"], [class*="l-path-"][class*="-hidden"] {
+    display: none !important;
+}

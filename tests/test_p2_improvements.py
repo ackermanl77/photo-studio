@@ -137,7 +137,7 @@ def test_shadows_lift_dark_regions_without_haloing_the_bright_side():
 
 # --- F4 / B9: rotate, flip, straighten, numeric and custom crop, constrain crop ------------------------
 
-from tests.test_frontend_unified_app import canvas_dims, run_with_uploaded_image  # noqa: E402  (also applies the backend stub fixture below)
+from tests.test_frontend_unified_app import canvas_dims, open_tab, run_with_uploaded_image, ui_source  # noqa: E402  (also applies the backend stub fixture below)
 from tests.test_frontend_unified_app import _stub_backend  # noqa: E402,F401
 
 
@@ -399,7 +399,7 @@ def test_shortcut_buttons_toggle_zoom_original_and_grid():
     at.run(timeout=30)
     assert at.selectbox(key="grid-type").value == "None"
     assert not at.exception
-    source = (APP_SOURCE := __import__("pathlib").Path(__import__("tests.test_frontend_unified_app", fromlist=["APP_PATH"]).APP_PATH).read_text(encoding="utf-8"))
+    source = APP_SOURCE = ui_source()
     for shortcut in ('shortcut="Ctrl+Z"', 'shortcut="Ctrl+Shift+Z"', 'shortcut="Ctrl+E"', 'shortcut="Z"', 'shortcut="B"', 'shortcut="G"'):
         assert shortcut in source
     assert "window.parent._photoStudioUndoRedoShortcutsBound" not in APP_SOURCE  # the injected JS is gone
@@ -439,7 +439,11 @@ def test_hidden_tabs_skip_face_detection_and_editor_iframes(monkeypatch):
     assert calls == [] and not any("faces" in caption.value for caption in at.caption)
     # The Portrait tab's widgets still exist (their state is kept), only the caption work is skipped.
     assert at.slider(key="port-sm").value == 0.0
-    at.session_state["tool-tab"] = "◌ Portrait"
+    # Portrait is a sub-tab of Local (F9): Local open on another sub-tab still skips the work.
+    open_tab(at, "◉ Local", "◉ Masks")
+    at.run(timeout=30)
+    assert calls == []
+    open_tab(at, "◉ Local", "◌ Portrait")
     at.run(timeout=30)
     assert not at.exception
     assert len(calls) == 1 and any("Detected faces" in caption.value for caption in at.caption)
@@ -568,13 +572,13 @@ def test_library_shows_the_catalog_without_a_rescan_and_edit_opens_the_photo(mon
     PhotoCatalog(user_data_file("catalog.sqlite")).upsert(photo, rating=5)
 
     at = run_with_uploaded_image(size=(40, 30))
-    at.session_state["tool-tab"] = "☰ Batch & Library"
+    open_tab(at, "✦ Presets & Library", "☰ Library & Batch")
     at.radio(key="more-mode").set_value("Library Catalog")
     at.run(timeout=30)
     assert not at.exception
     assert any(image.captions and "keeper.jpg" in image.captions[0] for image in at.image)
     edit_buttons = [button for button in at.button if button.key and button.key.startswith("lib-edit-") and button.key != "lib-edit-current-btn"]
-    at.session_state["tool-tab"] = "☰ Batch & Library"  # AppTest resends the old tab otherwise
+    open_tab(at, "✦ Presets & Library", "☰ Library & Batch")  # AppTest resends the old tab otherwise
     edit_buttons[0].click()
     at.run(timeout=30)
     at.run(timeout=30)

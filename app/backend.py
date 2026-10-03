@@ -24,12 +24,14 @@ from app.edit_schema import parse_options
 from app.export import encode_export
 from app.image_processor import PhotoProcessor
 from app.layer_workspace import layers_from_json
-from app.observability import ProcessingAudit, configure_json_logger, log_audit
+from app.observability import ProcessingAudit, configure_logging, get_logger, log_audit
 from app.pipeline import PipelineCancelled, decode_source, run_pipeline
 from app.reliability import check_pixel_count, new_request_id
 
 app = Flask(__name__)
-backend_logger = configure_json_logger("photo-studio-backend")
+# No handler at import (R2): serve() -- the backend process's entry point -- configures the file log;
+# an in-process caller (tests, the frontend's preset thumbnails) never opens one.
+backend_logger = get_logger("backend")
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
@@ -317,6 +319,7 @@ def unexpected_error(error):
 def serve(host: str = BACKEND_HOST, port: int = BACKEND_PORT) -> None:
     """Run the backend: on waitress (a production WSGI server, pure Python, fine on Windows) when it
     is installed, else Flask's threaded development server as before."""
+    configure_logging("backend")
     try:
         from waitress import serve as waitress_serve
     except ImportError:

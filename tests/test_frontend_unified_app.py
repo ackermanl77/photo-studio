@@ -30,10 +30,24 @@ from app.backend import process_image
 from app.layer_workspace import LayerWorkspace, WorkspaceLayer
 from app.major_features import PhotoCatalog
 from app.presets import PRESETS
-from app.project import PhotoProject
+from tests.legacy_project import PhotoProject
 from app.project_bundle import ProjectBundle
 
 APP_PATH = Path(__file__).resolve().parent.parent / "app" / "frontend_unified_app.py"
+UI_DIR = APP_PATH.parent / "ui"
+TOOL_TABS = ["☼ Basic", "🎨 Curves & Color", "🔬 Detail", "⛶ Geometry", "◉ Local", "◈ Layers", "✨ Effects", "⬇ Export", "✦ Presets & Library"]
+
+
+def ui_source() -> str:
+    """The UI's source text: the entry script plus every app/ui module (F14 split it up)."""
+    return "\n".join(path.read_text(encoding="utf-8") for path in [APP_PATH, *sorted(UI_DIR.rglob("*.py"))])
+
+
+def open_tab(at, tool_tab: str, sub_tab: str | None = None) -> None:
+    """Make a tab the visible one for the next run (hidden tabs skip display-only work, F1/F9)."""
+    at.session_state["tool-tab"] = tool_tab
+    if sub_tab is not None:
+        at.session_state["local-tab" if tool_tab == "◉ Local" else "library-tab"] = sub_tab
 
 # Every test here reruns the whole Streamlit script -- `pytest -m "not slow"` skips them for a quick
 # check of the processing modules alone (T7 in the improvement report).
@@ -158,7 +172,7 @@ def test_sample_photo_button_loads_a_valid_image_through_the_normal_upload_path(
     at.run(timeout=30)
 
     assert not at.exception
-    assert len(at.tabs) == 11
+    assert len(at.tabs) == len(TOOL_TABS) + 5  # + the Local and Presets & Library sub-tabs
     assert canvas_hash(at)
 
 
@@ -248,10 +262,13 @@ def test_uploading_image_renders_every_tab_without_errors():
     at = run_with_uploaded_image()
 
     assert not at.exception
-    assert [t.label for t in at.tabs] == [
-        "☼ Tone", "◎ Lens", "⛶ Crop", "\U0001f3a8 Color", "\U0001f52c Detail", "🩹 Repair", "◈ Layers",
-        "◉ Masks", "◌ Portrait", "✦ Presets", "☰ Batch & Library",
+    # Grouped by workflow (F9): nine tool tabs, with sub-tabs inside Local and Presets & Library.
+    labels = [t.label for t in at.tabs]
+    assert [label for label in labels if label in TOOL_TABS] == TOOL_TABS == [
+        "☼ Basic", "🎨 Curves & Color", "🔬 Detail", "⛶ Geometry", "◉ Local", "◈ Layers",
+        "✨ Effects", "⬇ Export", "✦ Presets & Library",
     ]
+    assert [label for label in labels if label not in TOOL_TABS] == ["◉ Masks", "🩹 Repair", "◌ Portrait", "✦ Presets", "☰ Library & Batch"]
     assert canvas_dims(at) == (40, 30)
 
 
@@ -781,7 +798,7 @@ def _full_painted_mask_base64(size=(20, 20)):
 
 def test_editing_an_existing_painted_mask_updates_it_in_place():
     """Regression coverage for the "Edit Painting" toggle (_render_selection_stack's per-layer
-    re-edit section): committing through it must update the same layer's mask_b64 in place, not
+    re-edit section): committing through it must update the same layer's painted mask in place, not
     append a second layer -- the same "genuine new commit only" guard as adding a fresh Painted
     selection, applied to the edit path instead."""
     at = run_with_uploaded_image(color=(80, 80, 80))
@@ -792,7 +809,9 @@ def test_editing_an_existing_painted_mask_updates_it_in_place():
     at.run(timeout=30)
 
     layer_id = at.session_state["mask_layers"][0]["id"]
-    original_mask_b64 = at.session_state["mask_layers"][0]["params"]["mask_b64"]
+    # Painted masks are stored once per content in the session table and referenced by hash (P5).
+    original_ref = at.session_state["mask_layers"][0]["params"]["mask_ref"]
+    assert at.session_state["_painted_masks"][original_ref] == painted_mask_base64()
 
     at.checkbox(key=f"m-editpaint-toggle-{layer_id}").set_value(True)
     at.run(timeout=30)
@@ -805,8 +824,8 @@ def test_editing_an_existing_painted_mask_updates_it_in_place():
     layers = at.session_state["mask_layers"]
     assert len(layers) == 1
     assert layers[0]["id"] == layer_id
-    assert layers[0]["params"]["mask_b64"] == edited_mask
-    assert layers[0]["params"]["mask_b64"] != original_mask_b64
+    assert layers[0]["params"]["mask_ref"] != original_ref
+    assert at.session_state["_painted_masks"][layers[0]["params"]["mask_ref"]] == edited_mask
 
 
 def test_masks_tab_state_survives_adding_a_repair_selection():
@@ -1766,7 +1785,7 @@ def test_load_preset_section_shows_a_thumbnail_preview(monkeypatch, tmp_path):
     presets_path.write_text(json.dumps({"Warm": {"exposure": 1.3, "temperature": 40}}), encoding="utf-8")
 
     at = run_with_uploaded_image()
-    at.session_state["tool-tab"] = "✦ Presets"  # thumbnails only render in the visible tab (F1)
+    open_tab(at, "✦ Presets & Library", "✦ Presets")  # thumbnails only render in the visible tab (F1)
     at.selectbox(key="p-load-sel").set_value("Warm")
     at.run(timeout=30)
 
@@ -2448,7 +2467,7 @@ def test_load_project_replaces_an_already_open_photo_and_resets_unmentioned_cont
 def test_every_streamlit_data_cache_is_bounded():
     """Regression: the st.cache_data caches had no max_entries, so every slider position kept a
     full-resolution image alive for the life of the server process."""
-    source = APP_PATH.read_text(encoding="utf-8")
+    source = ui_source()
     decorators = re.findall(r"@st\.cache_data\((.*?)\)\n", source)
     assert decorators
     assert all("max_entries" in args for args in decorators)

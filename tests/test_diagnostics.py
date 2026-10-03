@@ -1,4 +1,4 @@
-from app.diagnostics import check_environment, overall_status
+from app.diagnostics import check_environment
 
 
 def test_environment_diagnostics_report_required_runtime():
@@ -7,4 +7,4 @@ def test_environment_diagnostics_report_required_runtime():
     assert "Python" in names
     assert "PIL" in names
     assert "numpy" in names
-    assert overall_status(checks) in {"ok", "error"}
+    assert {check.status for check in checks} <= {"ok", "missing", "optional", "warning", "error"}

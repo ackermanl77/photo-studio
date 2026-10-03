@@ -23,6 +23,8 @@ import json
 
 from PIL import Image
 
+from app.ui.theme import editor_style
+
 # One commit per burst of arrow-key presses rather than one Streamlit rerun per key press.
 KEY_COMMIT_DELAY_MS = 350
 
@@ -47,7 +49,7 @@ def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, in
     before_b64 = _b64_png(before)
     after_b64 = _b64_png(after)
     html = f"""
-    <div style="position:relative;width:100%;background:#090d16;border-radius:8px;overflow:hidden;line-height:0;">
+    <div style="position:relative;width:100%;background:var(--ps-canvas);border-radius:8px;overflow:hidden;line-height:0;">
       <img src="data:image/png;base64,{after_b64}" style="display:block;width:100%;height:auto;">
       <img id="ba-before" src="data:image/png;base64,{before_b64}"
            style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;clip-path:inset(0 50% 0 0);">
@@ -69,7 +71,7 @@ def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, in
       }});
     </script>
     """
-    return html, display_height
+    return editor_style() + html, display_height
 
 
 def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, int]], extra_points: list[tuple[int, int]] | None = None) -> str:
@@ -123,8 +125,8 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
     points_json = json.dumps(points)
     bounds_json = json.dumps(bounds)
     extra_points_json = json.dumps(extra_points)
-    return f"""
-    <div style="background:#0f172a;border-radius:8px;padding:6px 8px;">
+    return editor_style() + f"""
+    <div style="background:var(--ps-panel);border-radius:8px;padding:6px 8px;">
     <svg id="curve-svg" width="100%" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" role="application"
          aria-label="Tone curve editor. Tab to a point, then use the Up and Down arrows."
          preserveAspectRatio="xMinYMin meet" style="touch-action:none;display:block;">
@@ -132,20 +134,20 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
             fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.15)" style="cursor:copy;"/>
       <line x1="{diag_x0:.1f}" y1="{diag_y0:.1f}" x2="{diag_x1:.1f}" y2="{diag_y1:.1f}"
             stroke="rgba(255,255,255,0.2)" stroke-dasharray="3,3"/>
-      <polyline id="curve-line" points="{poly}" fill="none" stroke="#fbbf24" stroke-width="2"/>
+      <polyline id="curve-line" points="{poly}" fill="none" style="stroke:var(--ps-accent)" stroke-width="2"/>
       {fixed_circles}
       <g id="extra-points"></g>
     </svg>
     </div>
-    <div style="color:#94a3b8;font:11px system-ui;margin-top:4px;padding:0 2px;">
+    <div style="color:var(--ps-text-muted);font:11px system-ui;margin-top:4px;padding:0 2px;">
       Click an empty spot on the curve to add a point, drag it, double-click to remove it. Keyboard: Tab to a point, Up/Down (Shift = x10).
     </div>
     <style>
-      #curve-svg .pt.fixed {{ fill:#fbbf24; stroke:#1e293b; stroke-width:2; cursor:ns-resize; }}
+      #curve-svg .pt.fixed {{ fill:var(--ps-accent); stroke:var(--ps-border); stroke-width:2; cursor:ns-resize; }}
       #curve-svg .pt.fixed:focus {{ outline:none; stroke:#fff; stroke-width:3; }}
-      #curve-svg .pt.fixed:hover {{ fill:#fde68a; }}
-      #curve-svg .pt.extra {{ fill:#60a5fa; stroke:#1e293b; stroke-width:2; cursor:move; }}
-      #curve-svg .pt.extra:hover {{ fill:#93c5fd; }}
+      #curve-svg .pt.fixed:hover {{ fill:var(--ps-accent-soft); }}
+      #curve-svg .pt.extra {{ fill:var(--ps-info); stroke:var(--ps-border); stroke-width:2; cursor:move; }}
+      #curve-svg .pt.extra:hover {{ fill:var(--ps-info-soft); }}
     </style>
     <script>
       (function() {{
@@ -335,8 +337,8 @@ def _paint_editor_html(background: Image.Image, key_prefix: str, preload_mask_b6
         else ""
     )
 
-    return f"""
-    <div id="paint-root" tabindex="0" role="application" style="background:#0f172a;border-radius:8px;padding:8px;outline:none;"
+    return editor_style() + f"""
+    <div id="paint-root" tabindex="0" role="application" style="background:var(--ps-panel);border-radius:8px;padding:8px;outline:none;"
          aria-label="Selection painter. [ and ] change the brush size; arrow keys move the last radial or gradient (Alt: its end point, Shift: 10x).">
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
         <button type="button" class="tool-btn active" data-tool="brush">🖌 Brush</button>
@@ -344,7 +346,7 @@ def _paint_editor_html(background: Image.Image, key_prefix: str, preload_mask_b6
         <button type="button" class="tool-btn" data-tool="gradient">📐 Gradient</button>
         <button type="button" id="erase-btn" class="tool-btn">🧹 Erase</button>
         <button type="button" id="clear-btn" class="tool-btn">✖ Clear</button>
-        <label style="display:flex;align-items:center;gap:4px;color:#cbd5e1;font:12px system-ui;margin-left:4px;">
+        <label style="display:flex;align-items:center;gap:4px;color:var(--ps-text);font:12px system-ui;margin-left:4px;">
           Size <input id="brush-size" type="range" min="4" max="80" value="18" style="width:80px;" aria-label="Brush size ([ and ] keys)">
           <span id="brush-size-label" style="min-width:22px;">18</span>
         </label>
@@ -357,16 +359,16 @@ def _paint_editor_html(background: Image.Image, key_prefix: str, preload_mask_b6
                 style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;"></canvas>
       </div>
       <button type="button" id="commit-btn" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;
-              border:none;background:#fbbf24;color:#1e293b;font:600 13px system-ui;cursor:pointer;">
+              border:none;background:var(--ps-accent);color:var(--ps-on-accent);font:600 13px system-ui;cursor:pointer;">
         {commit_label}
       </button>
-      <div style="color:#94a3b8;font:11px system-ui;margin-top:6px;">Keys: [ / ] brush size. After a radial or gradient: arrows move it, Alt+arrows move its end point, Shift = x10.</div>
+      <div style="color:var(--ps-text-muted);font:11px system-ui;margin-top:6px;">Keys: [ / ] brush size. After a radial or gradient: arrows move it, Alt+arrows move its end point, Shift = x10.</div>
     </div>
     <style>
-      .tool-btn {{ background:rgba(255,255,255,0.08); color:#cbd5e1; border:1px solid rgba(255,255,255,0.15);
+      .tool-btn {{ background:rgba(255,255,255,0.08); color:var(--ps-text); border:1px solid rgba(255,255,255,0.15);
                    border-radius:5px; padding:5px 9px; font:12px system-ui; cursor:pointer; }}
-      .tool-btn.active {{ background:#fbbf24; color:#1e293b; border-color:#fbbf24; }}
-      #erase-btn.active {{ background:#f87171; color:#1e293b; border-color:#f87171; }}
+      .tool-btn.active {{ background:var(--ps-accent); color:var(--ps-on-accent); border-color:var(--ps-accent); }}
+      #erase-btn.active {{ background:var(--ps-danger); color:var(--ps-on-accent); border-color:var(--ps-danger); }}
     </style>
     <script>
       (function() {{
@@ -561,16 +563,16 @@ def _wand_picker_html(background: Image.Image, key_prefix: str, hint: str = "Cli
     bg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
     hidden_selector = f".st-key-{key_prefix}-wand-hidden"
 
-    return f"""
-    <div style="background:#0f172a;border-radius:8px;padding:8px;">
+    return editor_style() + f"""
+    <div style="background:var(--ps-panel);border-radius:8px;padding:8px;">
       <div style="position:relative;width:100%;max-width:{display_w}px;line-height:0;">
         <img id="wand-img" src="data:image/png;base64,{bg_b64}" role="button" tabindex="0" aria-label="{html.escape(hint)}"
              style="display:block;width:100%;height:auto;border-radius:4px;cursor:crosshair;">
         <div id="wand-marker" style="position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;
-             border:2px solid #fbbf24;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.6);
+             border:2px solid var(--ps-accent);border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.6);
              display:none;pointer-events:none;"></div>
       </div>
-      <div style="color:#94a3b8;font:12px system-ui;margin-top:6px;">{html.escape(hint)}</div>
+      <div style="color:var(--ps-text-muted);font:12px system-ui;margin-top:6px;">{html.escape(hint)}</div>
     </div>
     <script>
       (function() {{
@@ -641,20 +643,20 @@ def _crop_editor_html(
     bg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
     hidden_selector = f".st-key-{key_prefix}-hidden"
 
-    return f"""
-    <div style="background:#0f172a;border-radius:8px;padding:8px;">
+    return editor_style() + f"""
+    <div style="background:var(--ps-panel);border-radius:8px;padding:8px;">
       <div id="crop-wrap" role="application" aria-label="Crop box. Tab to the box or a corner, then use the arrow keys (Shift = 10 pixels)."
            style="position:relative;width:100%;max-width:{display_w}px;line-height:0;touch-action:none;">
         <img src="data:image/png;base64,{bg_b64}" alt="" style="display:block;width:100%;height:auto;border-radius:4px;">
-        <div id="crop-rect" tabindex="0" aria-label="Crop box -- arrow keys move it" style="position:absolute;border:2px solid #fbbf24;background:rgba(251,191,36,0.15);cursor:move;box-sizing:border-box;"></div>
+        <div id="crop-rect" tabindex="0" aria-label="Crop box -- arrow keys move it" style="position:absolute;border:2px solid var(--ps-accent);background:rgba(251,191,36,0.15);cursor:move;box-sizing:border-box;"></div>
         <div id="crop-tl" class="crop-handle" tabindex="0" aria-label="Top-left crop corner -- arrow keys move it" style="cursor:nwse-resize;"></div>
         <div id="crop-br" class="crop-handle" tabindex="0" aria-label="Bottom-right crop corner -- arrow keys move it" style="cursor:nwse-resize;"></div>
       </div>
-      <div id="crop-dims" style="color:#94a3b8;font:12px system-ui;margin-top:6px;"></div>
+      <div id="crop-dims" style="color:var(--ps-text-muted);font:12px system-ui;margin-top:6px;"></div>
     </div>
     <style>
       .crop-handle {{ position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px;
-                      background:#fbbf24; border:2px solid #1e293b; border-radius:50%; }}
+                      background:var(--ps-accent); border:2px solid var(--ps-border); border-radius:50%; }}
       #crop-wrap [tabindex]:focus {{ outline:2px solid #fff; outline-offset:2px; }}
     </style>
     <script>
@@ -831,27 +833,27 @@ def _pen_editor_html(background: Image.Image, key_prefix: str, points: list[dict
     points_json = json.dumps(points)
     closed_json = json.dumps(bool(closed))
 
-    return f"""
-    <div style="background:#0f172a;border-radius:8px;padding:8px;">
+    return editor_style() + f"""
+    <div style="background:var(--ps-panel);border-radius:8px;padding:8px;">
       <div id="pen-wrap" tabindex="0" role="application"
            aria-label="Pen path. Tab to a point; arrow keys move it, Alt+arrows move its curve handle, Shift = 10x, Delete removes it."
            style="position:relative;width:100%;max-width:{display_w}px;line-height:0;touch-action:none;outline:none;">
         <img id="pen-bg" src="data:image/png;base64,{bg_b64}" style="display:block;width:100%;height:auto;border-radius:4px;">
         <svg id="pen-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <path id="pen-path" d="" fill="none" stroke="#60a5fa" stroke-width="0.6"></path>
+          <path id="pen-path" d="" fill="none" style="stroke:var(--ps-info)" stroke-width="0.6"></path>
           <g id="pen-handle-lines" stroke="rgba(251,191,36,0.7)" stroke-width="0.3"></g>
         </svg>
         <div id="pen-anchors"></div>
         <div id="pen-handles"></div>
       </div>
-      <div style="color:#94a3b8;font:12px system-ui;margin-top:6px;">Click the photo to add a point. Drag a point to move it, drag its amber handle to curve the path. Double-click a point to remove it. Keys: Tab to a point, arrows nudge it (Alt: its handle, Shift: x10), Delete removes it.</div>
+      <div style="color:var(--ps-text-muted);font:12px system-ui;margin-top:6px;">Click the photo to add a point. Drag a point to move it, drag its amber handle to curve the path. Double-click a point to remove it. Keys: Tab to a point, arrows nudge it (Alt: its handle, Shift: x10), Delete removes it.</div>
     </div>
     <style>
       #pen-wrap .pen-anchor {{ position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px;
-                      background:#60a5fa; border:2px solid #1e293b; border-radius:50%; cursor:move; }}
+                      background:var(--ps-info); border:2px solid var(--ps-border); border-radius:50%; cursor:move; }}
       #pen-wrap .pen-anchor.selected, #pen-wrap .pen-anchor:focus {{ outline:2px solid #fff; outline-offset:1px; }}
       #pen-wrap .pen-handle {{ position:absolute; width:10px; height:10px; margin:-5px 0 0 -5px;
-                      background:#fbbf24; border:2px solid #1e293b; border-radius:50%; cursor:crosshair; }}
+                      background:var(--ps-accent); border:2px solid var(--ps-border); border-radius:50%; cursor:crosshair; }}
     </style>
     <script>
       (function() {{
@@ -1081,14 +1083,14 @@ def _pan_viewer_html(
     hidden_selector = f".st-key-{key_prefix}-wand-hidden"
     image_w, image_h = (max(1, int(value)) for value in image_size)
     zoom = max(1.0, float(zoom))
-    return f"""
+    return editor_style() + f"""
     <div id="pan-wrap" tabindex="0" role="application" aria-label="Zoomed photo. Drag to pan, or use the arrow keys (Shift = faster)."
-         style="position:relative;overflow:hidden;background:#090d16;border-radius:8px;height:{display_h}px;
+         style="position:relative;overflow:hidden;background:var(--ps-canvas);border-radius:8px;height:{display_h}px;
                 display:flex;align-items:center;justify-content:center;cursor:grab;touch-action:none;outline:none;">
       <img id="pan-img" src="data:image/png;base64,{view_b64}" alt="" draggable="false"
            style="display:block;max-width:100%;max-height:{display_h}px;width:auto;height:auto;user-select:none;image-rendering:pixelated;">
     </div>
-    <div style="color:#94a3b8;font:12px system-ui;margin-top:4px;">Drag the photo to pan (arrow keys work too).</div>
+    <div style="color:var(--ps-text-muted);font:12px system-ui;margin-top:4px;">Drag the photo to pan (arrow keys work too).</div>
     <script>
       (function() {{
         const wrap = document.getElementById('pan-wrap');

@@ -473,13 +473,6 @@ class PhotoProcessor:
         top = (height - new_height) // 2
         return self.crop(0, top, width, top + new_height)
 
-    def apply_white_balance(self, red_gain: float = 1.0, blue_gain: float = 1.0) -> "PhotoProcessor":
-        arr = np.array(self.image, dtype=np.float32)
-        arr[:, :, 0] = np.clip(arr[:, :, 0] * red_gain, 0, 255)
-        arr[:, :, 2] = np.clip(arr[:, :, 2] * blue_gain, 0, 255)
-        self.image = Image.fromarray(arr.astype(np.uint8), mode="RGB")
-        return self
-
     def apply_denoise(self, radius: int = 3, color_radius: int = 0) -> "PhotoProcessor":
         """Edge-aware denoising via OpenCV's Non-Local Means (`cv2.fastNlMeansDenoisingColored`).
         Classical, not a neural network -- this app is explicitly CPU-first with no GPU dependency

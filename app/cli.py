@@ -82,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--metadata", choices=METADATA_POLICIES, default="all", help="EXIF to keep: all, camera (copyright & camera only), or none")
     parser.add_argument("--remove-gps", action="store_true", help="Drop GPS location from the kept EXIF")
     parser.add_argument(
+        "--gpu-export",
+        action="store_true",
+        help="Use CUDA for final export resizing and sharpening when available; encoding stays on the CPU and unavailable/failed CUDA falls back to CPU",
+    )
+    parser.add_argument(
         "--bit-depth", type=int, choices=(8, 16), default=8,
         help="16 = process in float32 and write a genuine 16-bit PNG/TIFF (16-bit and RAW sources keep their extra precision); JPEG/WEBP outputs stay 8-bit",
     )
@@ -150,13 +155,19 @@ def options_from_args(args: argparse.Namespace) -> dict:
 
 
 def main() -> None:
+    from app.observability import configure_logging
+
+    configure_logging("cli")
     parser = build_parser()
     args = parser.parse_args()
     try:
         options = options_from_args(args)
     except (OptionsError, ValueError, OSError) as error:
         parser.error(str(error))
-    export_settings = {"quality": max(1, min(100, args.quality)), "metadata": args.metadata, "remove_gps": args.remove_gps}
+    export_settings = {
+        "quality": max(1, min(100, args.quality)), "metadata": args.metadata,
+        "remove_gps": args.remove_gps, "gpu_export": args.gpu_export,
+    }
     if options.get("bit_depth") == 16:
         export_settings["bit_depth"] = 16
 
