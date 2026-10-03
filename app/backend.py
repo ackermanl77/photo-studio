@@ -71,6 +71,10 @@ def assign_request_id():
 _LATEST_GENERATION: "OrderedDict[tuple[str, str], int]" = OrderedDict()
 _LATEST_LOCK = threading.Lock()
 _LATEST_MAX_KEYS = 512
+# The frontend's background refine-on-pause render (app.refine_preview) and the interactive lanes
+# that supersede it.
+_REFINE_LANE = "refine"
+_INTERACTIVE_LANES = ("detail", "finish", "full")
 
 
 def _cancellation_check():
@@ -81,11 +85,19 @@ def _cancellation_check():
         return None
     if not session:
         return None
-    key = (session, request.headers.get(EDIT_LANE_HEADER, "default"))
+    lane = request.headers.get(EDIT_LANE_HEADER, "default")
+    key = (session, lane)
     with _LATEST_LOCK:
         if generation >= _LATEST_GENERATION.get(key, -1):
             _LATEST_GENERATION[key] = generation
             _LATEST_GENERATION.move_to_end(key)
+        if lane in _INTERACTIVE_LANES:
+            # A new interactive edit makes a pending refine-on-pause render obsolete (P1): the
+            # user moved on, so that full-resolution job stops at its next step.
+            refine_key = (session, _REFINE_LANE)
+            if generation > _LATEST_GENERATION.get(refine_key, -1):
+                _LATEST_GENERATION[refine_key] = generation
+                _LATEST_GENERATION.move_to_end(refine_key)
             while len(_LATEST_GENERATION) > _LATEST_MAX_KEYS:
                 _LATEST_GENERATION.popitem(last=False)
 
@@ -180,8 +192,14 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     exempt from the upload byte cap (INTERNAL_STAGE_MAX_BYTES), so the exact pixel limit is the
     bound that still applies to it. `stage_image` is that same Stage 1 result recalled from the
     backend's own cache by handle (P3) -- then `image_file` may be None.
+
+    A 16-bit export (`options["export"]["bit_depth"] == 16`) implies `bit_depth=16`: the source is
+    decoded at full precision and the pipeline runs in high-precision mode (B4, app.high_bit).
     """
     options = parse_options(options)
+    if (options.get("export") or {}).get("bit_depth") == 16:
+        options["bit_depth"] = 16
+    high_bit = options.get("bit_depth") == 16
     if stage_image is not None:
         image = stage_image
     else:
@@ -191,7 +209,7 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
             image = PhotoProcessor.from_bytes(source_bytes, filename).image
             check_pixel_count(*image.size)
         else:
-            image = decode_source(source_bytes, filename)
+            image = decode_source(source_bytes, filename, high_bit=high_bit)
     layers = layers_from_json(layers_file.read()) if layers_file else None
     return run_pipeline(
         image, options, removal_mask=_open_mask(removal_mask), local_mask=_open_mask(local_mask), layers=layers,
@@ -213,6 +231,10 @@ def _encode_response(result: Image.Image, options: dict):
     if max_width > 0 and max_height > 0:
         result.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
     keep_metadata = not options.get("strip_metadata", False)
+    if output_format == "PNG" and options.get("bit_depth") == 16 and not (max_width > 0 and max_height > 0):
+        # A high-precision run asked for a plain PNG response (the API/CLI, not the UI): a 16-bit PNG.
+        content, _extension, mime = encode_export(result, {"format": "PNG", "bit_depth": 16, "metadata": "all" if keep_metadata else "none"})
+        return BytesIO(content), mime, "edited.png"
     buffer = BytesIO()
     if output_format == "JPEG":
         save_options = {"format": "JPEG", "quality": options.get("quality", 92), "optimize": True}

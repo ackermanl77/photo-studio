@@ -23,3 +23,12 @@ def _isolated_user_data_dir(monkeypatch, tmp_path):
     # No backend token unless a test sets one -- and one set during a test (the frontend generates
     # one when it spawns a backend) is removed again afterwards instead of leaking into later tests.
     monkeypatch.setenv("PHOTO_BACKEND_TOKEN", "")
+
+
+@pytest.fixture(autouse=True)
+def _no_refine_on_pause(monkeypatch):
+    """The proxy preview's refine-on-pause (app.refine_preview) starts a background full-resolution
+    render after a real-time pause -- nondeterministic under AppTest. Off unless a test enables it."""
+    from app import refine_preview
+
+    monkeypatch.setattr(refine_preview, "PAUSE_SECONDS", float("inf"))

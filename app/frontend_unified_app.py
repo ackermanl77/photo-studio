@@ -18,18 +18,18 @@ import cv2
 from app.advanced_masks import COMBINE_MODES, MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, magic_wand_mask, radial_mask, soften_mask
 from app.ai_upscale import ai_upscale_installed
 from app.backend import process_image
-from app.backend_client import SupersededError, bind_edit_session, ensure_backend_running, export_via_backend, process_via_backend
+from app.backend_client import REFINE_LANE, REFINE_REQUEST_TIMEOUT_S, SupersededError, bind_edit_session, ensure_backend_running, export_via_backend, process_via_backend
 from app.batch_release import FileLike, export_multiple, stream_to_zip
 from app.config import MAX_UPLOAD_BYTES, user_data_dir, user_data_file
 from app.custom_presets import PresetStore
 from app.edit_history import EditHistory
 from app.edit_schema import DETAIL_STAGE_OPTION_KEYS, migrate_legacy_keys, recipe_defaults, sanitize_recipe
-from app.export import DEFAULT_NAME_TEMPLATE, EXPORT_FORMATS, METADATA_POLICIES, METADATA_POLICY_LABELS, OUTPUT_SHARPENING, ExportPresetStore, cached_export, encode_export, render_export_name
+from app.export import DEFAULT_NAME_TEMPLATE, EXPORT_FORMATS, HIGH_BIT_FORMATS, METADATA_POLICIES, METADATA_POLICY_LABELS, OUTPUT_SHARPENING, ExportPresetStore, cached_export, encode_export, render_export_name
 from app.image_processor import PhotoProcessor, auto_enhance_recipe
 from app.pipeline import check_upscale_output, expected_output_size
 from app.layer_styles import apply_layer_styles
 from app.layer_workspace import LayerWorkspace, WorkspaceLayer, layers_to_json, render_image_layer, render_text_layer
-from app.ui_editors import _before_after_html, _crop_editor_html, _curve_editor_html, _paint_editor_html, _pen_editor_html, _wand_picker_html
+from app.ui_editors import _before_after_html, _crop_editor_html, _curve_editor_html, _paint_editor_html, _pan_viewer_html, _pen_editor_html, _wand_picker_html
 from app.vector_shapes import SHAPE_TYPES, render_path_layer, render_shape_layer
 from app.library import index_folder, thumbnail
 from app.major_features import BLEND_MODE_LABELS, PhotoCatalog
@@ -42,6 +42,7 @@ from app.lens_corrections import LENS_PROFILES
 from app.professional_tools import EXPORT_PROFILES, GRID_PRESETS, OVERLAY_STYLES, WATERMARK_POSITIONS, apply_mask_overlay, apply_watermark, compute_histogram, compute_waveform, draw_guides_and_grid, draw_viewport_box, export_profile, grid_line_fractions, preview_image, zoom_preview, zoom_viewport
 from app.project_bundle import ProjectBundle
 from app.raw_import import SUPPORTED_EXTENSIONS, uploader_types
+from app.refine_preview import POLL_SECONDS as REFINE_POLL_SECONDS, RefineTracker
 from app.reliability import image_digest
 from app.recipe_options import ASPECT_RATIOS, merge_curve_points, recipe_to_options, without_per_photo_only_keys
 
@@ -1283,6 +1284,61 @@ def _render_full_resolution_export(
     )
 
 
+def _render_full_resolution_image(
+    content: bytes, filename: str, options: dict, mask_source: Image.Image,
+    local_signature: str | None, removal_signature: str | None, layers_signature: str | None,
+    own_signatures: list[str] | None = None, layers_canvas: tuple[int, int] | None = None,
+) -> Image.Image:
+    """Refine-on-pause producer (P1, app.refine_preview): the same full-resolution render the
+    export path does, decoded for the canvas. Runs on a background thread -- no st.* calls, every
+    input bound up front -- in the backend's "refine" lane, which any newer interactive request of
+    this session supersedes (the user moved on), so an obsolete job stops early."""
+    extra = {}
+    if own_signatures:
+        extra["local_masks_bytes"] = _local_masks_payload([_combined_mask_png_uncached(mask_source, signature) for signature in own_signatures])
+    return process_via_backend(
+        content, filename, options,
+        _combined_mask_png_uncached(mask_source, local_signature) if local_signature else None,
+        _build_layers_payload(layers_signature, layers_canvas) if layers_signature else None,
+        _combined_mask_png_uncached(mask_source, removal_signature) if removal_signature else None,
+        lane=REFINE_LANE, timeout=REFINE_REQUEST_TIMEOUT_S, **extra,
+    )
+
+
+def _in_fragment_rerun() -> bool:
+    """True during a fragment-only rerun (not a full script run)."""
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+    ctx = get_script_run_ctx()
+    return bool(ctx is not None and ctx.fragment_ids_this_run)
+
+
+def _refine_status_view() -> None:
+    """The canvas's refine-on-pause status line, run as an st.fragment that polls (run_every) while
+    a refine is pending: it starts the full-resolution job once the edit has paused, and when the
+    job finishes it reruns the whole page so the canvas, histogram and export switch to it. In a
+    full run it defers that rerun to the end of the script (_request_rerun) -- a mid-script
+    st.rerun() would drop not-yet-rendered widgets' state; in a fragment-only run the rest of the
+    script isn't running, so st.rerun() is safe there."""
+    tracker = st.session_state.get("_refine_tracker")
+    if tracker is None:
+        return
+    tracker.maybe_start()
+    if tracker.needs_rerun():
+        if _in_fragment_rerun():
+            st.rerun(scope="app")
+        _request_rerun()
+    status = tracker.status()
+    if status == "waiting":
+        st.caption("⚡ Fast preview -- a full-resolution render follows when you pause.")
+    elif status == "running":
+        st.caption("⏳ Rendering full resolution…")
+    elif status == "ready":
+        st.caption("✨ Full-resolution view")
+    elif status == "failed":
+        st.caption("⚡ Fast preview (the full-resolution render didn't finish; it is still used for Save).")
+
+
 def _project_archive(source_name: str, source_bytes: bytes, recipe: dict, layers: list[dict]) -> bytes:
     """The .photoproject bytes for Save Project -- built only when the download button is clicked
     (Streamlit runs a download_button's data callable on its own thread; inputs are bound up front
@@ -1433,6 +1489,7 @@ def _apply_export_preset(preset: dict) -> None:
     widget_keys = {
         "format": "exp-fmt", "quality": "exp-qual", "long_edge": "exp-long-edge", "sharpen": "exp-sharpen",
         "metadata": "exp-metadata", "remove_gps": "exp-remove-gps", "name_template": "exp-name-template",
+        "bit_depth": "exp-bit-depth",
     }
     for field, widget_key in widget_keys.items():
         if field in preset:
@@ -2725,14 +2782,37 @@ with st.container(key="workspace-split"):
 
         detail_options = {key: options[key] for key in (*_DETAIL_STAGE_OPTION_KEYS, *_BOTH_STAGES_OPTION_KEYS) if key in options}
         remaining_options = {key: value for key, value in options.items() if key not in _DETAIL_STAGE_OPTION_KEYS}
-        try:
-            stage_a_png_bytes, stage_a_handle = _cached_process_through_detail(stage_input_key, stage_input, stage_input_name, detail_options)
-            stage_a_key = image_digest(f"{stage_input_key}|{json.dumps(detail_options, sort_keys=True)}".encode("utf-8"))
-            edited_image = _cached_process_from_repair_onward(
-                stage_a_key, stage_a_png_bytes, remaining_options,
-                local_mask_key, local_mask_bytes, layers_key, layers_bytes, removal_mask_key, removal_mask_bytes,
-                stage_a_handle, local_masks_key, local_masks_bytes,
+        # Refine-on-pause (P1, app.refine_preview): while a proxy is in use, the edit's key plus a
+        # bound full-resolution producer; once a background render of this exact edit has finished
+        # it replaces the proxy result below. Any change to the edit gives a new key -- straight
+        # back to the fast proxy until the next pause.
+        refine_tracker = st.session_state.setdefault("_refine_tracker", RefineTracker())
+        refine_key = refine_render = None
+        if use_proxy:
+            full_render_options = {key: value for key, value in options.items() if key != "preview_scale"}
+            refine_inputs = [
+                source_digest, full_render_options, mask_source_key, mask_signature if shared_mask_layers else None,
+                own_signatures, removal_signature if removal_active else None, layers_signature,
+            ]
+            refine_key = image_digest(json.dumps(refine_inputs, sort_keys=True, default=str).encode("utf-8"))
+            refine_render = functools.partial(
+                _render_full_resolution_image, upload_bytes, upload_name, full_render_options, mask_source,
+                mask_signature if shared_mask_layers else None, removal_signature if removal_active else None, layers_signature,
+                own_signatures, tuple(full_canvas),
             )
+        refine_tracker.observe(refine_key, refine_render)
+        refined_image = refine_tracker.result(refine_key)
+        try:
+            if refined_image is not None:
+                edited_image = refined_image
+            else:
+                stage_a_png_bytes, stage_a_handle = _cached_process_through_detail(stage_input_key, stage_input, stage_input_name, detail_options)
+                stage_a_key = image_digest(f"{stage_input_key}|{json.dumps(detail_options, sort_keys=True)}".encode("utf-8"))
+                edited_image = _cached_process_from_repair_onward(
+                    stage_a_key, stage_a_png_bytes, remaining_options,
+                    local_mask_key, local_mask_bytes, layers_key, layers_bytes, removal_mask_key, removal_mask_bytes,
+                    stage_a_handle, local_masks_key, local_masks_bytes,
+                )
         except SupersededError:
             # A newer edit from this session replaced this render on the backend -- this run is
             # already obsolete (its rerun is underway), so there is nothing to show or report.
@@ -2742,7 +2822,7 @@ with st.container(key="workspace-split"):
             st.stop()
         # What an export will measure -- on a proxy preview, the real (full-resolution) output size,
         # not the proxy's.
-        output_size = expected_output_size(source.size, options) if use_proxy else edited_image.size
+        output_size = expected_output_size(source.size, options) if use_proxy and refined_image is None else edited_image.size
 
     _TAB_VISIBLE = True  # the canvas column is always on screen
     with canvas_col:
@@ -2845,6 +2925,10 @@ with st.container(key="workspace-split"):
         key_c2.button("👁 Before / After", key="kb-orig-btn", on_click=_toggle_original, shortcut="B", use_container_width=True, help="Show the original (B)")
         key_c3.button("# Grid", key="kb-grid-btn", on_click=_toggle_grid, shortcut="G", use_container_width=True, help="Toggle the composition grid (G)")
 
+        # Refine-on-pause status (P1): a fragment that polls only while a full-resolution render
+        # is pending for a proxy preview, so a settled photo costs nothing.
+        st.fragment(_refine_status_view, run_every=REFINE_POLL_SECONDS if refine_tracker.pending() else None)()
+
         if zoom_level >= 1.0:
             # Navigator: click the overview to center the zoomed view there (the same hidden
             # text_area commit pattern as the other on-canvas pickers). Handled before the pan
@@ -2860,15 +2944,17 @@ with st.container(key="workspace-split"):
             if _consume_new_commit(pending_nav, "cv-nav-committed"):
                 try:
                     nav_click = json.loads(pending_nav)
-                    st.session_state["cv-panx"] = round(min(1.0, max(0.0, float(nav_click["x"]))), 2)
-                    st.session_state["cv-pany"] = round(min(1.0, max(0.0, float(nav_click["y"]))), 2)
+                    # 4 decimals: a drag-pan (F3) at 400 % moves the view by a few source pixels,
+                    # far below the old 0.01 step.
+                    st.session_state["cv-panx"] = round(min(1.0, max(0.0, float(nav_click["x"]))), 4)
+                    st.session_state["cv-pany"] = round(min(1.0, max(0.0, float(nav_click["y"]))), 4)
                 except (json.JSONDecodeError, TypeError, KeyError, ValueError):
                     pass
             pan_c1, pan_c2 = st.columns(2)
             with pan_c1:
-                pan_x = st.slider("Pan Horizontal", 0.0, 1.0, 0.5, 0.01, key="cv-panx")
+                pan_x = st.slider("Pan Horizontal", 0.0, 1.0, 0.5, 0.0001, format="%.3f", key="cv-panx")
             with pan_c2:
-                pan_y = st.slider("Pan Vertical", 0.0, 1.0, 0.5, 0.01, key="cv-pany")
+                pan_y = st.slider("Pan Vertical", 0.0, 1.0, 0.5, 0.0001, format="%.3f", key="cv-pany")
 
         # Guides & Grid -- a pure composition/alignment aid, the same "view-only, never sent
         # through the backend or included in an export" pattern as the clipping-warning and Masks
@@ -2927,7 +3013,16 @@ with st.container(key="workspace-split"):
                 canvas_display, canvas_caption = zoom_preview(edited_image, zoom_level, (pan_x, pan_y)), "Current Edited Image"
             if grid_type != "None" or guides:
                 canvas_display = draw_guides_and_grid(canvas_display, grid_type, guides)
-            st.image(canvas_display, caption=canvas_caption, use_container_width=True)
+            if zoom_level >= 1.0 and not show_original:
+                # Drag-to-pan (F3): the zoomed view in a small viewer that commits the new center
+                # through the navigator's hidden field (handled above, before the pan sliders).
+                view_box = zoom_viewport(edited_image.size, zoom_level, (pan_x, pan_y))
+                view_center = ((view_box[0] + view_box[2]) / 2 / edited_image.width, (view_box[1] + view_box[3]) / 2 / edited_image.height)
+                pan_html, pan_height = _pan_viewer_html(canvas_display, "cv-nav", view_center, zoom_level, edited_image.size)
+                components.html(pan_html, height=pan_height)
+                st.caption(f"{canvas_caption} -- {int(zoom_level * 100)}%, drag to pan")
+            else:
+                st.image(canvas_display, caption=canvas_caption, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
         # Histogram -- always reflects edited_image (the backend-processed result), not whichever
@@ -3036,6 +3131,15 @@ with st.container(key="workspace-split"):
                 )
                 # On by default (R4): a location shouldn't leave the machine unless asked for.
                 exp_remove_gps = st.checkbox("Remove GPS location", value=True, key="exp-remove-gps", disabled=exp_metadata != "all")
+                # B4: a genuine 16-bit PNG/TIFF -- rendered on the backend in float32 from the
+                # full-precision source (16-bit files and RAW keep their extra bits). Always
+                # rendered (only disabled for JPEG/WEBP) so its value survives a format switch; the
+                # format selectbox renders later, in the footer, so its last value is read here.
+                exp_bit_depth = st.selectbox(
+                    "Bit depth", [8, 16], key="exp-bit-depth", format_func=lambda bits: f"{bits}-bit",
+                    disabled=st.session_state.get("exp-fmt", "JPEG") not in HIGH_BIT_FORMATS,
+                    help="16-bit (PNG/TIFF only) keeps smooth skies and gradients free of banding for further editing or print. Renders at full resolution when you click Save.",
+                )
             # AI Upscale lives here, not in the Detail tab: it runs once, on the final full-resolution
             # result, only when Save is clicked (it used to re-run Real-ESRGAN on every Stage 2
             # change, and its 2x/4x result could crash this page on decode). ai_upscale_installed(),
@@ -3063,7 +3167,7 @@ with st.container(key="workspace-split"):
                     export_store.save(new_export_preset.strip(), {
                         "format": st.session_state.get("exp-fmt", "JPEG"), "quality": st.session_state.get("exp-qual", 92),
                         "long_edge": exp_long_edge, "sharpen": exp_sharpen, "metadata": exp_metadata,
-                        "remove_gps": exp_remove_gps, "name_template": exp_name_template,
+                        "remove_gps": exp_remove_gps, "name_template": exp_name_template, "bit_depth": exp_bit_depth,
                     })
                     st.toast(f"Export preset '{new_export_preset.strip()}' saved", icon="💾")
                     _request_rerun()
@@ -3082,9 +3186,11 @@ with st.container(key="workspace-split"):
                 "format": out_format, "quality": out_quality, "long_edge": exp_long_edge, "sharpen": exp_sharpen,
                 "metadata": exp_metadata, "remove_gps": exp_remove_gps,
                 "watermark": {"text": wm_text, "position": wm_position, "opacity": wm_opacity, "font_size": wm_font_size} if wm_text.strip() else None,
+                "bit_depth": exp_bit_depth if out_format in HIGH_BIT_FORMATS else 8,
             }
             export_extension, export_mime = EXPORT_FORMATS[out_format]
-            # A full-resolution render on the backend is needed when the canvas shows a proxy, or
+            # A full-resolution render on the backend is needed when the canvas shows a proxy, for
+            # a 16-bit file (the float32 pipeline runs there, from the full-precision source), or
             # for AI Upscale (whose output this process may not even be able to decode) -- the
             # backend then encodes the file itself (app.export.encode_export via /process's
             # "export" option). Otherwise the already-rendered result is encoded right here.
@@ -3101,7 +3207,8 @@ with st.container(key="workspace-split"):
             export_key = image_digest(
                 json.dumps([source_digest, full_options, mask_source_key, mask_signature, own_signatures, removal_signature if removal_active else None, layers_key, export_settings, use_proxy], sort_keys=True, default=str).encode("utf-8")
             )
-            if use_proxy or exp_upscale:
+            # A finished refine-on-pause render already *is* the full-resolution result.
+            if (use_proxy and refined_image is None) or exp_upscale or export_settings["bit_depth"] == 16:
                 export_producer = functools.partial(
                     _render_full_resolution_export, upload_bytes, upload_name, full_options, export_settings, mask_source,
                     mask_signature if shared_mask_layers else None, removal_signature if removal_active else None, layers_signature,
