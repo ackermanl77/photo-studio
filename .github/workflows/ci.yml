@@ -29,7 +29,7 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
-      # Core requirements + pytest only -- requirements-raw.txt (rawpy) gets its own job below and
+      # Core requirements + pytest (and pytest-xdist) only -- requirements-raw.txt (rawpy) gets its own job below and
       # requirements-desktop.txt (pywebview/PyInstaller) is build-only: pywebview can need system
       # GTK/WebKit packages on Linux, and no test needs it (app.desktop imports it lazily).
       - name: Install dependencies
@@ -39,7 +39,7 @@ jobs:
         run: python -m compileall -q app
 
       - name: Run tests
-        run: python -m pytest -q
+        run: python -m pytest -q -n auto
 
   raw-decode:
     # Exercises real LibRaw decoding (a generated DNG, tests/synthetic_assets.py) -- skipped in the

@@ -1,3 +1,6 @@
 # Test/CI tooling -- never bundled into the desktop build.
 -r requirements.txt
 pytest>=8.0.0,<10
+# Parallel test runs: python -m pytest -n auto (T7). The suite is xdist-safe -- every test gets its own
+# data folder (tests/conftest.py) and no test binds a fixed port.
+pytest-xdist>=3.6,<4
