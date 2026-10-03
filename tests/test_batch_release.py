@@ -2,6 +2,7 @@ from pathlib import Path
 import zipfile
 import io
 
+import numpy as np
 from PIL import Image
 
 import pytest
@@ -29,6 +30,27 @@ def test_batch_zip_contains_rendered_files(tmp_path):
     archive = zipfile.ZipFile(io.BytesIO(make_zip(outputs)))
 
     assert archive.namelist() == ["one-edited.jpg"]
+
+
+def test_process_files_can_use_the_optional_gpu_resize(monkeypatch, tmp_path):
+    source = tmp_path / "large.jpg"
+    Image.new("RGB", (2400, 1600), (20, 30, 40)).save(source)
+    calls = []
+
+    def fake_gpu_resize(pixels, output_size, sharpening=None):
+        calls.append((pixels.shape, output_size, sharpening))
+        return np.asarray(Image.fromarray(pixels).resize(output_size, Image.Resampling.BICUBIC))
+
+    from app import export
+
+    monkeypatch.setattr(export, "gpu_export_transform", fake_gpu_resize)
+    outputs, report = process_files([source], profile="Web", gpu_export=True)
+
+    assert report[0].status == "ok"
+    assert len(outputs) == 1
+    assert calls == [((1600, 2400, 3), (2048, 1365), None)]
+    with Image.open(io.BytesIO(outputs[0][1])) as result:
+        assert result.size == (2048, 1365)
 
 
 def test_export_multiple_bundles_every_selected_profile_into_one_zip():

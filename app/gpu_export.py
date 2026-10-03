@@ -40,7 +40,9 @@ def resize_and_sharpen(
         raise ValueError(f"GPU export needs 1, 3 or 4 channels, got shape {pixels.shape}")
 
     is_eight_bit = source.dtype == np.uint8
-    tensor = torch.from_numpy(np.ascontiguousarray(source)).to(device="cuda", dtype=torch.float32)
+    # np.asarray(PIL image) is read-only and torch.from_numpy() warns about that; require a
+    # contiguous, writable array (a copy only when the input isn't one already).
+    tensor = torch.from_numpy(np.require(source, requirements=["C", "W"])).to(device="cuda", dtype=torch.float32)
     tensor = tensor.permute(2, 0, 1).unsqueeze(0)
     if is_eight_bit:
         tensor = tensor / 255.0
