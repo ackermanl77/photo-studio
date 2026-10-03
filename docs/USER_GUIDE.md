@@ -5,22 +5,26 @@ tone/color/detail pipeline, local masking, object removal, layers, batch process
 library — all running locally, no cloud. Core editing and file encoding need no GPU; an optional
 CUDA path can accelerate final export resizing and sharpening.
 
-This guide walks through every tab and control in the unified workspace. For what's changed
-recently and known limitations, see [`PROJECT_STATUS.md`](PROJECT_STATUS.md).
+This guide walks through every tab and control in the unified workspace. For known limitations, see
+[`PROJECT_STATUS.md`](PROJECT_STATUS.md); for what changed recently, [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
 ## 1. Getting Started
 
-**Desktop app (recommended):** run `release\PhotoStudio.exe` (or `PhotoStudio.exe` from an
-extracted `PhotoStudio-<version>-Windows.7z`) — a native window, nothing to install.
+**Desktop app (recommended):** run `PhotoStudio.exe` from an extracted
+`PhotoStudio-<version>-Windows.7z` (or `release\PhotoStudio.exe` after a local build) — a native
+window, nothing else to install. Or run the installer, `PhotoStudio-Setup-<version>.exe` (see
+[Installing](#installing) below).
 
 **From source:** `streamlit run app/frontend_unified_app.py` opens it in your browser instead. Both
 give you the exact same workspace.
 
 **Opening a photo:** drag a file onto the uploader at the top, or click it to browse. Supported
-formats: JPG, PNG, WEBP, TIFF, and camera RAW (`.cr2`, `.cr3`, `.nef`, `.arw`, `.dng` — RAW support
-needs the optional `rawpy` package; the app tells you clearly if it's missing). Your original file
+formats: JPG, PNG, WEBP, TIFF (including 16-bit PNG/TIFF), and camera RAW (`.cr2`, `.cr3`, `.nef`,
+`.arw`, `.dng`, `.raf`, `.rw2`, `.orf`, `.pef`, `.srw`) — RAW support is included in the desktop
+app; from source it needs the optional `rawpy` package (`requirements-raw.txt`), and the app tells
+you clearly if it's missing). Your original file
 is never overwritten — every edit lives in the app until you explicitly export or save.
 
 **Opening a saved project:** expand "📁 Open a saved project (.photoproject)" above the uploader to
@@ -228,11 +232,8 @@ One handle per point means a curve's direction can't change abruptly on one side
 other the way Photoshop's Alt-drag "corner point" allows — see
 [Known Limitations](#known-limitations).
 
-**A note on Text/Shape/Path layers and Save Project:** these three layer types stay fully editable
-while you're working, but **Save Project flattens them into a plain image** — reopening a
-`.photoproject` later shows them as an ordinary Image layer, not editable text/shape/path anymore.
-An Image layer (an uploaded photo) doesn't have this limitation, since it was already a plain image
-to begin with.
+Text, Shape and Pen path layers stay editable after **Save Project** and reopening the file (see
+[Projects](#projects)).
 
 ## 10. Masks — local adjustments (◉ Local → ◉ Masks)
 
@@ -437,6 +438,55 @@ ships it separately:
 - The **Batch Processor** has a separate **Use GPU for profile resizing** option for its Web/Social
   profiles. It uses the same optional CUDA support and CPU fallback; Print/Archive do not resize.
 - From source, install `requirements-gpu.txt` instead (see its header for the CUDA build of torch).
+
+---
+
+## Installing
+
+- **Portable:** extract `PhotoStudio-<version>-Windows.7z` anywhere and run `PhotoStudio.exe`. The
+  Microsoft Edge WebView2 runtime the window needs is bundled (`WebView2Runtime` next to the exe),
+  so nothing else has to be installed.
+- **Installer:** `PhotoStudio-Setup-<version>.exe` asks whether to install **for all users**
+  (needs administrator rights, goes to Program Files) or **just for you** (no administrator rights,
+  goes to `%LOCALAPPDATA%\Programs`). It can associate `.photoproject` files with Photo Studio,
+  creates Start-menu and desktop shortcuts, and — when it was built with one — offers the **GPU
+  pack** as an optional component. Uninstalling asks whether to delete your presets, catalog and
+  logs too; answering No (or a silent uninstall) keeps them.
+- **Your files:** settings, custom presets, export presets, the library catalog, logs and a GPU
+  pack you extracted there live in `%LOCALAPPDATA%\PhotoStudio`, never in the install folder.
+  Photos are only read; edits are written only where you save or export them.
+
+---
+
+## Command Line
+
+The same edit pipeline runs without the window (from source: `python -m app`), for one photo or a
+whole folder:
+
+```powershell
+python -m app --input photo.jpg --output out.jpg --exposure-ev 0.5 --contrast 1.1 --vibrance 20
+python -m app --input-dir .\shoot --output-dir .\edited --preset travel-clean --quality 90
+python -m app --input scan.tif --output scan-edit.tif --bit-depth 16 --curve "0:8,128:140,255:250"
+python -m app --input photo.jpg --output square.jpg --rotate 90 --straighten 1.5 --aspect 1 1
+python -m app --input photo.jpg --output clean.jpg --remove-mask object-mask.png
+```
+
+- Tone/colour: `--exposure-ev` (stops), `--contrast`/`--saturation`/`--brightness` (multipliers,
+  1.0 = unchanged), `--highlights`/`--shadows`, `--temperature`/`--tint`, `--vibrance`,
+  `--texture`/`--clarity`, `--dehaze`, `--curve "in:out,..."`, `--denoise 0-9` (+ `--denoise-color`),
+  `--sharpen`, `--auto-enhance`, `--preset <built-in look>`.
+- Geometry: `--rotate 90|180|270`, `--straighten <degrees>`, `--constrain-crop`,
+  `--crop LEFT TOP RIGHT BOTTOM` (pixels), `--aspect W H` (centred crop).
+- Local edits (single photo): `--mask mask.png` with `--mask-exposure`/`--mask-contrast`/
+  `--mask-saturation` (multipliers; white = edited, black = protected, grey = partial), and
+  `--remove-mask mask.png` for object removal.
+- Saved looks: `--recipe preset.json` (a custom preset, or an exported presets file with
+  `--recipe-name`); `--options options.json` takes a raw pipeline options object.
+- Output: `--quality 1-100` (JPEG/WEBP), `--metadata all|camera|none`, `--remove-gps`,
+  `--bit-depth 16` (PNG/TIFF), `--gpu-export` (CUDA resize/sharpen when the GPU pack's torch is
+  available), `--ai-upscale 2|4` (needs the GPU pack).
+
+`python -m app --help` lists every option with its range.
 
 ---
 

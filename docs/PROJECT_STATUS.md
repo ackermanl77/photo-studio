@@ -1,5 +1,9 @@
 # Project Status
 
+The current-state reference: architecture, entry points, backend API and limits, release and
+installer, verification and known issues. Using the app: [`USER_GUIDE.md`](USER_GUIDE.md). Fix
+history: [`CHANGELOG.md`](CHANGELOG.md). Contributor notes: [`../CLAUDE.md`](../CLAUDE.md).
+
 ## Architecture
 
 ```text
@@ -20,8 +24,9 @@ only Streamlit entry point) composes the panels in `app/ui/` (`tabs/`, `canvas.p
 `selections.py`, `layers.py`, `processing.py`, ...). Each panel records its widgets' values in an
 `EditorContext`, and the options are built from them through the one control registry,
 `app/controls.py::CONTROLS` (which also generates the widgets, the recipe sanitizer, the
-control-backed option specs and the stage split). The frontend and `app/backend_client.py` sends the source (or a 2048 px proxy for a large photo) plus mask,
-per-mask and layer payloads to `/process`. The step order lives only in
+control-backed option specs and the stage split). Through `app/backend_client.py` the frontend sends
+the source (or a 2048 px proxy for a photo whose long edge exceeds 2560 px) plus mask, per-mask and
+layer payloads to `/process`. The step order lives only in
 `app/pipeline.py::run_pipeline()`: ICC -> sRGB, Geometry (rotate/flip, Lens, straighten, constrain
 crop -- `app/geometry.py`), Tone (+ preset), Color, Detail | Repair, Layers, Masks (shared mask, then
 per-selection adjustment sets), Portrait, Crop, Effects, AI Upscale. The backend, the CLI and both
@@ -57,7 +62,16 @@ The desktop wrapper is `app/desktop.py`, and the PyInstaller specification is `P
 | Processing backend the frontend talks to over HTTP | `app/backend.py` |
 | HTTP client + on-demand backend startup used by the frontend | `app/backend_client.py` |
 
-Earlier development iterations used additional per-feature Streamlit entry points (`frontend_project.py`, `frontend_layers.py`, `frontend_masking.py`, `frontend_batch.py`, `frontend_library_editor.py`, `frontend_portrait.py`, `frontend_diagnostics.py`, `frontend_release.py`, `frontend_complete.py`, `frontend_center.py`, `frontend_integrated.py`, `frontend_unified_v2.py`, `integrated_workbench_next.py`, and plain `frontend.py`). They were consolidated into `frontend_unified_app.py` and **no longer exist** in `app/` (their compiled `.pyc` files are the only trace left, in `app/__pycache__/`). Any documentation that still tells you to run one of them describes a past development snapshot — see the notice at the top of `docs/workflows/README.md`.
+Earlier development iterations used additional per-feature Streamlit entry points (`frontend_project.py`, `frontend_layers.py`, `frontend_masking.py`, `frontend_batch.py`, `frontend_library_editor.py`, `frontend_portrait.py`, `frontend_diagnostics.py`, `frontend_release.py`, `frontend_complete.py`, `frontend_center.py`, `frontend_integrated.py`, `frontend_unified_v2.py`, `integrated_workbench_next.py`, and plain `frontend.py`). They were consolidated into `frontend_unified_app.py` and **no longer exist**; neither do `app/cached_processing.py`, `app/performance.py`, `app/edit_stack.py` and `app/release_preflight.py` (removed as dead code, B12) -- stale `.pyc` files of removed modules may linger in `app/__pycache__/`. Old mentions of any of them in `docs/CHANGELOG.md` describe a past development snapshot.
+
+### Backend API and limits
+
+`app/backend.py` (Flask; served by waitress when installed) binds to `127.0.0.1` (`PHOTO_BACKEND_HOST`/`PHOTO_BACKEND_PORT`, default port 8502; the desktop launcher picks free ports per launch) and, whenever `PHOTO_BACKEND_TOKEN` is set (always under `app/desktop.py`, and for a backend the frontend starts itself), answers every request except `/health` with 401 unless it carries that token in `X-Photo-Token`:
+
+- `GET /health` -- status.
+- `POST /process` -- multipart: the source `image`, optional mask / per-selection / layer payloads, and an `options` JSON field validated by `app/edit_schema.py::parse_options()` (unknown keys are rejected). The response is JSON + multipart; Stage 1 results come back with an `X-Photo-Stage-Handle` that Stage 2 sends instead of the image (410 when it has expired). A superseded interactive request ends with 409; every response carries an `X-Request-ID`.
+
+Limits (environment variables, read at start-up by `app/config.py`): `PHOTO_MAX_UPLOAD_BYTES` (default 50 MB), `PHOTO_MAX_IMAGE_PIXELS` (50,000,000), `PHOTO_MAX_UPSCALE_OUTPUT_PIXELS` (200,000,000, the AI Upscale result), `PHOTO_STAGE_CACHE_ENTRIES` (4 Stage 1 handles), `PHOTO_MAX_HEAVY_JOBS` (2 concurrent Non-Local Means / dehaze steps). Per-user files (settings, presets, catalog, logs, an optional GPU pack) live in `%LOCALAPPDATA%\PhotoStudio` on Windows, `~/.photo-studio` elsewhere (`app.config.user_data_dir()`; `PHOTO_STUDIO_DATA_DIR` overrides).
 
 ## Release
 
@@ -78,11 +92,30 @@ packages stay first). The base bundles the whole standard library so the pack's 
 what they need. The installer offers the pack as an optional component when it was built;
 `-BuildProfile gpu` still builds the older all-in-one folder.
 
-`scripts/build_release.ps1` cleans up after itself: PyInstaller's output is moved into `release/` (no second version-named copy anymore), and `build-release/`/`dist-release/` are deleted after a successful build (`-KeepBuildFiles` keeps them). Rebuild with `scripts/build_release.ps1`. Older release notes under `docs/workflows/desktop-exe/` (`current-all-features.md`, `latest-release.md`, `all-features-release.md`, `global-release.md`) reference earlier `dist-*` folder names and test counts from previous builds — they are historical and do not describe the current release.
+`scripts/build_release.ps1` cleans up after itself: PyInstaller's output is moved into `release/` (no second version-named copy anymore), and `build-release/`/`dist-release/` are deleted after a successful build (`-KeepBuildFiles` keeps them). Rebuild with `scripts/build_release.ps1`.
+
+**Installer.** `build_release.ps1 -Installer` runs Inno Setup 6 (`ISCC.exe` on `PATH`, in Program Files,
+or a per-user install under `%LOCALAPPDATA%\Programs\Inno Setup 6`) on `installer/PhotoStudio.iss`,
+passing `-Version` through, and writes `installer-output\PhotoStudio-Setup-<version>.exe` (gitignored).
+It packages the finished `release\` folder (including `WebView2Runtime\`). Setup asks "all users"
+(admin, `Program Files`) or "just me" (no admin, `%LOCALAPPDATA%\Programs`; `/CURRENTUSER` on the
+command line), offers a `.photoproject` file association (written per machine or per user to match)
+and desktop/Start-menu shortcuts, and adds a "GPU pack" component when `-GpuPack` built one. The
+uninstaller asks whether to delete `%LOCALAPPDATA%\PhotoStudio` (presets, catalog, logs, a GPU pack
+kept there); a silent uninstall (`/SUPPRESSMSGBOXES`) keeps it.
 
 ## Verification
 
-Run `python -m compileall -q app` and `python -m pytest -q` yourself before relying on a pass count (`-m "not slow"` skips the AppTest-driven tests; `PHOTO_PERF_TESTS=1 python -m pytest -m perf` runs the 24 MP budgets). The suite's size and pass count have changed repeatedly across development snapshots (75, 81, and 84 all appear in historical docs under `docs/workflows/`), so no single number here should be trusted as current without re-running it.
+Run `python -m compileall -q app` and `python -m pytest -q -n auto` (or without `-n auto`) yourself
+before relying on a pass count (`-m "not slow"` skips the AppTest-driven tests; `PHOTO_PERF_TESTS=1
+python -m pytest -m perf` runs the 24 MP budgets). CI (`.github/workflows/ci.yml`) runs the same on
+Windows and Ubuntu with Python 3.12 and 3.14, plus a `raw-decode` job with `requirements-raw.txt`.
+
+Last run 2026-10-03 on Windows 11 / Python 3.14.7 with the dev `.venv`'s packages: `compileall` clean;
+`pytest -q` **639 passed, 11 skipped** in 174 s (serially). The 11 skips are by design: nine
+photo-specific or UI-only controls in `tests/test_parity_golden.py` and the two opt-in
+`PHOTO_PERF_TESTS` budgets. That venv has CUDA torch 2.14 and Real-ESRGAN, so the GPU-export and
+AI Upscale tests ran; without torch the ones that need it skip (CI).
 
 Release checks last run on 2026-10-01 (Windows 11, RTX 5080): `build_release.ps1` built both profiles
 from a fresh `build-venv\<profile>` and `--self-test` passed (cpu: about 1.0 GB, 2,795 files; gpu with
@@ -93,7 +126,13 @@ ports bound to 127.0.0.1, `/process` returns 401 without the token or with a wro
 the window uses the bundled `WebView2Runtime`, and a second launch exits in under a second without
 starting servers. The startup-failure dialog was checked by reading the code only, not by triggering it.
 Real CUDA Real-ESRGAN with 12 forced tiles matched an untiled run (PSNR 59 dB, no seams, no NaNs). The
-Inno Setup installer and the GitHub workflows have not been run.
+GitHub workflows have not been run.
+
+2026-10-02: the installer was built (`-Installer`) and installed/uninstalled silently, which found and
+fixed the per-user install, the silent-uninstall prompt and a leftover registry key (`c78612b`); its
+GPU-pack component was not exercised. The CUDA export path was checked on an RTX 5080: a 4500x3000 ->
+2048 px Screen-sharpened export matched the CPU path to a mean of 0.35 levels (max 4), 202 ms vs
+305 ms once warm, with ~8 s of CUDA start-up on the first call.
 
 Clean-up round, 2026-10-02: a scratch PyInstaller build of the CPU base (from a fresh venv, outside
 `release/`; 331 MB / 2,585 files without WebView2) passed `--self-test`, and with
@@ -127,7 +166,7 @@ on:
 
 ## History
 
-The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).
+The fix history, newest first, is in [`docs/CHANGELOG.md`](CHANGELOG.md).
 
 ## Known Issues
 
@@ -177,7 +216,6 @@ The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).
   is Streamlit's, and AppTest can't press keys, so they're covered by source checks and manual testing.
 - The third-party test images were deleted from `tests/assets/`, but they remain in git history; purge
   them from history (a force-push) if the repository is public.
-
 - Text layers have no font picker or custom font upload -- `app.layer_workspace._load_font()` checks a short list of common TrueType font paths per OS and falls back to Pillow's built-in bitmap font when none exist, so the actual typeface rendered depends on what's installed on the machine running the app (see docs/CHANGELOG.md), not a choice the user makes.
 - The free-form Crop tool's corner-drag handles snap to active grid lines/guides; dragging the whole rectangle to move it does not (see docs/CHANGELOG.md for why that scope cut was made).
 - Guides can only be added at a typed-in percentage position via a slider, not dragged out from an on-screen ruler the way Photoshop's own guides are -- consistent with this app's established preference (see the free-form crop rectangle's own history) for a plain-widget alternative over adding a new interactive canvas component where a simpler one is workable.
@@ -191,7 +229,7 @@ The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).
 - Lens corrections aren't calibrated to any specific camera/lens model — there's no real profile database (see docs/CHANGELOG.md); `LENS_PROFILES`'s entries are generic starting points by lens category, not anything matched against a photo's actual EXIF lens metadata (which isn't read at all currently).
 - The HSL Color Mixer still renders all 8 bands (collapsed, keyed expanders) on every run: a widget that isn't rendered loses its state, and `persist_state=` didn't hold up as the fix (see above). `request_rerun()` and the hidden-textarea commit guard (`consume_new_commit()`) are the other two state helpers, all in `app/ui/state.py`.
 - Face detection uses YuNet via `cv2.FaceDetectorYN`; an OpenCV build with neither it nor the Haar cascade reports "no detector" in System Health and the Portrait tab instead of a misleading 0. Skin smoothing is still a global skin-hue mask, not limited to detected faces.
-- Microsoft Edge WebView2 Runtime is required for the native desktop window.
+- Microsoft Edge WebView2 Runtime is required for the native desktop window; the release bundles a pinned Fixed Version copy (`release\WebView2Runtime\`), which does not auto-update -- `.github/workflows/webview2-age.yml` opens an issue when it is more than 90 days old.
 - The Library Catalog's keyboard shortcuts (rate/reject/navigate) only work while a real browser tab has the page focused — they reach into `window.parent.document` from a `components.html()` iframe, which `streamlit.testing.v1.AppTest` (a headless harness with no real DOM/JS) can't exercise, so that part is only covered by live manual verification, not the automated suite. The same limitation now also applies to the draggable free-form crop rectangle and the tone curve's click-to-add/drag/double-click-to-remove extra points — their JS interactions are covered by live verification and by driving the hidden commit field directly (the same wiring a real interaction ultimately depends on), not by an automated test that simulates an actual drag or double-click.
 - The on-canvas paint editor (including re-editing an existing "Painted" selection's "🎨 Edit Painting") draws at a downscaled preview resolution (capped at 480px on the long edge via `preview_image()`), not the source's full resolution — fine for the bilinear upscale `MaskLayer.normalized()` already does for every mask kind, but a very precise, high-resolution brush edge will look softer than a pixel-perfect selection would.
 - Dehaze's transmission map is smoothed with a plain Gaussian blur, not a real edge-aware guided filter (see docs/CHANGELOG.md) — expect a faint halo around strong, hard edges at high strength. There's also no sky segmentation, so a hazy sky can receive more correction than the rest of the scene.
@@ -205,4 +243,4 @@ The fix history (docs/CHANGELOG.md) is in [`docs/CHANGELOG.md`](CHANGELOG.md).
 - The tone curve's "extra" points can be added and dragged freely in both X and Y, but there's no visual warning while dragging one directly onto another point's exact X — the collision is only caught and silently resolved (the earlier-sorted point wins, the later one is dropped) when the curve is actually applied, in `app.recipe_options.merge_curve_points()`.
 - Post-Crop Vignette and the Lens tab's corrective vignette are independent controls that both run in the same pipeline (Lens's before Crop, Effects' after) — using both at once stacks their darkening/brightening rather than one overriding the other, which is the expected behavior for two conceptually different tools but can look like "double vignetting" if not intentional.
 - "Color Noise" has no effect while Denoise is 0 (the slider is disabled to make this visible) — it's a modifier to Non-Local Means' existing `hColor` parameter, not an independent chroma-only denoise pass, so it can't run without Denoise also being nonzero.
-- **AI Upscale (`app/ai_upscale.py`) is a deliberate, explicitly-scoped learned-processing exception to this app's otherwise CPU-first, no-ML-dependency design** — denoise, dehaze and lens corrections remain classical, and the edit pipeline still runs on CPU. Real-ESRGAN was chosen for upscaling because it is opt-in and occasional. It is entirely optional: `torch`/`realesrgan` are never installed by `requirements.txt`/CI, only by `requirements-gpu.txt`; `app.ai_upscale.ai_upscale_available()` reports `False` when they are not importable, and the Export tab explains how to get them. Separately, `app.gpu_export` optionally uses CUDA via PyTorch for final resize/output sharpening; it is opt-in, lazy-loaded, keeps encoding on CPU, and logs/falls back to the CPU transform if CUDA is unavailable or fails. When available, AI Upscale auto-detects CUDA and uses float16 on GPU / float32 on CPU, and is applied last in `app/backend.py::process_image()` after Effects.
+- **AI Upscale (`app/ai_upscale.py`) is a deliberate, explicitly-scoped learned-processing exception to this app's otherwise CPU-first, no-ML-dependency design** — denoise, dehaze and lens corrections remain classical, and the edit pipeline still runs on CPU. Real-ESRGAN was chosen for upscaling because it is opt-in and occasional. It is entirely optional: `torch`/`realesrgan` are never installed by `requirements.txt`/CI, only by `requirements-gpu.txt`; `app.ai_upscale.ai_upscale_available()` reports `False` when they are not importable, and the Export tab explains how to get them. Separately, `app.gpu_export` optionally uses CUDA via PyTorch for final resize/output sharpening; it is opt-in, lazy-loaded, keeps encoding on CPU, and logs/falls back to the CPU transform if CUDA is unavailable or fails. When available, AI Upscale auto-detects CUDA and uses float16 on GPU / float32 on CPU, and is applied last in `app/pipeline.py::run_pipeline()`, after Effects (on export, not on every preview).
