@@ -18,6 +18,21 @@ LENS_PROFILES = {
 }
 
 
+def _rgb_array(image) -> np.ndarray:
+    """The pixels to warp: a PIL image's 8-bit RGB array, or -- app.high_bit's 16-bit export path
+    (B4) -- a float32 HxWx3 array (0..1) passed straight through. Every cv2 call below accepts both."""
+    if isinstance(image, np.ndarray):
+        return np.ascontiguousarray(image, dtype=np.float32)
+    return np.array(image.convert("RGB"))
+
+
+def _like(array: np.ndarray, source):
+    """Back to the caller's own type: a float array stays a (clipped) float array."""
+    if isinstance(source, np.ndarray):
+        return np.clip(array, 0.0, 1.0)
+    return Image.fromarray(array, mode="RGB")
+
+
 def correct_distortion(image: Image.Image, amount: float) -> Image.Image:
     """Radial barrel/pincushion correction. `amount` -100..100: negative pulls a barrel-distorted
     image's edges back in (corrects barrel), positive pushes them back out (corrects pincushion) --
@@ -28,14 +43,14 @@ def correct_distortion(image: Image.Image, amount: float) -> Image.Image:
     amount = max(-100.0, min(100.0, float(amount)))
     if amount == 0:
         return image
-    array = np.array(image.convert("RGB"))
+    array = _rgb_array(image)
     height, width = array.shape[:2]
     focal = float(max(width, height))
     camera_matrix = np.array([[focal, 0, width / 2.0], [0, focal, height / 2.0], [0, 0, 1]], dtype=np.float32)
     k1 = (amount / 100.0) * 0.5
     dist_coeffs = np.array([k1, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
     corrected = cv2.undistort(array, camera_matrix, dist_coeffs)
-    return Image.fromarray(corrected, mode="RGB")
+    return _like(corrected, image)
 
 
 def correct_vignette(image: Image.Image, amount: float, midpoint: float = 50.0) -> Image.Image:
@@ -45,7 +60,7 @@ def correct_vignette(image: Image.Image, amount: float, midpoint: float = 50.0) 
     amount = max(-100.0, min(100.0, float(amount)))
     if amount == 0:
         return image
-    array = np.array(image.convert("RGB"), dtype=np.float32)
+    array = _rgb_array(image).astype(np.float32)
     height, width = array.shape[:2]
     center_x, center_y = width / 2.0, height / 2.0
     max_distance = np.hypot(center_x, center_y)
@@ -55,6 +70,8 @@ def correct_vignette(image: Image.Image, amount: float, midpoint: float = 50.0) 
     falloff = np.clip((distance - midpoint_norm) / (1.0 - midpoint_norm), 0.0, 1.0)
     factor = 1.0 + (amount / 100.0) * falloff
     array *= factor[..., None]
+    if isinstance(image, np.ndarray):
+        return np.clip(array, 0.0, 1.0)
     return Image.fromarray(np.clip(array, 0, 255).astype(np.uint8), mode="RGB")
 
 
@@ -67,7 +84,7 @@ def correct_chromatic_aberration(image: Image.Image, amount: float) -> Image.Ima
     amount = max(-100.0, min(100.0, float(amount)))
     if amount == 0:
         return image
-    array = np.array(image.convert("RGB"))
+    array = _rgb_array(image)
     height, width = array.shape[:2]
     center_x, center_y = width / 2.0, height / 2.0
     scale = (amount / 100.0) * 0.01
@@ -81,7 +98,7 @@ def correct_chromatic_aberration(image: Image.Image, amount: float) -> Image.Ima
     red = _radially_scaled(array[..., 0], scale)
     blue = _radially_scaled(array[..., 2], -scale)
     corrected = np.stack([red, array[..., 1], blue], axis=-1)
-    return Image.fromarray(corrected, mode="RGB")
+    return _like(corrected, image)
 
 
 def _perspective_warp(array: np.ndarray, src: np.ndarray, dst: np.ndarray, border: int = cv2.BORDER_REPLICATE) -> np.ndarray:
@@ -116,7 +133,7 @@ def correct_perspective(image: Image.Image, vertical: float = 0.0, horizontal: f
     horizontal = max(-100.0, min(100.0, float(horizontal)))
     if not vertical and not horizontal:
         return image
-    array = np.array(image.convert("RGB"))
+    array = _rgb_array(image)
     height, width = array.shape[:2]
     src = np.float32([[0, 0], [width, 0], [width, height], [0, height]])
 
@@ -136,7 +153,7 @@ def correct_perspective(image: Image.Image, vertical: float = 0.0, horizontal: f
             dst = np.float32([[0, 0], [width, shift], [width, height - shift], [0, height]])
         array = _perspective_warp(array, src, dst, border)
 
-    return Image.fromarray(array, mode="RGB")
+    return _like(array, image)
 
 
 def apply_lens_corrections(

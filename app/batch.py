@@ -33,7 +33,7 @@ def process_folder(
         if not input_path.is_file() or suffix not in SUPPORTED_EXTENSIONS:
             continue
         output_path = destination / (input_path.name if suffix in STANDARD_EXTENSIONS else f"{input_path.stem}.jpg")
-        image = decode_source(input_path.read_bytes(), input_path.name)
+        image = decode_source(input_path.read_bytes(), input_path.name, high_bit=run_options.get("bit_depth") == 16)
         write_export(run_pipeline(image, run_options), output_path, export_settings)
         outputs.append(output_path)
 

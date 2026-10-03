@@ -36,8 +36,17 @@ GEOMETRY_OPTION_KEYS = (
 
 
 def orient(image: Image.Image, rotate: int = 0, flip_horizontal: bool = False, flip_vertical: bool = False) -> Image.Image:
-    """`rotate` is clockwise degrees (0/90/180/270) -- what a "rotate right" button adds."""
+    """`rotate` is clockwise degrees (0/90/180/270) -- what a "rotate right" button adds. `image`
+    may also be a float HxWx3 array (app.high_bit's 16-bit path)."""
     rotate = int(rotate) % 360
+    if isinstance(image, np.ndarray):
+        if rotate:
+            image = np.rot90(image, -(rotate // 90))
+        if flip_horizontal:
+            image = image[:, ::-1]
+        if flip_vertical:
+            image = image[::-1]
+        return np.ascontiguousarray(image)
     if rotate == 90:
         image = image.transpose(Image.Transpose.ROTATE_270)  # PIL rotates counter-clockwise
     elif rotate == 180:
@@ -61,10 +70,13 @@ def straighten(image: Image.Image, angle: float, border: int = cv2.BORDER_CONSTA
     angle = max(-STRAIGHTEN_LIMIT, min(STRAIGHTEN_LIMIT, float(angle)))
     if not angle:
         return image
-    array = np.array(image.convert("RGB"))
+    is_array = isinstance(image, np.ndarray)
+    array = np.ascontiguousarray(image, dtype=np.float32) if is_array else np.array(image.convert("RGB"))
     height, width = array.shape[:2]
     matrix = cv2.getRotationMatrix2D((width / 2.0, height / 2.0), -angle, 1.0)
     rotated = cv2.warpAffine(array, matrix, (width, height), flags=cv2.INTER_CUBIC, borderMode=border)
+    if is_array:
+        return np.clip(rotated, 0.0, 1.0)  # cubic interpolation overshoots at hard edges
     return Image.fromarray(rotated, mode="RGB")
 
 
@@ -126,16 +138,20 @@ def constrain_fractions(size: tuple[int, int], options: dict) -> tuple[float, fl
 def _crop_to_fractions(image: Image.Image, fractions: tuple[float, float, float, float]) -> Image.Image:
     if fractions == (0.0, 0.0, 1.0, 1.0):
         return image
-    width, height = image.size
+    width, height = (image.shape[1], image.shape[0]) if isinstance(image, np.ndarray) else image.size
     x0, y0, x1, y1 = fractions
     box = (int(round(x0 * width)), int(round(y0 * height)), int(round(x1 * width)), int(round(y1 * height)))
+    if isinstance(image, np.ndarray):
+        return image[box[1]:max(box[3], box[1] + 1), box[0]:max(box[2], box[0] + 1)]
     return image.crop((box[0], box[1], max(box[2], box[0] + 1), max(box[3], box[1] + 1)))
 
 
 def apply_geometry(image: Image.Image, options: dict) -> Image.Image:
-    """Every geometry option in `options` (see GEOMETRY_OPTION_KEYS), in the module's order."""
+    """Every geometry option in `options` (see GEOMETRY_OPTION_KEYS), in the module's order.
+    `image` is a PIL image, or a float32 HxWx3 array (0..1) for the 16-bit path -- the result is
+    the same type."""
     image = orient(image, options.get("rotate", 0), options.get("flip_horizontal", False), options.get("flip_vertical", False))
-    oriented = image.size
+    oriented = (image.shape[1], image.shape[0]) if isinstance(image, np.ndarray) else image.size
     image = apply_lens_corrections(
         image,
         options.get("lens_distortion", 0.0),
