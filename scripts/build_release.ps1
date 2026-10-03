@@ -336,6 +336,8 @@ try {
     if ($Installer) {
         $iscc = Get-Command iscc -ErrorAction SilentlyContinue
         $isccPath = if ($iscc) { $iscc.Source } else { Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe" }
+        # Inno Setup installed "for me only" lands under %LOCALAPPDATA%\Programs instead.
+        if (-not (Test-Path $isccPath) -and $env:LOCALAPPDATA) { $isccPath = Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe" }
         if (-not (Test-Path $isccPath)) { throw "ISCC.exe (Inno Setup 6) not found -- needed for -Installer." }
         & $isccPath "/DMyAppVersion=$Version" (Join-Path $ProjectRoot "installer\PhotoStudio.iss")
         if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed (exit code $LASTEXITCODE)." }
