@@ -7,6 +7,11 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-06 -- v0.2.0
+
+Release of everything below since v0.1.0 (2026-09-17), on Streamlit 1.65 and, for the GPU pack,
+torch 2.14.1+cu130.
+
 ## 2026-10-02 -- optional CUDA export, installer fixes
 
 - **Opt-in CUDA export resize/sharpen.** `app/gpu_export.py` resizes and output-sharpens the final

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.0",
+    [string]$Version = "0.2.0",
     [switch]$Sign,
     # SHA-1 thumbprint of the code-signing certificate (signtool /sha1). Was misleadingly named
     # -CertificateSubject although it was always passed to /sha1; the old name still works.
