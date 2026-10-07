@@ -237,6 +237,8 @@ def run_pipeline(
         )
         if options.get("curve"):
             processor.apply_curves(options["curve"])
+        if options.get("curve_channels"):
+            processor.apply_channel_curves(options["curve_channels"])
 
         checkpoint()
         # Detail

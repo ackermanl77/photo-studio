@@ -357,6 +357,20 @@ class PhotoProcessor:
         self.image = Image.fromarray(lookup[arr], mode="RGB")
         return self
 
+    def apply_channel_curves(self, curves: dict[str, list[tuple[int, int]]]) -> "PhotoProcessor":
+        """Per-channel tone curves (F13): {"r"|"g"|"b": points}, each through its own LUT."""
+        if not curves:
+            return self
+        values = self.hdr * 255.0 if self.hdr is not None else np.array(self.image.convert("RGB"), dtype=np.float32)
+        for index, channel in enumerate("rgb"):
+            if channel in curves:
+                ordered = sorted((int(x), int(y)) for x, y in curves[channel])
+                values[..., index] = np.interp(values[..., index], [p[0] for p in ordered], [p[1] for p in ordered])
+        if self.hdr is not None:
+            return self._set_hdr(values / 255.0)
+        self.image = Image.fromarray(np.clip(np.round(values), 0, 255).astype(np.uint8), mode="RGB")
+        return self
+
     def remove_objects(self, mask: np.ndarray | Image.Image | str | Path, radius: float = 3.0, method: str = "Fill") -> "PhotoProcessor":
         """Repair: "Fill" inpaints the selection from its edges; "Heal" (app.heal) copies the
         best-matching nearby patch over each spot and blends it in."""

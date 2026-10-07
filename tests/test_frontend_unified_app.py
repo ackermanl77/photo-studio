@@ -172,7 +172,7 @@ def test_sample_photo_button_loads_a_valid_image_through_the_normal_upload_path(
     at.run(timeout=30)
 
     assert not at.exception
-    assert len(at.tabs) == len(TOOL_TABS) + 5  # + the Local and Presets & Library sub-tabs
+    assert len(at.tabs) == len(TOOL_TABS) + 5 + 4  # + the Local and Presets & Library sub-tabs, the curve channels
     assert canvas_hash(at)
 
 
@@ -268,7 +268,10 @@ def test_uploading_image_renders_every_tab_without_errors():
         "☼ Basic", "🎨 Curves & Color", "🔬 Detail", "⛶ Geometry", "◉ Local", "◈ Layers",
         "✨ Effects", "⬇ Export", "✦ Presets & Library",
     ]
-    assert [label for label in labels if label not in TOOL_TABS] == ["◉ Masks", "🩹 Repair", "◌ Portrait", "✦ Presets", "☰ Library & Batch"]
+    assert [label for label in labels if label not in TOOL_TABS] == [
+        "RGB", "Red", "Green", "Blue",  # the tone curve's channels (F13)
+        "◉ Masks", "🩹 Repair", "◌ Portrait", "✦ Presets", "☰ Library & Batch",
+    ]
     assert canvas_dims(at) == (40, 30)
 
 

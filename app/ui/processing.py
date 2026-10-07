@@ -23,7 +23,7 @@ from PIL import Image
 from app import backend_client, export as export_module, portrait_tools
 from app.backend import process_image
 from app.batch_release import FileLike
-from app.controls import controls_to_options, curve_fixed_points
+from app.controls import controls_to_options, curve_channels_from, curve_fixed_points
 from app.edit_schema import DETAIL_STAGE_OPTION_KEYS, sanitize_recipe
 from app.geometry import apply_geometry, geometry_output_size
 from app.image_processor import PhotoProcessor
@@ -261,6 +261,7 @@ def build_options(ctx) -> dict:
     options = controls_to_options(values)
     options["hsl_bands"] = ctx.hsl_bands
     options["curve"] = merge_curve_points(curve_fixed_points(values), st.session_state.get("curve_extra_points", [])) if values.get("curve_enabled") else None
+    options["curve_channels"] = curve_channels_from(values)
     options["local_adjustments"] = [dict(layer["adjustments"]) for layer in ctx.own_mask_layers] or None
     options["aspect"] = ctx.aspect_code
     options["crop_box"] = list(ctx.crop_box) if ctx.crop_box else None

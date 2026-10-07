@@ -82,6 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tint", type=float, help="Tint from -100 green to 100 magenta")
     parser.add_argument("--vibrance", type=float, help="Vibrance from -100 to 100")
     parser.add_argument("--dehaze", type=float, help="Dehaze strength from 0 to 100")
+    for channel in ("red", "green", "blue"):
+        parser.add_argument(f"--curve-{channel}", type=parse_curve, help=f"{channel.title()} channel curve points, e.g. 0:0,128:140,255:255")
     parser.add_argument("--black-white", nargs="?", const="", metavar="BAND=AMOUNT,...",
                         help="Convert to black & white; optionally brighten/darken the gray of colour bands, e.g. Blue=-60,Red=30 (bands: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta; -100..100)")
     parser.add_argument("--curve", type=parse_curve, help="RGB curve points such as 0:0,128:140,255:255")
@@ -161,6 +163,9 @@ def options_from_args(args: argparse.Namespace) -> dict:
         options["sharpen"] = True
     if args.curve:
         options["curve"] = [list(point) for point in args.curve]
+    channel_curves = {name[0]: [list(point) for point in getattr(args, f"curve_{name}")] for name in ("red", "green", "blue") if getattr(args, f"curve_{name}")}
+    if channel_curves:
+        options["curve_channels"] = channel_curves
     if args.crop:
         options["crop_box"] = list(args.crop)
     if args.aspect:

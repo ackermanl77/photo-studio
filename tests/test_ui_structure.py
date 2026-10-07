@@ -38,6 +38,7 @@ PINNED_WIDGET_KEYS = {
     "saturation_amount": "c-saturation", "shadows": "t-shad", "sharpen": "d-sharp",
     "straighten": "geo-straighten", "temperature": "c-temp", "texture": "d-text", "tint": "c-tint",
     "vibrance": "c-vib", "whites": "t-whites", "blacks": "t-blacks", "black_white": "bw-enabled", "removal_method": "rm-method",
+    **{f"curve_{c}_{point}": f"c-{c}-p{i}" for c in "rgb" for i, point in enumerate(("black", "shadows", "mid", "highlights", "white"))},
     **{f"bw_{band}": f"bw-{band}" for band in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta")},
 }
 
