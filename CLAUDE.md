@@ -11,7 +11,7 @@ A CPU-first Python photo editor (no GPU dependency, deliberately avoids ML/neura
 ```powershell
 # Install (requirements-dev.txt = requirements.txt + pytest + pytest-xdist)
 python -m pip install -r requirements-dev.txt
-python -m pip install -r requirements-raw.txt -r requirements-desktop.txt   # optional: RAW import, desktop packaging
+python -m pip install -r requirements-raw.txt -r requirements-desktop.txt   # optional: RAW import + lensfun lens lookup, desktop packaging
 
 # Run the app (only Streamlit entry point in the project)
 python -m streamlit run app/frontend_unified_app.py
@@ -103,6 +103,7 @@ Pillow / NumPy / OpenCV / tifffile / optional rawpy / optional torch (GPU pack: 
 - `app/advanced_masks.py` — `MaskStack`/`MaskLayer` (Luminance/Color/Gradient/Radial/Painted/Magic Wand selections, combined by add/subtract/intersect).
 - `app/painted_masks.py` — painted masks stored once per content (P5): intern/resolve/inline.
 - `app/dehaze.py` — classical Dark Channel Prior dehaze.
+- `app/lens_lookup.py` — Lens → "From the photo's lens": EXIF camera/lens/focal/aperture looked up in lensfun (optional `lensfunpy`, requirements-raw.txt) and the Lens sliders least-squares fitted to lensfun's correction fields.
 - `app/heal.py` — Repair's "Heal" method: best-matching nearby patch per spot, Poisson-blended (`cv2.seamlessClone`); falls back to inpaint at the border or for huge regions.
 - `app/geometry.py` — `apply_geometry()` (orientation, lens warps, straighten, constrain crop), `geometry_output_size()`, `estimate_straighten_angle()` (auto-level).
 - `app/ui_editors.py` — the on-canvas editors' HTML/JS builders (`_curve_editor_html`, `_paint_editor_html`, `_wand_picker_html`, `_crop_editor_html`, `_pen_editor_html`, `_before_after_html`, `_pan_viewer_html`), Streamlit-free.

@@ -1,2 +1,4 @@
 -r requirements.txt
+# Camera support: RAW decoding (LibRaw) and the lensfun lens database (Lens -> "From the photo's lens").
 rawpy>=0.25.0,<1
+lensfunpy>=1.18,<2

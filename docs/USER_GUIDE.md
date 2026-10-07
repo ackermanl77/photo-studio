@@ -89,10 +89,15 @@ automatically when you open them.
 
 ## 4. Lens (⛶ Geometry)
 
-Corrects distortion from the lens/shooting angle. Not calibrated to your specific camera or
-lens — the "Lens Profile" dropdown offers generic starting points by lens category (Wide-angle,
-Standard zoom, Telephoto, Fisheye), which you fine-tune from there.
+Corrects distortion from the lens/shooting angle.
 
+- **📷 From the photo's lens** — reads the camera, lens, focal length and aperture from the photo's
+  EXIF, looks them up in the lensfun lens database (installed with the app; offline) and sets
+  Distortion, Vignette and Chromatic Aberration to the closest match of that lens's calibration at
+  this focal length and aperture. The caption says which lens it matched, or why it couldn't (no
+  EXIF focal length -- RAW files don't carry their EXIF through here --, or a lens lensfun doesn't
+  know). The sliders are simpler than lensfun's own models, so this is a close approximation (most
+  of the distortion, not complex "mustache" shapes); fine-tune from there.
 - **Lens Profile** + **Apply Profile Defaults** — loads that category's typical starting values;
   you can still adjust every slider afterward.
 - **Distortion** — negative corrects barrel distortion (lines bowing outward); positive corrects
