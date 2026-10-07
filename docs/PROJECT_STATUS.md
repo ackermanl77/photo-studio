@@ -164,6 +164,12 @@ on:
 8. The `--ps-*` colours: header, canvas background, export footer, and the editors' panels/handles.
 9. Then run the whole suite (AppTest catches API changes, not layout ones).
 
+Last upgrade: 1.64.0 -> 1.65.0 (2026-10-06, Dependabot #9). Checked headless in Chromium with a photo
+loaded: every `data-testid` hook the stylesheet targets, the hidden header, the tab-row wrapping,
+the narrow-window column order, the 0-px commit fields and the `--ps-*` variables measured identical
+to 1.64 at 1400 and 800 px (items 1-3, 8); the suite passes (item 9). Items 4-7 (editor commits,
+tab `.open`, fragments, shortcuts) still need a real browser.
+
 ## History
 
 The fix history, newest first, is in [`docs/CHANGELOG.md`](CHANGELOG.md).

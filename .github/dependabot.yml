@@ -8,6 +8,11 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # sympy 1.14 (pinned in constraints-gpu.txt, required by torch) needs mpmath<1.4;
+      # a newer pin would make the GPU-pack install unresolvable. Drop this with a sympy that allows it.
+      - dependency-name: "mpmath"
+        versions: [">=1.4"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
