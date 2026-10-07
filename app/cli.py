@@ -11,6 +11,7 @@ from app.edit_schema import OptionsError, migrate_recipe, parse_options, sanitiz
 from app.export import METADATA_POLICIES, write_export
 from app.pipeline import decode_source, run_pipeline
 from app.presets import PRESETS
+from app.professional_color import HSL_BAND_ORDER
 from app.recipe_options import recipe_to_options, without_per_photo_only_keys
 
 # --auto-enhance sets exactly what the GUI's "Auto Enhance" button writes into the recipe (see
@@ -21,7 +22,7 @@ AUTO_ENHANCE_OPTIONS = {"exposure": 1.12, "contrast": 1.15, "saturation": 1.08, 
 # flag attribute -> options key, for every flag that maps 1:1 onto an app.pipeline option.
 _FLAG_OPTIONS = {
     "brightness": "brightness", "exposure": "exposure", "contrast": "contrast", "saturation": "saturation",
-    "highlights": "highlights", "shadows": "shadows", "texture": "texture", "clarity": "clarity",
+    "highlights": "highlights", "shadows": "shadows", "whites": "whites", "blacks": "blacks", "texture": "texture", "clarity": "clarity",
     "temperature": "temperature", "tint": "tint", "vibrance": "vibrance", "dehaze": "dehaze",
     "denoise": "denoise", "denoise_color": "denoise_color", "preset": "preset",
     "mask_exposure": "mask_exposure", "mask_contrast": "mask_contrast", "mask_saturation": "mask_saturation",
@@ -34,6 +35,18 @@ def parse_curve(value: str) -> list[tuple[int, int]]:
         return [tuple(int(part) for part in pair.split(":")) for pair in value.split(",")]
     except (TypeError, ValueError) as error:
         raise argparse.ArgumentTypeError("Curves must use x:y pairs, for example 0:0,128:140,255:255") from error
+
+
+def parse_black_white(value: str) -> dict:
+    """--black-white's "Blue=-60,Red=30" -> the black_white/bw_<band> options."""
+    options = {"black_white": True}
+    for item in filter(None, (part.strip() for part in value.split(","))):
+        band, separator, amount = item.partition("=")
+        key = f"bw_{band.strip().lower()}"
+        if not separator or key not in {f"bw_{name.lower()}" for name in HSL_BAND_ORDER}:
+            raise ValueError(f"--black-white expects BAND=AMOUNT pairs with bands {', '.join(HSL_BAND_ORDER)}; got {item!r}")
+        options[key] = float(amount)
+    return options
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -61,12 +74,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--constrain-crop", action="store_true", default=None, help="Crop away the borders lens/perspective/straighten corrections leave uncovered")
     parser.add_argument("--highlights", type=float, help="Highlights adjustment from -255 to 255")
     parser.add_argument("--shadows", type=float, help="Shadows adjustment from -255 to 255")
+    parser.add_argument("--whites", type=float, help="White point from -100 to 100 (the GUI's Whites slider)")
+    parser.add_argument("--blacks", type=float, help="Black point from -100 to 100 (the GUI's Blacks slider)")
     parser.add_argument("--texture", type=float, help="Texture adjustment from -100 to 100")
     parser.add_argument("--clarity", type=float, help="Clarity adjustment from -100 to 100")
     parser.add_argument("--temperature", type=float, help="Temperature from -100 cool to 100 warm")
     parser.add_argument("--tint", type=float, help="Tint from -100 green to 100 magenta")
     parser.add_argument("--vibrance", type=float, help="Vibrance from -100 to 100")
     parser.add_argument("--dehaze", type=float, help="Dehaze strength from 0 to 100")
+    parser.add_argument("--black-white", nargs="?", const="", metavar="BAND=AMOUNT,...",
+                        help="Convert to black & white; optionally brighten/darken the gray of colour bands, e.g. Blue=-60,Red=30 (bands: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta; -100..100)")
     parser.add_argument("--curve", type=parse_curve, help="RGB curve points such as 0:0,128:140,255:255")
     parser.add_argument("--remove-mask", help="Grayscale mask path for CPU object removal (single image only)")
     parser.add_argument("--mask", help="Grayscale mask path for local adjustments (single image only)")
@@ -138,6 +155,8 @@ def options_from_args(args: argparse.Namespace) -> dict:
         value = getattr(args, attribute)
         if value is not None:
             options[key] = value
+    if args.black_white is not None:
+        options.update(parse_black_white(args.black_white))
     if args.sharpen:
         options["sharpen"] = True
     if args.curve:

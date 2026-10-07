@@ -36,6 +36,13 @@ from app.reliability import check_pixel_count, validate_image_bytes
 # Skin smoothing's blur radius at full resolution (see app.portrait_tools.smooth_skin).
 _SKIN_BLUR_RADIUS = 2.0
 
+# The Black & White mixer's option per colour band (spelled out: tests/test_parity_golden.py checks
+# that every option name appears in this file).
+_BW_MIX_OPTIONS = {
+    "Red": "bw_red", "Orange": "bw_orange", "Yellow": "bw_yellow", "Green": "bw_green",
+    "Aqua": "bw_aqua", "Blue": "bw_blue", "Purple": "bw_purple", "Magenta": "bw_magenta",
+}
+
 # Caps how many CPU-heavy steps (Non-Local Means denoise, dehaze) run at once across every request
 # thread of the backend, so a burst of requests can't oversubscribe the CPU (B11).
 HEAVY_STEP_SEMAPHORE = threading.BoundedSemaphore(MAX_HEAVY_JOBS)
@@ -207,6 +214,7 @@ def run_pipeline(
         processor.apply_exposure_ev(options.get("exposure_ev", 0.0))
         processor.apply_contrast(options.get("contrast", 1.0))
         processor.apply_highlights_shadows(options.get("highlights", 0.0), options.get("shadows", 0.0))
+        processor.apply_whites_blacks(options.get("whites", 0.0), options.get("blacks", 0.0))
         if options.get("preset") and options["preset"] != "None":
             apply_preset(processor, options["preset"])
 
@@ -217,6 +225,10 @@ def run_pipeline(
         processor.apply_vibrance(options.get("vibrance", 0.0))
         if options.get("hsl_bands"):
             processor.apply_hsl_mixer(options["hsl_bands"])
+        if options.get("black_white"):
+            # After the colour adjustments that shape its input, before Color Grading (which can
+            # then tone the gray -- a split-toned B&W) and the curve.
+            processor.apply_black_white({band: options.get(key, 0.0) for band, key in _BW_MIX_OPTIONS.items()})
         processor.apply_color_grading(
             shadows_hue=options.get("cg_shadows_hue", 0.0), shadows_intensity=options.get("cg_shadows_intensity", 0.0),
             midtones_hue=options.get("cg_midtones_hue", 0.0), midtones_intensity=options.get("cg_midtones_intensity", 0.0),

@@ -10,7 +10,7 @@ from app.ai_upscale import upscale as ai_upscale
 from app.dehaze import apply_dehaze
 from app.effects import apply_film_grain
 from app.lens_corrections import apply_lens_corrections, correct_vignette
-from app.professional_color import apply_color_grading, apply_hsl_mixer, apply_vibrance
+from app.professional_color import apply_color_grading, apply_hsl_mixer, apply_vibrance, black_white_float, from_float_rgb, to_float_rgb
 from app.raw_import import open_image
 
 
@@ -78,6 +78,23 @@ def exposure_lut(ev: float) -> list[int]:
     values, and its 0.5-1.5 range was only about -1..+0.6 EV)."""
     curve = exposure_curve(np.arange(256, dtype=np.float64) / 255.0, ev)
     return [int(v) for v in np.clip(np.round(curve * 255.0), 0, 255)]
+
+
+# How far the Whites/Blacks sliders move the very end of the range at +-100 (as a fraction of
+# full scale, i.e. +-64 levels at the white or black point).
+_WHITES_BLACKS_REACH = 0.25
+
+
+def whites_blacks_curve(values: np.ndarray, whites: float = 0.0, blacks: float = 0.0) -> np.ndarray:
+    """Lightroom-style Whites/Blacks on 0..1 values: Whites moves the top of the range by
+    `whites/100 * _WHITES_BLACKS_REACH * x**3`, Blacks the bottom by the mirror image, so each
+    slider sets its own end point (negative Blacks crushes into black, positive Whites pushes into
+    white) and barely touches the midtones -- the endpoint control the tone curve was the only
+    route to before (F13). Monotonic over the whole slider range (the slope stays >= 0.25), so it
+    never inverts tones. Shared by the 8-bit LUT and the 16-bit float path."""
+    whites = max(-100.0, min(100.0, float(whites))) / 100.0 * _WHITES_BLACKS_REACH
+    blacks = max(-100.0, min(100.0, float(blacks))) / 100.0 * _WHITES_BLACKS_REACH
+    return np.clip(values + whites * values ** 3 + blacks * (1.0 - values) ** 3, 0.0, 1.0)
 
 
 def _clarity_float(arr: np.ndarray, clarity: float) -> np.ndarray:
@@ -431,6 +448,23 @@ class PhotoProcessor:
         if self.hdr is not None:
             return self._set_hdr(arr / 255.0)
         self.image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), mode="RGB")
+        return self
+
+    def apply_whites_blacks(self, whites: float = 0.0, blacks: float = 0.0) -> "PhotoProcessor":
+        """The Whites/Blacks end-point sliders (whites_blacks_curve), per channel like the tone curve."""
+        if not whites and not blacks:
+            return self
+        if self.hdr is not None:
+            return self._set_hdr(whites_blacks_curve(self.hdr, whites, blacks))
+        lut = np.round(whites_blacks_curve(np.arange(256, dtype=np.float64) / 255.0, whites, blacks) * 255.0)
+        self.image = self.image.convert("RGB").point([int(v) for v in lut] * 3)
+        return self
+
+    def apply_black_white(self, mix: dict[str, float]) -> "PhotoProcessor":
+        """Convert to black & white with a per-colour brightness mix (app.professional_color)."""
+        if self.hdr is not None:
+            return self._set_hdr(black_white_float(self.hdr, mix))
+        self.image = from_float_rgb(black_white_float(to_float_rgb(self.image), mix))
         return self
 
     def apply_texture_clarity(self, texture: float = 0.0, clarity: float = 0.0) -> "PhotoProcessor":

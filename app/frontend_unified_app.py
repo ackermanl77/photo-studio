@@ -175,6 +175,7 @@ with st.container(key="workspace-split"):
         with tabs["🎨 Curves & Color"]:
             color.curve_section(ctx)
             color.hsl_section(ctx)
+            color.black_white_section(ctx)
             color.grading_section(ctx)
             color.soft_proof_section(ctx)
 

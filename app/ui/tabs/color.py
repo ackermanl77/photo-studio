@@ -9,7 +9,7 @@ import streamlit as st
 from app.controls import CONTROLS_BY_KEY
 from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS
 from app.ui.processing import cached_gamut_warning_overlay
-from app.ui.state import consume_new_commit, is_modified, request_rerun, section_header, section_label, show_component
+from app.ui.state import consume_new_commit, is_modified, request_rerun, section_header, section_label, section_reset_button, show_component
 from app.ui.widgets import render_control
 from app.ui_editors import _curve_editor_html
 
@@ -58,6 +58,20 @@ def hsl_section(ctx) -> None:
         values.update(zip(keys, band_values))
         hsl_bands[band] = dict(zip(("hue", "sat", "lum"), band_values))
     ctx.hsl_bands = hsl_bands
+
+
+def black_white_section(ctx) -> None:
+    values = ctx.values
+    with st.expander(section_label("⚫ Black & White", "bw"), expanded=False, key="sec-bw"):
+        values["black_white"] = render_control("black_white")
+        st.caption("Brighten or darken the gray each original colour turns into -- e.g. darken Blue for a dramatic sky. Applies while the conversion is on.")
+        # Always rendered (disabled while the conversion is off): a widget skipped in a run loses its state.
+        enabled = bool(values["black_white"])
+        for column, bands in zip(st.columns(2), (HSL_BAND_ORDER[:4], HSL_BAND_ORDER[4:])):
+            with column:
+                for band in bands:
+                    values[f"bw_{band.lower()}"] = render_control(f"bw_{band.lower()}", disabled=not enabled)
+        section_reset_button("bw", "Black & White")
 
 
 def grading_section(ctx) -> None:

@@ -47,7 +47,7 @@ def tone_section(ctx) -> None:
                     st.caption(name)
         values["preset"] = render_control("preset")
     section_header("Tone", "tone")
-    for key in ("exposure_ev", "contrast_amount", "highlights", "shadows"):
+    for key in ("exposure_ev", "contrast_amount", "highlights", "shadows", "whites", "blacks"):
         values[key] = render_control(key)
     section_reset_button("tone", "Tone")
 
