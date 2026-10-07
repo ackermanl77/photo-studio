@@ -37,7 +37,7 @@ PINNED_WIDGET_KEYS = {
     "preset": "tone-preset", "removal_radius": "rm-radius", "rotate": "geo-rotate",
     "saturation_amount": "c-saturation", "shadows": "t-shad", "sharpen": "d-sharp",
     "straighten": "geo-straighten", "temperature": "c-temp", "texture": "d-text", "tint": "c-tint",
-    "vibrance": "c-vib", "whites": "t-whites", "blacks": "t-blacks", "black_white": "bw-enabled",
+    "vibrance": "c-vib", "whites": "t-whites", "blacks": "t-blacks", "black_white": "bw-enabled", "removal_method": "rm-method",
     **{f"bw_{band}": f"bw-{band}" for band in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta")},
 }
 

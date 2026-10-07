@@ -188,6 +188,8 @@ CONTROLS: tuple[Control, ...] = (
     # --- Repair --------------------------------------------------------------------------------------
     _slider("removal_radius", "rm-radius", "Repair Softness", 1, 15, 3, section="repair", option=True, option_domain=(1, 50),
             help="How far the repair blends into the surrounding area -- higher softens a wider edge."),
+    _choice("removal_method", "rm-method", "Repair Method", ("Fill", "Heal"), "Fill", section="repair", option=True,
+            help="Fill paints the area over from its edges (best for wires, small objects on smooth areas). Heal copies the best-matching nearby patch and blends it in, keeping real texture (best for spots and blemishes on skin, sand or grass)."),
     # --- Lens ------------------------------------------------------------------------------------------
     _choice("lens_profile", "lens-profile", "Lens Profile", tuple(LENS_PROFILES), "None", section="lens"),
     _slider("lens_distortion", "lens-distortion", "Distortion", -100, 100, section="lens", option=True, stage=_D,
