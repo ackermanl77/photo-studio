@@ -357,8 +357,15 @@ class PhotoProcessor:
         self.image = Image.fromarray(lookup[arr], mode="RGB")
         return self
 
-    def remove_objects(self, mask: np.ndarray | Image.Image | str | Path, radius: float = 3.0) -> "PhotoProcessor":
+    def remove_objects(self, mask: np.ndarray | Image.Image | str | Path, radius: float = 3.0, method: str = "Fill") -> "PhotoProcessor":
+        """Repair: "Fill" inpaints the selection from its edges; "Heal" (app.heal) copies the
+        best-matching nearby patch over each spot and blends it in."""
         mask_array = self._mask_array(mask)
+        if method == "Heal":
+            from app.heal import heal
+
+            self.image = Image.fromarray(heal(np.array(self.image.convert("RGB")), mask_array, feather=radius), mode="RGB")
+            return self
         source = cv2.cvtColor(np.array(self.image), cv2.COLOR_RGB2BGR)
         repaired = cv2.inpaint(source, mask_array, max(1.0, float(radius)), cv2.INPAINT_TELEA)
         self.image = Image.fromarray(cv2.cvtColor(repaired, cv2.COLOR_BGR2RGB), mode="RGB")

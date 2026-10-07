@@ -46,7 +46,7 @@ def masks_section(ctx) -> None:
 
 def repair_section(ctx) -> None:
     section_header("Remove Objects", "repair", extra_modified=bool(st.session_state.get("removal_mask_layers")))
-    st.caption("Select the blemish or object to remove with the same selection tools as Masks. The selected area is painted over by blending in nearby texture.")
+    st.caption("Select the blemish or object to remove with the same selection tools as Masks. Fill paints the area over from its edges; Heal copies a matching nearby patch over it.")
     mask_source, mask_source_key = ctx.mask_source, ctx.mask_source_key
     ctx.removal_signature = render_selection_stack("removal_mask_layers", "rm", mask_source, include_opacity=False)
     removal_layers = st.session_state.removal_mask_layers
@@ -55,6 +55,7 @@ def repair_section(ctx) -> None:
         st.caption("No selections yet — nothing will be removed.")
     elif not ctx.removal_active:
         st.caption("All selections are disabled — nothing will be removed.")
+    ctx.values["removal_method"] = render_control("removal_method", disabled=not ctx.removal_active)
     ctx.values["removal_radius"] = render_control("removal_radius", disabled=not ctx.removal_active)
     if st.checkbox("👁️ Preview removal selection", key="rm-preview-overlay") and removal_layers:
         # Yellow (vs. Masks' red) so the two overlays are never confused.

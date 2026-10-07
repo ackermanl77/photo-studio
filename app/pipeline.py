@@ -259,7 +259,7 @@ def run_pipeline(
     # Repair
     removal = _fit(removal_mask, processor.image.size)
     if removal is not None:
-        processor.remove_objects(removal, radius=max(1.0, options.get("removal_radius", 3.0) * scale))
+        processor.remove_objects(removal, radius=max(1.0, options.get("removal_radius", 3.0) * scale), method=options.get("removal_method", "Fill"))
 
     # Layers -- bottom-to-top, each composited onto the working image in turn.
     if layers:

@@ -177,9 +177,13 @@ tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color
 ## 8. Repair — object removal (◉ Local → 🩹 Repair)
 
 Select a blemish or unwanted object with the same selection tools as Masks (see
-[Selection Types](#selection-types-masks--repair) below), and it's painted over by blending in
-nearby texture (inpainting).
+[Selection Types](#selection-types-masks--repair) below), and it's repaired by the chosen method:
 
+- **Repair Method** — **Fill** paints the area over from its edges (inpainting): good for wires and
+  small objects on smooth areas such as sky. **Heal** looks for the best-matching patch nearby,
+  copies it over each selected spot and blends its colour and brightness into the surroundings, so
+  real texture (skin, sand, grass) comes back instead of a smooth smear. A spot at the photo's edge,
+  or one too large for a clean nearby patch, is filled instead.
 - **Repair Softness** — how far the repair blends into the surrounding area; higher softens a wider
   edge. Disabled until at least one selection is enabled.
 - **👁️ Preview removal selection** — shows the selected region in yellow (Masks' own preview uses
