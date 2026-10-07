@@ -9,6 +9,44 @@ from typing import Any
 # list grew for the whole session.
 MAX_HISTORY_STEPS = 200
 
+# History list labels (F13) for the recipe's list-valued entries, which have no registry control.
+_LIST_LABELS = {"mask_layers": "Masks", "removal_mask_layers": "Repair", "curve_extra_points": "Curve points", "layers": "Layers"}
+
+
+def describe_change(before: dict[str, Any] | None, after: dict[str, Any]) -> str:
+    """A short label for one Undo step: what changed from `before` to `after` -- "Exposure (EV)
+    0.3" for one control, "Contrast, Clarity" for two, "Tone curve +3 more" for many."""
+    from app.controls import CONTROLS_BY_KEY
+
+    if before is None:
+        return "Opened"
+    changed = [key for key in set(before) | set(after) if before.get(key) != after.get(key)]
+    changed.sort(key=lambda key: (list(CONTROLS_BY_KEY).index(key) if key in CONTROLS_BY_KEY else len(CONTROLS_BY_KEY), key))
+    if not changed:
+        return "No change"
+
+    def label(key: str) -> str:
+        control = CONTROLS_BY_KEY.get(key)
+        if control is None:
+            return _LIST_LABELS.get(key, key.replace("_", " ").capitalize())
+        if key.startswith(("hsl_", "bw_")):
+            return f"{'HSL' if key.startswith('hsl_') else 'B&W'} {key.split('_')[1].title()} {control.label}"
+        if key.startswith("curve_"):
+            return "Tone curve"
+        return control.label
+
+    labels = list(dict.fromkeys(label(key) for key in changed))
+    if len(changed) == 1 and changed[0] in CONTROLS_BY_KEY:
+        value = after.get(changed[0])
+        if isinstance(value, bool):
+            return f"{labels[0]} {'on' if value else 'off'}"
+        if isinstance(value, float):
+            value = round(value, 2)
+        return f"{labels[0]} {value}"
+    if len(labels) <= 2:
+        return ", ".join(labels)
+    return f"{labels[0]} +{len(labels) - 1} more"
+
 
 @dataclass
 class EditHistory:
@@ -44,6 +82,16 @@ class EditHistory:
     @property
     def can_redo(self) -> bool:
         return 0 <= self.cursor < len(self.snapshots) - 1
+
+    def steps(self) -> list[str]:
+        """One label per Undo step, oldest first (describe_change); `cursor` is the current one."""
+        return [describe_change(self.snapshots[index - 1] if index else None, snapshot) for index, snapshot in enumerate(self.snapshots)]
+
+    def jump(self, index: int) -> dict[str, Any] | None:
+        """Move to Undo step `index` (as if Undo/Redo were pressed until there) and return it."""
+        if 0 <= index < len(self.snapshots):
+            self.cursor = index
+        return self.current
 
     def undo(self) -> dict[str, Any] | None:
         if not self.can_undo:

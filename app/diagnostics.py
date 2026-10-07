@@ -58,3 +58,28 @@ def check_environment(storage_path: str | Path | None = None) -> list[Check]:
     return checks
 
 
+
+
+def logs_folder() -> Path:
+    """The folder the rotating logs are written to (app.observability.configure_logging)."""
+    from app.config import user_data_dir
+
+    return user_data_dir() / "logs"
+
+
+def open_folder(path: str | Path) -> None:
+    """Show `path` in the OS file manager (created first if missing). The Streamlit server runs on
+    the user's own machine -- the desktop app's child process, or a local `streamlit run` -- so this
+    opens it there. Raises OSError when no file manager can be started."""
+    import os
+    import subprocess
+
+    folder = Path(path)
+    folder.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        os.startfile(folder)  # noqa: S606 -- a fixed local folder, not user input
+    else:
+        opener = shutil.which("open" if sys.platform == "darwin" else "xdg-open")
+        if opener is None:
+            raise OSError("no file manager found (xdg-open)")
+        subprocess.Popen([opener, str(folder)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
