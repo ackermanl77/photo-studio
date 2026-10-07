@@ -144,6 +144,29 @@ def apply_hsl_mixer(image: Image.Image, adjustments: dict[str, dict[str, float]]
     return from_float_rgb(np.clip(hsl_to_rgb(new_hsl), 0.0, 1.0))
 
 
+_BW_LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+
+
+def black_white_float(rgb: np.ndarray, mix: dict[str, float] | None = None) -> np.ndarray:
+    """Black & white with a per-colour brightness mix (Lightroom's B&W mixer, F13). `rgb`: float
+    (H, W, 3) in [0, 1]; `mix` maps HSL_BAND_ORDER names to -100..100. The gray starts as Rec. 709
+    luminance; each band then scales it by up to x0 (-100) or x2 (+100) for pixels of its hue, with
+    the HSL mixer's falloff between neighbouring bands, weighted by the pixel's chroma (max - min)
+    so neutral and near-black pixels -- whose hue is noise -- keep their plain luminance."""
+    rgb = np.asarray(rgb, dtype=np.float32)
+    gray = rgb @ _BW_LUMA
+    active = {name: float(amount) for name, amount in (mix or {}).items() if amount}
+    if active:
+        hue = rgb_to_hsl(rgb)[..., 0]
+        chroma = rgb.max(axis=2) - rgb.min(axis=2)
+        factor = np.zeros_like(gray)
+        for name, amount in active.items():
+            angular_distance = np.abs(((hue - HSL_BAND_HUES[name] + 180.0) % 360.0) - 180.0)
+            factor += np.clip(1.0 - angular_distance / _HSL_MIXER_FALLOFF_DEGREES, 0.0, 1.0) * (max(-100.0, min(100.0, amount)) / 100.0)
+        gray = gray * np.maximum(0.0, 1.0 + factor * chroma)
+    return np.repeat(np.clip(gray, 0.0, 1.0)[..., None], 3, axis=2)
+
+
 _SKIN_TONE_HUE_CENTER = 25.0
 _SKIN_TONE_HUE_RANGE = 25.0
 _SKIN_TONE_PROTECTION = 0.6  # skin-tone hues get 60% less vibrance boost than the formula would otherwise give

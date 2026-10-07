@@ -114,6 +114,10 @@ CONTROLS: tuple[Control, ...] = (
             help="Recovers or boosts the brightest parts of the image -- negative pulls blown highlights back, positive brightens them further."),
     _slider("shadows", "t-shad", "Shadows", -100, 100, section="tone", option=True, stage=_D, option_domain=(-255, 255),
             help="Lifts or deepens the darkest parts of the image -- positive opens up shadow detail, negative deepens shadows."),
+    _slider("whites", "t-whites", "Whites", -100, 100, section="tone", option=True, stage=_D,
+            help="Sets the white point -- positive pushes the brightest tones toward pure white, negative pulls them down. Midtones barely move."),
+    _slider("blacks", "t-blacks", "Blacks", -100, 100, section="tone", option=True, stage=_D,
+            help="Sets the black point -- negative deepens the darkest tones toward pure black, positive lifts them. Midtones barely move."),
     # --- Color ------------------------------------------------------------------------------------
     _slider("temperature", "c-temp", "Temperature (Cool/Warm)", -100, 100, section="color", option=True, stage=_D,
             help="Shifts the overall white balance -- negative cools the image toward blue, positive warms it toward orange."),
@@ -123,6 +127,11 @@ CONTROLS: tuple[Control, ...] = (
             help="Uniformly boosts or reduces color intensity across the whole image -- -100 is grayscale, 0 is unchanged."),
     _slider("vibrance", "c-vib", "Vibrance", -100, 100, section="color", option=True, stage=_D,
             help="A smarter saturation boost -- protects skin tones and already-saturated colors, pushing washed-out ones harder instead."),
+    # --- Black & White (a per-colour brightness mix of the gray conversion) -------------------------
+    _check("black_white", "bw-enabled", "Convert to Black & White", section="bw", option=True, stage=_D,
+           help="Converts the photo to black and white. The sliders below brighten or darken the gray of each original colour."),
+    *(_slider(f"bw_{band.lower()}", f"bw-{band.lower()}", band, -100, 100, section="bw", option=True, stage=_D)
+      for band in HSL_BAND_ORDER),
     # --- Tone curve (feeds the "curve" option together with the extra points) ---------------------
     _check("curve_enabled", "c-curve-en", "Enable RGB Curve", section="curve", composite="curve"),
     _slider("curve_black", "c-p0", "Blacks", 0, 64, 0, section="curve", composite="curve"),

@@ -40,8 +40,8 @@ The screen is split in two:
 
   | Tab | What's in it |
   |---|---|
-  | **☼ Basic** | ✨ Auto Enhance, 🎞️ Preset Look, Tone (exposure, contrast, highlights, shadows), Color (white balance, saturation, vibrance, 🎯 Pick White Balance) and Presence (texture, clarity, dehaze) |
-  | **🎨 Curves & Color** | RGB Tone Curve, Color Mixer (HSL), Color Grading, Soft Proof |
+  | **☼ Basic** | ✨ Auto Enhance, 🎞️ Preset Look, Tone (exposure, contrast, highlights, shadows, whites, blacks), Color (white balance, saturation, vibrance, 🎯 Pick White Balance) and Presence (texture, clarity, dehaze) |
+  | **🎨 Curves & Color** | RGB Tone Curve, Color Mixer (HSL), Black & White, Color Grading, Soft Proof |
   | **🔬 Detail** | Denoise, Color Noise, Sharpen |
   | **⛶ Geometry** | Rotate & Straighten, Lens Corrections, Crop / Aspect Ratio |
   | **◉ Local** | three sub-tabs: ◉ Masks, 🩹 Repair, ◌ Portrait |
@@ -78,6 +78,9 @@ The starting point for every edit.
 - **Contrast**, **Highlights**, **Shadows** — −100 to +100. Highlights/Shadows work on regions (an
   edge-aware base layer), so lifting a shadowed face keeps its texture and doesn't flatten the bright
   background next to it.
+- **Whites**, **Blacks** — −100 to +100: set the white and black points without opening the curve.
+  Negative Blacks deepens the darkest tones into black, positive Whites pushes the brightest into
+  white; the midtones barely move.
 - **↺ Reset Tone** — puts just this section back to its defaults. Lens, Rotate & Straighten, Color,
   Detail, Effects and the mask targets have the same button.
 
@@ -140,6 +143,10 @@ tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color
 - **Color Mixer (HSL)** — independent Hue/Saturation/Luminance sliders for each of 8 named color
   bands (Red/Orange/Yellow/Green/Aqua/Blue/Purple/Magenta) — a band's icon turns green once you've
   touched it, so you can see at a glance which ones are active.
+- **⚫ Black & White** — "Convert to Black & White", then one slider per colour band brightens or
+  darkens the gray that colour turns into (darken Blue for a dramatic sky, brighten Orange for
+  lighter skin). Color Grading still applies afterwards, so it can tone the result (sepia, split
+  toning). CLI: `--black-white Blue=-60,Orange=20`.
 - **Color Grading (Split Toning)** — tint Shadows/Midtones/Highlights toward independent hues, plus
   a Balance slider shifting where shadows end and highlights begin.
 - **RGB Tone Curve** — drag any of the 5 fixed points (Blacks/Shadows/Midtones/Highlights/Whites)
