@@ -19,7 +19,7 @@ jobs:
     env:
       MAX_AGE_DAYS: "90"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check the pinned WebView2 version's age
         env:
           GH_TOKEN: ${{ github.token }}
