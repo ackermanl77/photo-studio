@@ -48,7 +48,7 @@ rpds-py==2026.6.3
 setuptools==78.1.0
 six==1.17.0
 starlette==1.7.0
-streamlit==1.64.0
+streamlit==1.65.0
 tifffile==2026.9.20
 toml==0.10.2
 typing_extensions==4.16.0
