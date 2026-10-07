@@ -161,6 +161,27 @@ if (-not $Python -or -not (Test-Path $Python)) {
     throw "Base Python interpreter not found. Install Python 3.14 (or pass -Python <path>)."
 }
 
+# Code signing: checked before the multi-minute build, not after it. The thumbprint can also come
+# from CODESIGN_THUMBPRINT (shared by the other projects' builds), so one setting signs them all.
+$TimestampUrl = if ($env:CODESIGN_TIMESTAMP_URL) { $env:CODESIGN_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
+if ($Sign) {
+    if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) { $CertificateThumbprint = "$env:CODESIGN_THUMBPRINT" }
+    $CertificateThumbprint = $CertificateThumbprint -replace "\s", ""
+    if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
+        throw "-Sign needs -CertificateThumbprint (or CODESIGN_THUMBPRINT): the SHA-1 thumbprint of a code-signing certificate."
+    }
+    # signtool ships with the Windows SDK, which doesn't put it on PATH.
+    $SignTool = Get-Command signtool -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+    if (-not $SignTool -and ${env:ProgramFiles(x86)}) {
+        $SignTool = Get-ChildItem (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin\10.*\x64\signtool.exe") -ErrorAction SilentlyContinue |
+            Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
+    }
+    if (-not $SignTool) { throw "-Sign needs signtool.exe (Windows SDK); it is neither on PATH nor in Windows Kits\10\bin." }
+    $signingCert = Get-ChildItem Cert:\CurrentUser\My, Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
+        Where-Object { $_.Thumbprint -eq $CertificateThumbprint } | Select-Object -First 1
+    if (-not $signingCert) { throw "No certificate with thumbprint $CertificateThumbprint in the CurrentUser or LocalMachine 'My' store." }
+}
+
 Push-Location $ProjectRoot
 try {
     # $ErrorActionPreference doesn't cover native commands -- check their exit codes explicitly, so a
@@ -294,11 +315,8 @@ try {
     }
 
     if ($Sign) {
-        if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
-            throw "-CertificateThumbprint is required when -Sign is used."
-        }
         $exe = Join-Path $ReleaseFolder "PhotoStudio.exe"
-        & signtool sign /sha1 $CertificateThumbprint /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a $exe
+        & $SignTool sign /sha1 $CertificateThumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 $exe
         if ($LASTEXITCODE -ne 0) { throw "signtool failed (exit code $LASTEXITCODE) -- the release is unsigned." }
     }
 
@@ -339,7 +357,12 @@ try {
         # Inno Setup installed "for me only" lands under %LOCALAPPDATA%\Programs instead.
         if (-not (Test-Path $isccPath) -and $env:LOCALAPPDATA) { $isccPath = Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe" }
         if (-not (Test-Path $isccPath)) { throw "ISCC.exe (Inno Setup 6) not found -- needed for -Installer." }
-        & $isccPath "/DMyAppVersion=$Version" (Join-Path $ProjectRoot "installer\PhotoStudio.iss")
+        $isccArgs = @("/DMyAppVersion=$Version")
+        if ($Sign) {
+            # Inno Setup signs the installer and its uninstaller itself ($f = the file, $q = a quote).
+            $isccArgs += @("/DSign", "/Scodesign=`$q$SignTool`$q sign /sha1 $CertificateThumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 `$f")
+        }
+        & $isccPath @isccArgs (Join-Path $ProjectRoot "installer\PhotoStudio.iss")
         if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed (exit code $LASTEXITCODE)." }
     }
 
