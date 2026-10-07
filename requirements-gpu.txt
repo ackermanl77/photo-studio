@@ -9,10 +9,11 @@
 # torch must be a CUDA build for GPU acceleration -- pip's default resolution of a bare `torch`
 # pin installs the CPU-only wheel. Install the CUDA build FIRST, from PyTorch's own index for your
 # CUDA version (https://pytorch.org/get-started/locally/), e.g. for CUDA 13.0:
-#   pip install torch==2.14.0 torchvision --index-url https://download.pytorch.org/whl/cu130
-# then install the rest of this file. This exact combination (torch==2.14.0+cu130,
-# torchvision==0.29.0+cu130) is confirmed working end-to-end (a real RealESRGAN_x4plus GPU
-# inference call, not just import checks) against an RTX 5080. CPU-only inference still works with
+#   pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu130
+# then install the rest of this file. This exact combination (torch==2.14.1+cu130,
+# torchvision==0.29.1+cu130, the pins in constraints-gpu.txt) is confirmed working end-to-end (a
+# real RealESRGAN_x4plus GPU inference call through the built GPU pack, pixel-identical to
+# 2.14.0+cu130, 2026-10-06) against an RTX 5080. CPU-only inference still works with
 # the default (non-CUDA) torch wheel -- just slower -- and on an older RTX 40-series card or no GPU
 # at all, app.ai_upscale falls back to CPU automatically via torch.cuda.is_available().
 #
