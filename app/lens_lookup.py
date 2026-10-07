@@ -47,6 +47,19 @@ def lensfun_available() -> bool:
     return True
 
 
+def lens_database_size() -> int:
+    """How many lenses lensfun's database holds (0 when lensfunpy or its data files are missing) --
+    the packaged build's self-test checks the database files were bundled."""
+    if not lensfun_available():
+        return 0
+    import lensfunpy
+
+    try:
+        return len(lensfunpy.Database().lenses)
+    except Exception:  # noqa: BLE001 -- a broken install reports 0, never crashes the report
+        return 0
+
+
 def _exif_fields(image: Image.Image) -> dict:
     exif = image.getexif()
     sub = exif.get_ifd(_EXIF_IFD)

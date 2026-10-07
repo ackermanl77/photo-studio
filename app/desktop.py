@@ -281,7 +281,7 @@ def self_test_report() -> dict:
     """What `PhotoStudio.exe --self-test` reports (scripts/build_release.ps1 runs it right after
     PyInstaller): every module in _SELF_TEST_MODULES imports, the Streamlit script is bundled, and
     the capabilities every build profile promises are present -- rawpy (both profiles install
-    requirements-raw.txt) and a working face detector for the Portrait tab. Whether AI Upscale's
+    requirements-raw.txt, so rawpy and lensfun's lens database) and a working face detector for the Portrait tab. Whether AI Upscale's
     torch stack is installed is reported but not required (it ships in the optional GPU pack, or in
     the all-in-one gpu profile)."""
     import importlib
@@ -298,6 +298,7 @@ def self_test_report() -> dict:
 
     from app.ai_upscale import ai_upscale_available, ai_upscale_installed
     from app.gpu_pack import gpu_pack_status
+    from app.lens_lookup import lens_database_size
     from app.portrait_tools import face_detection_backend
     from app.ui.theme import page_style
 
@@ -305,6 +306,7 @@ def self_test_report() -> dict:
     installed = ai_upscale_installed()
     capabilities = {
         "rawpy": importlib.util.find_spec("rawpy") is not None,
+        "lensfun_lenses": lens_database_size(),
         "face_detection": face_detection_backend(),
         "ai_upscale_installed": installed,
         # A real import of torch + Real-ESRGAN (seconds) when the packages are present -- a GPU pack
@@ -317,6 +319,7 @@ def self_test_report() -> dict:
     ok = (
         all(status == "ok" for status in modules.values())
         and capabilities["rawpy"]
+        and capabilities["lensfun_lenses"] > 0
         and capabilities["face_detection"] != "none"
     )
     return {

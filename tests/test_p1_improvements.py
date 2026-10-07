@@ -72,7 +72,7 @@ def test_desktop_self_test_reports_modules_and_capabilities(tmp_path, monkeypatc
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert all(status == "ok" for status in report["modules"].values()), report["modules"]
     assert report["capabilities"]["face_detection"] in ("yunet", "haar")
-    assert code == (0 if report["capabilities"]["rawpy"] else 1)
+    assert code == (0 if report["capabilities"]["rawpy"] and report["capabilities"]["lensfun_lenses"] > 0 else 1)
 
 
 def test_desktop_startup_failure_shows_one_dialog_and_logs_the_traceback(monkeypatch):
