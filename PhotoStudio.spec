@@ -17,6 +17,17 @@ for package in ["streamlit", "pywebview"]:
     binaries += package_binaries
     hiddenimports += package_hiddenimports
 
+# lensfunpy (requirements-raw.txt) reads its lens database XML files from its package folder.
+try:
+    import lensfunpy  # noqa: F401
+except ImportError:
+    pass
+else:
+    package_datas, package_binaries, package_hiddenimports = collect_all("lensfunpy")
+    datas += package_datas
+    binaries += package_binaries
+    hiddenimports += package_hiddenimports
+
 hiddenimports += collect_submodules("app")
 
 # The optional GPU pack (K5, app/gpu_pack.py) is imported from a folder outside this bundle, so the

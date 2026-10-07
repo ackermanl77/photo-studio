@@ -10,7 +10,7 @@ import json
 
 import streamlit as st
 
-from app import geometry
+from app import geometry, lens_lookup
 from app.controls import CONTROLS_BY_KEY, section_keys
 from app.lens_corrections import LENS_PROFILES
 from app.professional_tools import draw_guides_and_grid, grid_line_fractions, preview_image
@@ -46,12 +46,25 @@ def rotate_section(ctx) -> None:
 
 def lens_section(ctx) -> None:
     section_header("Lens Corrections", "lens")
-    st.caption(
-        "Not calibrated to a specific camera/lens model -- there's no profile database here, "
-        "just typical starting points by lens category. Pick the closest one, then fine-tune "
-        "with the sliders below."
-    )
     values = ctx.values
+    available = lens_lookup.lensfun_available()
+    st.caption(
+        "📷 **From the photo's lens** looks the camera and lens up in the lensfun database (from the "
+        "photo's EXIF) and fits the sliders below to its calibration at this focal length and aperture."
+        if available else
+        "The lens database (lensfunpy) isn't installed, so only the category starting points below are available."
+    )
+    if st.button("📷 From the photo's lens", key="lens-auto-btn", disabled=not available):
+        match, message = lens_lookup.find_lens(ctx.source)
+        # Kept with the photo it describes, so another photo doesn't show a stale match.
+        st.session_state["_lens-auto-message"] = (ctx.source_digest, message)
+        if match is not None:
+            st.session_state["_pending_restore"] = {**match.sliders, "lens_profile": "None"}
+            request_rerun()
+    lens_message = st.session_state.get("_lens-auto-message")
+    if lens_message and lens_message[0] == ctx.source_digest:
+        st.caption(lens_message[1])
+    st.caption("Or start from a typical lens category, then fine-tune with the sliders below.")
     values["lens_profile"] = render_control("lens_profile")
     # A caption rather than help=: st.button(help=...) adds a second focusable tooltip button.
     st.caption("Loads this profile's starting values -- you can still adjust the sliders afterward.")
