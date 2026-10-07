@@ -501,6 +501,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                     "Blend Mode", blend_mode_choices, format_func=lambda mode: BLEND_MODE_LABELS[mode],
                     index=blend_mode_choices.index(layer["blend_mode"]), key=f"l-blend-{layer_id}",
                 )
+                render_layer_mask_controls(layer, layer_id)
                 # Every mutation below (reorder/duplicate/remove) is followed by `break`, not just
                 # request_rerun() -- swapping or inserting into `layers` while an outer `enumerate()`
                 # over that same list keeps iterating would re-visit the layer that just got swapped/
@@ -532,23 +533,71 @@ def render_layer_stack(source: Image.Image) -> str | None:
     if not layers:
         return None
     # The stack's own JSON -- rasterized + serialized later (layers_payload, cached on it) at the
-    # size the pipeline composites at: the full-resolution frame, or the preview proxy's.
-    return json.dumps(layers, sort_keys=True)
+    # size the pipeline composites at: the full-resolution frame, or the preview proxy's. A layer
+    # mask is carried as its selection's signature, so editing that selection re-renders the stack.
+    return json.dumps([with_mask_signature(layer) for layer in layers], sort_keys=True)
 
 
-def build_layers_payload(signature: str, canvas_size: tuple[int, int], scale: float = 1.0) -> bytes:
-    """Uncached layers_payload(), for the export/refine producers' thread."""
+def render_layer_mask_controls(layer: dict, layer_id: str) -> None:
+    """Layer mask (F13): limit the layer to one of the Masks tab's selections (its own invert and
+    opacity apply), optionally inverted -- the selection tools are shared rather than duplicated."""
+    selections = {selection["id"]: selection.get("name", "Selection") for selection in st.session_state.get("mask_layers", [])}
+    choices = [None, *selections]
+    current = layer.get("mask_selection") if layer.get("mask_selection") in selections else None
+    layer["mask_selection"] = st.selectbox(
+        "Layer mask", choices, index=choices.index(current), key=f"l-mask-{layer_id}",
+        format_func=lambda choice: "None (whole layer)" if choice is None else f"Selection: {selections[choice]}",
+        help="Show this layer only where a selection from ◉ Local → ◉ Masks is. Build the selection there; it can be one that isn't used for adjustments.",
+    )
+    layer["mask_invert"] = st.checkbox("Invert layer mask", layer.get("mask_invert", False), key=f"l-mask-inv-{layer_id}", disabled=layer["mask_selection"] is None)
+    if layer.get("mask_selection") and layer["mask_selection"] not in selections:
+        layer["mask_selection"] = None
+
+
+def with_mask_signature(layer: dict) -> dict:
+    """A copy of `layer` carrying `mask_signature`: its mask selection's signature (enabled, on its
+    own), or None for no mask or a selection that no longer exists."""
+    from app.ui.selections import selections_signature
+
+    selection = next((item for item in st.session_state.get("mask_layers", []) if item["id"] == layer.get("mask_selection")), None)
+    signature = selections_signature([dict(selection, enabled=True, combine="add")]) if selection else None
+    return {**layer, "mask_signature": signature}
+
+
+def _layer_mask(layer: dict, canvas_size: tuple[int, int], mask_builder) -> Image.Image | None:
+    if not layer.get("mask_signature") or mask_builder is None:
+        return None
+    mask = Image.open(io.BytesIO(mask_builder(layer["mask_signature"], tuple(canvas_size)))).convert("L")
+    if mask.size != tuple(canvas_size):
+        mask = mask.resize(tuple(canvas_size), Image.Resampling.BILINEAR)
+    if layer.get("mask_invert"):
+        mask = Image.eval(mask, lambda value: 255 - value)
+    return mask
+
+
+def build_layers_payload(signature: str, canvas_size: tuple[int, int], scale: float = 1.0, mask_builder=None) -> bytes:
+    """Uncached layers_payload(), for the export/refine producers' thread. `mask_builder(selection
+    signature, size) -> PNG bytes` renders layer masks (None: layers keep no mask)."""
     layers = json.loads(signature)
     workspace_layers = [
-        WorkspaceLayer(layer["name"], layer_dict_to_image(layer, tuple(canvas_size), scale), layer["opacity"], layer["blend_mode"], layer["visible"])
+        WorkspaceLayer(
+            layer["name"], layer_dict_to_image(layer, tuple(canvas_size), scale), layer["opacity"], layer["blend_mode"], layer["visible"],
+            _layer_mask(layer, canvas_size, mask_builder),
+        )
         for layer in layers
     ]
     return layers_to_json(workspace_layers).encode("utf-8")
 
 
 @st.cache_data(show_spinner=False, max_entries=4)
-def layers_payload(signature: str, canvas_size: tuple[int, int], scale: float = 1.0) -> bytes:
+def layers_payload(signature: str, canvas_size: tuple[int, int], scale: float = 1.0, source_key: str = "", _mask_source: Image.Image | None = None) -> bytes:
     """The Layers stack's /process payload at `canvas_size` (the full frame or the proxy's), cached
-    on the stack's own JSON -- rasterizing (Layer Styles ~1 s per styled layer, a photo-sized image
-    layer ~3 s) only happens when a layer actually changes."""
-    return build_layers_payload(signature, canvas_size, scale)
+    on the stack's own JSON (layer masks' selection signatures included) and the photo's geometry
+    key -- rasterizing (Layer Styles ~1 s per styled layer, a photo-sized image layer ~3 s) only
+    happens when a layer actually changes."""
+    from app.ui.selections import combined_mask_png
+
+    mask_builder = None
+    if _mask_source is not None:
+        mask_builder = lambda mask_signature, size: combined_mask_png(source_key, _mask_source, mask_signature, size)  # noqa: E731
+    return build_layers_payload(signature, canvas_size, scale, mask_builder)

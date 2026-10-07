@@ -199,6 +199,14 @@ def _producer_masks(mask_source, local_signature, removal_signature, own_signatu
     return local, removal, extra
 
 
+def _producer_layers(mask_source, layers_signature, layers_canvas, painted) -> bytes | None:
+    """The Layers payload at full resolution for a producer thread; layer masks (F13) are built
+    uncached from the bound painted-mask table."""
+    if not layers_signature:
+        return None
+    return build_layers_payload(layers_signature, layers_canvas, mask_builder=lambda signature, _size: combined_mask_png_uncached(mask_source, signature, painted))
+
+
 def render_full_resolution_export(
     content: bytes, filename: str, options: dict, settings: dict, mask_source: Image.Image,
     local_signature: str | None, removal_signature: str | None, layers_signature: str | None,
@@ -210,7 +218,7 @@ def render_full_resolution_export(
     local, removal, extra = _producer_masks(mask_source, local_signature, removal_signature, own_signatures, painted)
     return backend_client.export_via_backend(
         content, filename, options, settings, local,
-        build_layers_payload(layers_signature, layers_canvas) if layers_signature else None, removal, **extra,
+        _producer_layers(mask_source, layers_signature, layers_canvas, painted), removal, **extra,
     )
 
 
@@ -225,7 +233,7 @@ def render_full_resolution_image(
     local, removal, extra = _producer_masks(mask_source, local_signature, removal_signature, own_signatures, painted)
     return backend_client.process_via_backend(
         content, filename, options, local,
-        build_layers_payload(layers_signature, layers_canvas) if layers_signature else None, removal,
+        _producer_layers(mask_source, layers_signature, layers_canvas, painted), removal,
         lane=backend_client.REFINE_LANE, timeout=backend_client.REFINE_REQUEST_TIMEOUT_S, **extra,
     )
 
@@ -307,9 +315,9 @@ def render_edit(ctx) -> None:
     layers_bytes = None
     if ctx.layers_signature:
         if use_proxy:
-            layers_bytes = layers_payload(ctx.layers_signature, tuple(mask_size), mask_size[0] / max(1, full_canvas[0]))
+            layers_bytes = layers_payload(ctx.layers_signature, tuple(mask_size), mask_size[0] / max(1, full_canvas[0]), mask_source_key, mask_source)
         else:
-            layers_bytes = layers_payload(ctx.layers_signature, tuple(full_canvas))
+            layers_bytes = layers_payload(ctx.layers_signature, tuple(full_canvas), 1.0, mask_source_key, mask_source)
     ctx.layers_key = image_digest(layers_bytes) if layers_bytes else None
 
     detail_options = {key: options[key] for key in (*DETAIL_STAGE_OPTION_KEYS, *BOTH_STAGES_OPTION_KEYS) if key in options}

@@ -552,6 +552,39 @@ def test_adding_a_shape_layer_renders_it_onto_the_final_image():
     assert canvas_hash(at) != baseline
 
 
+def test_a_layer_mask_from_a_masks_selection_limits_the_layer():
+    """F13: a layer's "Layer mask" picks one of the Masks tab's selections; the composite changes
+    with it, its Invert toggle, and an edit of that selection (the stack signature carries it)."""
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Shape")
+    at.run(timeout=30)
+    at.button(key="l-add-shape-btn").click()
+    at.run(timeout=30)
+    at.selectbox(key="m-new-kind").set_value("Radial")
+    at.run(timeout=30)
+    at.slider(key="m-new-rr").set_value(0.1)  # smaller than the centred 30 % shape
+    at.button(key="m-add-btn").click()
+    at.run(timeout=30)
+    unmasked = canvas_hash(at)
+
+    layer_id = at.session_state["image_layers"][0]["id"]
+    selection = at.session_state["mask_layers"][0]
+    at.selectbox(key=f"l-mask-{layer_id}").set_value(selection["id"])
+    at.run(timeout=30)
+    masked = canvas_hash(at)
+    assert not at.exception and masked != unmasked
+    assert at.session_state["image_layers"][0]["mask_selection"] == selection["id"]
+
+    at.checkbox(key=f"l-mask-inv-{layer_id}").check()
+    at.run(timeout=30)
+    assert canvas_hash(at) not in (masked, unmasked)
+
+    at.checkbox(key=f"l-mask-inv-{layer_id}").uncheck()
+    at.slider(key=f"m-sf-{selection['id']}").set_value(20)
+    at.run(timeout=30)
+    assert canvas_hash(at) not in (masked, unmasked)  # the selection's edit reached the layer
+
+
 def test_a_layers_expander_splits_into_content_styles_and_settings_sub_tabs():
     """Regression test for splitting each layer's expander into sub-tabs (Content/Styles/Settings)
     to declutter what had become a long scroll once a layer could be four kinds each with several
