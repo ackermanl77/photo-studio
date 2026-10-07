@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # The build interpreter the release is tested with (constraints-cpu.txt was verified on it).
           python-version: "3.14"
