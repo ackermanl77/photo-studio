@@ -94,3 +94,28 @@ def test_snapshot_names_reflects_insertion_and_survives_unrelated_undo_redo():
     history.undo()
 
     assert set(history.snapshot_names) == {"A", "B"}
+
+
+def test_history_steps_describe_what_each_step_changed():
+    from app.edit_history import describe_change
+    from app.edit_schema import recipe_defaults
+
+    base = recipe_defaults()
+    assert describe_change(None, base) == "Opened"
+    assert describe_change(base, dict(base, exposure_ev=0.3)) == "Exposure (EV) 0.3"
+    assert describe_change(base, dict(base, black_white=True)) == "Convert to Black & White on"
+    assert describe_change(base, dict(base, contrast_amount=10, clarity=5)) == "Contrast, Clarity"
+    assert describe_change(base, dict(base, hsl_blue_sat=-20)) == "HSL Blue Saturation -20"
+    assert describe_change(base, dict(base, curve_mid=140, curve_white=250)) == "Tone curve"
+    assert describe_change(base, dict(base, mask_layers=[{"id": "a"}])) == "Masks"
+    assert describe_change(base, dict(base, exposure_ev=1.0, whites=5, tint=3)) == "Exposure (EV) +2 more"
+
+
+def test_jump_moves_the_cursor_without_dropping_the_redo_branch():
+    history = EditHistory()
+    for value in (0.0, 0.5, 1.0):
+        history.record({"exposure_ev": value})
+    assert history.jump(0) == {"exposure_ev": 0.0} and history.cursor == 0 and history.can_redo
+    history.record({"exposure_ev": 0.0})  # the frontend records the restored recipe -- unchanged
+    assert len(history.snapshots) == 3
+    assert history.jump(99) == {"exposure_ev": 0.0}  # out of range: stays put

@@ -49,7 +49,7 @@ def _toggle_grid() -> None:
 def _snapshots_popover(history) -> None:
     with st.popover(
         "📌", use_container_width=True,
-        help="Named Snapshots -- bookmark the current look under a name and jump back to it any time without losing Undo/Redo history",
+        help="History and Named Snapshots -- jump to any earlier step, or bookmark the current look under a name",
     ):
         st.markdown("**Named Snapshots**")
         st.caption(
@@ -82,6 +82,33 @@ def _snapshots_popover(history) -> None:
                 history.delete_snapshot(snap_name)
                 request_rerun()
                 break
+        _history_list(history)
+
+
+# Steps shown in the History list (newest first); older ones stay reachable with Undo.
+HISTORY_LIST_STEPS = 30
+
+
+def _history_list(history) -> None:
+    """The Undo steps as a list (F13): click one to jump there, like pressing Undo/Redo until it."""
+    st.divider()
+    st.markdown("**History**")
+    steps = history.steps()
+    if len(steps) <= 1:
+        st.caption("No edits yet.")
+        return
+    first_shown = max(0, len(steps) - HISTORY_LIST_STEPS)
+    for index in range(len(steps) - 1, first_shown - 1, -1):
+        current = index == history.cursor
+        label = f"{'▶ ' if current else ''}{index}. {steps[index]}"
+        # Keyed by step number: the list is rebuilt from history each run, and a jump never
+        # renumbers steps (only a new edit after Undo drops the redo branch).
+        if st.button(label, key=f"hist-step-{index}", disabled=current, use_container_width=True, type="tertiary"):
+            st.session_state["_pending_restore"] = history.jump(index) or {}
+            request_rerun()
+            break
+    if first_shown:
+        st.caption(f"{first_shown} older step(s) -- reachable with Undo.")
 
 
 def canvas_header(ctx) -> None:

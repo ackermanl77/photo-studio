@@ -1064,6 +1064,22 @@ def test_adding_a_mask_selection_does_not_reset_canvas_view_settings():
     assert at.checkbox(key="cv-split").value is True
 
 
+def test_the_history_list_jumps_to_an_earlier_step_and_keeps_the_later_ones():
+    at = run_with_uploaded_image()
+    at.slider(key="t-ev").set_value(0.5)
+    at.run(timeout=30)
+    at.slider(key="t-contrast").set_value(20)
+    at.run(timeout=30)
+    labels = [button.label for button in at.button if button.key and button.key.startswith("hist-step-")]
+    assert labels[:2] == ["▶ 2. Contrast 20", "1. Exposure (EV) 0.5"]
+
+    at.button(key="hist-step-1").click()
+    at.run(timeout=30)
+    assert not at.exception
+    assert at.slider(key="t-ev").value == 0.5 and at.slider(key="t-contrast").value == 0
+    assert at.button(key="hist-step-1").disabled and not at.button(key="hist-step-2").disabled  # step 2 kept (Redo)
+
+
 def test_undo_button_does_not_reset_canvas_view_settings():
     """Same bug class as test_adding_a_mask_selection_does_not_reset_canvas_view_settings, but for
     canvas_col's own Undo button, which used to call st.rerun() directly -- aborting the script

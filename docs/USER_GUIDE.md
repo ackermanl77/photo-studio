@@ -354,7 +354,9 @@ Three modes, selected via the radio buttons at the top of the tab.
 ### System Health
 
 A read-only diagnostics table (`app/diagnostics.py`) — useful for confirming optional dependencies
-like `rawpy` (RAW import) are actually installed and working.
+like `rawpy` (RAW import) are actually installed and working. **📂 Open logs folder** opens the
+folder holding the app's log files (its path is shown above the button) — attach them to a bug
+report.
 
 ---
 
@@ -364,6 +366,10 @@ Always visible above/below the preview, on every tab:
 
 - **↶ Undo** / **↷ Redo** — step backward/forward through your edit history (the last 200 steps).
   Also available via **Ctrl+Z** (undo) and **Ctrl+Shift+Z** (redo).
+- **📌 History & Snapshots** — the **History** list shows the last 30 steps, newest first, each named
+  after what it changed ("Exposure (EV) 0.3", "Masks", "Contrast, Clarity"); click one to jump
+  there, exactly as if you pressed Undo/Redo until it (the later steps stay until you make a new
+  edit). **Named Snapshots** bookmark the current look under a name.
 - **↺ Reset** — restores every adjustment to its default. Deliberately leaves an attached layer or
   RAW source alone — only the slider/checkbox values reset.
 - **Zoom View** — **Fit** (the whole photo), **100% (1:1)** — the photo's real pixels, the view to

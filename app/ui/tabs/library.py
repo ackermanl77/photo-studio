@@ -277,5 +277,11 @@ def library_section(ctx) -> None:
                 "Download ZIP", functools.partial(Path(batch_result[0]).read_bytes), "batch.zip", "application/zip", key="b-dl",
             )
     else:
-        from app.diagnostics import check_environment
+        from app.diagnostics import check_environment, logs_folder, open_folder
         st.dataframe([{"check": c.name, "status": c.status, "message": c.message} for c in check_environment()], use_container_width=True)
+        st.caption(f"Logs: `{logs_folder()}`")
+        if st.button("📂 Open logs folder", key="diag-open-logs", help="Show the app's log files (useful to attach to a bug report)"):
+            try:
+                open_folder(logs_folder())
+            except OSError as error:
+                st.toast(f"Couldn't open the folder: {error}", icon="⚠️")

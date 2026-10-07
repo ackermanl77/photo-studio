@@ -1,0 +1,33 @@
+name: Performance budgets
+
+# The opt-in 24 MP budgets (tests/test_performance_budget.py, T5 in the improvement report) on the
+# product's platform. Weekly rather than nightly: a Windows run bills twice its minutes on a
+# private repo, and the edit pipeline rarely changes between weeks. Run it by hand
+# (Actions -> "Performance budgets" -> "Run workflow") after a change to a pipeline step.
+on:
+  schedule:
+    - cron: "17 4 * * 1"  # Mondays 04:17 UTC
+  workflow_dispatch:
+
+jobs:
+  perf:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Run the performance budgets
+        env:
+          PHOTO_PERF_TESTS: "1"
+        run: python -m pytest -q -m perf --durations=0
