@@ -39,7 +39,8 @@ python -m app --input photo.jpg --output out.jpg --exposure-ev 0.5 --contrast 1.
 # self-tests the base exe with it; -BuildProfile gpu is the older all-in-one flavour. -Installer also runs Inno Setup
 # (installer\PhotoStudio.iss -> installer-output\PhotoStudio-Setup-<v>.exe; per-user or all-users install, the GPU
 # pack as an optional component when it was built). Other switches: -Python, -ReuseVenv, -SkipArchive,
-# -KeepBuildFiles, -Sign -CertificateThumbprint <sha1>.
+# -KeepBuildFiles, -Sign [-CertificateThumbprint <sha1>] (default $env:CODESIGN_THUMBPRINT; signs the exe and, with
+# -Installer, the installer + uninstaller through Inno's SignTool).
 .\scripts\build_release.ps1 -Version "0.1.0"
 .\scripts\build_release.ps1 -Version "0.1.0" -GpuPack -ExtraIndexUrl https://download.pytorch.org/whl/cu130
 ```

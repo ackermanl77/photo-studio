@@ -51,7 +51,7 @@ Rebuild:
 .\scripts\build_release.ps1 -Version "0.1.0"
 ```
 
-The release script builds from a fresh virtual environment (`build-venv\<profile>`, pinned by `constraints-<profile>.txt`, `-BuildProfile cpu|gpu`), verifies the bundled WebView2 runtime's SHA-256, runs `PhotoStudio.exe --self-test`, and supports optional signing (`-Sign -CertificateThumbprint <sha1>`), 7-Zip compression, SHA-256 checksums, and the Inno Setup installer (`-Installer`, see below).
+The release script builds from a fresh virtual environment (`build-venv\<profile>`, pinned by `constraints-<profile>.txt`, `-BuildProfile cpu|gpu`), verifies the bundled WebView2 runtime's SHA-256, runs `PhotoStudio.exe --self-test`, and supports optional signing (`-Sign -CertificateThumbprint <sha1>`, or `-Sign` with the thumbprint in `CODESIGN_THUMBPRINT`: signs `PhotoStudio.exe` and, with `-Installer`, the installer and its uninstaller, timestamped by `CODESIGN_TIMESTAMP_URL`, default DigiCert), 7-Zip compression, SHA-256 checksums, and the Inno Setup installer (`-Installer`, see below).
 
 **CPU base + optional GPU pack.** The default release is the CPU base package (no PyTorch).
 `-GpuPack` (with `-ExtraIndexUrl https://download.pytorch.org/whl/cu130`) also builds the

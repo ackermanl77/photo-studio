@@ -22,6 +22,12 @@ DefaultDirName={autopf}\Photo Studio
 DefaultGroupName=Photo Studio
 OutputDir=..\installer-output
 OutputBaseFilename=PhotoStudio-Setup-{#MyAppVersion}
+; build_release.ps1 -Sign passes /DSign and the "codesign" tool (/Scodesign=...): Inno Setup then
+; signs this installer and the uninstaller it writes.
+#ifdef Sign
+SignTool=codesign
+SignedUninstaller=yes
+#endif
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
