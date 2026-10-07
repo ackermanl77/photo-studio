@@ -77,7 +77,7 @@ jobs:
           .\scripts\build_release.ps1 -Version "${{ steps.version.outputs.value }}" @extra
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PhotoStudio-${{ steps.version.outputs.value }}-Windows
           path: |
@@ -87,7 +87,7 @@ jobs:
 
       - name: Upload GPU pack
         if: github.event.inputs.gpu_pack == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PhotoStudio-${{ steps.version.outputs.value }}-GPU-pack
           path: |
