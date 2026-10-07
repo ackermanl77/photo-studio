@@ -2,7 +2,7 @@
 ; Passed by scripts\build_release.ps1 -Installer as /DMyAppVersion=<its -Version>, so the installer
 ; can't drift from the build it packages; the fallback only applies to a manual ISCC run.
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.0"
+  #define MyAppVersion "0.2.0"
 #endif
 #define MyAppPublisher "Photo Studio"
 #define MyAppExeName "PhotoStudio.exe"

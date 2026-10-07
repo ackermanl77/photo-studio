@@ -9,7 +9,7 @@ on:
       version:
         description: "Version number to build (e.g. 0.1.0) -- no leading 'v'"
         required: true
-        default: "0.1.0"
+        default: "0.2.0"
       gpu_pack:
         description: "Also build the optional GPU pack (AI Upscale; a multi-GB CUDA torch download) as a workflow artifact"
         type: boolean
