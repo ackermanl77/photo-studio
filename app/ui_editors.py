@@ -74,7 +74,11 @@ def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, in
     return editor_style() + html, display_height
 
 
-def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, int]], extra_points: list[tuple[int, int]] | None = None) -> str:
+_MASTER_CURVE_KEYS = ("curve_black", "curve_shadows", "curve_mid", "curve_highlights", "curve_white")
+
+
+def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, int]], extra_points: list[tuple[int, int]] | None = None,
+                       keys: tuple[str, ...] = _MASTER_CURVE_KEYS, color: str = "var(--ps-accent)") -> str:
     """A draggable RGB tone curve: an inline SVG with five fixed points (Blacks/Shadows/Midtones/
     Highlights/Whites, matching the five sliders below it), each vertically draggable within its
     own [min, max], plus any number of user-added "extra" points -- click empty space on the curve
@@ -105,8 +109,13 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
     instantiates, then rerun" mechanism Undo/Redo/Reset already use to update a slider's value from
     outside the widget itself, which sidesteps the whole reliability question since it never
     depends on a script-dispatched DOM event reaching a slider at all.
+
+    `keys` are the recipe keys of the five fixed points (default: the master curve's); a per-channel
+    curve (F13) passes its own and `color`, and gets no free-form extra points (they belong to the
+    master curve, `curve_extra_points`).
     """
-    extra_points = extra_points or []
+    allow_extra = tuple(keys) == _MASTER_CURVE_KEYS
+    extra_points = (extra_points or []) if allow_extra else []
     margin_left, margin_top, plot_size = 34, 12, 210
     svg_w, svg_h = margin_left + plot_size + 12, margin_top + plot_size + 12
 
@@ -131,19 +140,19 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
          aria-label="Tone curve editor. Tab to a point, then use the Up and Down arrows."
          preserveAspectRatio="xMinYMin meet" style="touch-action:none;display:block;">
       <rect id="curve-bg" x="{margin_left}" y="{margin_top}" width="{plot_size}" height="{plot_size}"
-            fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.15)" style="cursor:copy;"/>
+            fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.15)" style="cursor:{'copy' if allow_extra else 'default'};"/>
       <line x1="{diag_x0:.1f}" y1="{diag_y0:.1f}" x2="{diag_x1:.1f}" y2="{diag_y1:.1f}"
             stroke="rgba(255,255,255,0.2)" stroke-dasharray="3,3"/>
-      <polyline id="curve-line" points="{poly}" fill="none" style="stroke:var(--ps-accent)" stroke-width="2"/>
+      <polyline id="curve-line" points="{poly}" fill="none" style="stroke:{color}" stroke-width="2"/>
       {fixed_circles}
       <g id="extra-points"></g>
     </svg>
     </div>
     <div style="color:var(--ps-text-muted);font:11px system-ui;margin-top:4px;padding:0 2px;">
-      Click an empty spot on the curve to add a point, drag it, double-click to remove it. Keyboard: Tab to a point, Up/Down (Shift = x10).
+      {'Click an empty spot on the curve to add a point, drag it, double-click to remove it. ' if allow_extra else 'Drag a point up or down. '}Keyboard: Tab to a point, Up/Down (Shift = x10).
     </div>
     <style>
-      #curve-svg .pt.fixed {{ fill:var(--ps-accent); stroke:var(--ps-border); stroke-width:2; cursor:ns-resize; }}
+      #curve-svg .pt.fixed {{ fill:{color}; stroke:var(--ps-border); stroke-width:2; cursor:ns-resize; }}
       #curve-svg .pt.fixed:focus {{ outline:none; stroke:#fff; stroke-width:3; }}
       #curve-svg .pt.fixed:hover {{ fill:var(--ps-accent-soft); }}
       #curve-svg .pt.extra {{ fill:var(--ps-info); stroke:var(--ps-border); stroke-width:2; cursor:move; }}
@@ -155,6 +164,7 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
         const bounds = {bounds_json};
         const points = {points_json};
         let extraPoints = {extra_points_json};
+        const keys = {json.dumps(list(keys))}, allowExtra = {'true' if allow_extra else 'false'};
         const svg = document.getElementById('curve-svg');
         const bg = document.getElementById('curve-bg');
         const line = document.getElementById('curve-line');
@@ -181,11 +191,10 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
         }}
         function commit() {{
           try {{
-            const payload = JSON.stringify({{
-              curve_black: points[0][1], curve_shadows: points[1][1], curve_mid: points[2][1],
-              curve_highlights: points[3][1], curve_white: points[4][1], curve_enabled: true,
-              curve_extra_points: extraPoints,
-            }});
+            const data = {{ curve_enabled: true }};
+            keys.forEach((key, i) => {{ data[key] = points[i][1]; }});
+            if (allowExtra) data.curve_extra_points = extraPoints;
+            const payload = JSON.stringify(data);
             const container = window.parent.document.querySelector('.st-key-curve-hidden');
             if (!container) return;
             const textarea = container.querySelector('textarea');
@@ -285,6 +294,7 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
         // Click empty background (not a drag-release from a point, which targets a circle
         // element instead of the rect) adds a new extra point at the clicked position.
         bg.addEventListener('click', (e) => {{
+          if (!allowExtra) return;
           const rect = svg.getBoundingClientRect();
           const scale = svgW / rect.width;
           const px = (e.clientX - rect.left) * scale;

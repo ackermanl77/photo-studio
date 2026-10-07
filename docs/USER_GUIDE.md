@@ -152,7 +152,11 @@ tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color
 - **RGB Tone Curve** — drag any of the 5 fixed points (Blacks/Shadows/Midtones/Highlights/Whites)
   vertically, or click an empty spot on the curve to add a fully free-form point you can drag
   anywhere (double-click to remove it). The sliders below give exact numeric values for the 5 fixed
-  points. Must be enabled via the checkbox to take effect.
+  points. Must be enabled via the checkbox to take effect. The **RGB / Red / Green / Blue** tabs
+  switch the editor between the master curve and one curve per colour channel (five points each,
+  no extra points): lift Blue in the shadows for a cool cast, pull Red down in the highlights, and
+  so on. They apply after the master curve, while the curve is enabled. CLI: `--curve-red`,
+  `--curve-green`, `--curve-blue` (same `x:y,...` format as `--curve`).
 - **🎯 Soft Proof: Gamut Warning** — for a photo with an embedded color profile, highlights in
   magenta any pixel that gets clipped when converted into this app's sRGB working space. Not a
   simulation of a specific printer profile.

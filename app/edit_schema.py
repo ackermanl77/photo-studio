@@ -81,6 +81,8 @@ _OTHER_OPTION_SPECS: dict[str, OptionSpec] = {
     "exposure": _num(0, 10, "detail"),
     "hsl_bands": OptionSpec("hsl_bands", nullable=True, stage="detail"),
     "curve": OptionSpec("curve", nullable=True, stage="detail"),
+    # Per-channel R/G/B curves (F13): {"r"|"g"|"b": [[x, y], ...]}, after the master curve.
+    "curve_channels": OptionSpec("curve_channels", nullable=True, stage="detail"),
     # Repair / Masks
     "mask_exposure": _num(0, 10),
     # One adjustment set per selection that has its own (B8) -- paired, in order, with the masks in
@@ -187,6 +189,10 @@ def _check_value(key: str, spec: OptionSpec, value):
                 raise OptionsError(f"curve points must be [x, y] pairs within 0-255, got {point!r}")
             points.append((int(point[0]), int(point[1])))
         return points
+    if kind == "curve_channels":
+        if not isinstance(value, dict) or set(value) - {"r", "g", "b"}:
+            raise OptionsError('curve_channels must be an object with only "r", "g" and "b" curves')
+        return {channel: _check_value(f"curve_channels.{channel}", OptionSpec("curve"), points) for channel, points in value.items()}
     if kind == "crop_box":
         if not isinstance(value, (list, tuple)) or len(value) != 4 or not all(_is_number(v) for v in value):
             raise OptionsError("crop_box must be [left, top, right, bottom]")

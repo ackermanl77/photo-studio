@@ -9,12 +9,21 @@ import streamlit as st
 from app.controls import CONTROLS_BY_KEY
 from app.professional_color import HSL_BAND_ORDER, ICC_TRANSFORM_ERRORS
 from app.ui.processing import cached_gamut_warning_overlay
-from app.ui.state import consume_new_commit, is_modified, request_rerun, section_header, section_label, section_reset_button, show_component
+from app.ui.state import consume_new_commit, is_modified, request_rerun, section_header, section_label, section_reset_button, show_component, tab_open
 from app.ui.widgets import render_control
 from app.ui_editors import _curve_editor_html
 
 CURVE_X = (0, 64, 128, 192, 255)
 CURVE_KEYS = ("curve_black", "curve_shadows", "curve_mid", "curve_highlights", "curve_white")
+
+
+# The curve channels (F13): tab label, recipe-key prefix, editor colour.
+CURVE_CHANNEL_TABS = (("RGB", "curve", "var(--ps-accent)"), ("Red", "curve_r", "#e5534b"), ("Green", "curve_g", "#57ab5a"), ("Blue", "curve_b", "#539bf5"))
+CURVE_POINT_NAMES = ("black", "shadows", "mid", "highlights", "white")
+
+
+def _channel_curve_keys(prefix: str) -> tuple[str, ...]:
+    return CURVE_KEYS if prefix == "curve" else tuple(f"{prefix}_{name}" for name in CURVE_POINT_NAMES)
 
 
 def curve_section(ctx) -> None:
@@ -23,8 +32,20 @@ def curve_section(ctx) -> None:
     label = section_label("📈 RGB Tone Curve", "curve", extra_modified=bool(st.session_state["curve_extra_points"]))
     with st.expander(label, expanded=False, key="sec-curve"):
         curve_bounds = [(0, 64), (0, 128), (64, 192), (128, 255), (192, 255)]
-        preview_points = [(x, st.session_state.get(CONTROLS_BY_KEY[key].widget_key, CONTROLS_BY_KEY[key].default)) for x, key in zip(CURVE_X, CURVE_KEYS)]
-        show_component(lambda: (_curve_editor_html(preview_points, curve_bounds, st.session_state["curve_extra_points"]), 270))
+        values["curve_enabled"] = render_control("curve_enabled")
+        # One tab per channel (F13); every tab's sliders render on every run (a widget skipped in a
+        # run loses its state), only the open tab draws its editor.
+        channel_tabs = st.tabs([name for name, _prefix, _color in CURVE_CHANNEL_TABS], key="curve-channel-tab", on_change="rerun")
+        for tab, (name, prefix, color) in zip(channel_tabs, CURVE_CHANNEL_TABS):
+            keys = _channel_curve_keys(prefix)
+            with tab:
+                if tab_open(tab):
+                    preview_points = [(x, st.session_state.get(CONTROLS_BY_KEY[key].widget_key, CONTROLS_BY_KEY[key].default)) for x, key in zip(CURVE_X, keys)]
+                    extra = st.session_state["curve_extra_points"] if prefix == "curve" else None
+                    show_component(lambda: (_curve_editor_html(preview_points, curve_bounds, extra, keys=keys, color=color), 270))
+                with st.container(key="curve-points" if prefix == "curve" else f"curve-points-{prefix}"):
+                    for key in keys:
+                        values[key] = render_control(key)
         with st.container(key="curve-hidden"):
             curve_commit = st.text_area("Curve commit data", key="curve-commit-data", label_visibility="collapsed")
         # A dragged point commits its recipe values here (a script-dispatched slider event doesn't
@@ -37,10 +58,7 @@ def curve_section(ctx) -> None:
             if isinstance(parsed, dict):
                 st.session_state["_pending_restore"] = parsed
                 request_rerun()
-        with st.container(key="curve-points"):
-            for key in ("curve_enabled", *CURVE_KEYS):
-                values[key] = render_control(key)
-        st.caption("Drag a point on the curve, or use the sliders below for exact values.")
+        st.caption("Drag a point on the curve, or use the sliders for exact values. Red/Green/Blue curves shift one colour channel -- e.g. lift Blue in the shadows for a cool cast.")
 
 
 def hsl_section(ctx) -> None:

@@ -38,6 +38,11 @@ ASPECT_RATIOS = {
     "9:16 Story": (9, 16),
 }
 
+# Per-channel tone curves (F13): "r", "g", "b", in that order.
+CURVE_CHANNELS = ("r", "g", "b")
+CURVE_POINTS = ("black", "shadows", "mid", "highlights", "white")
+CURVE_X = (0, 64, 128, 192, 255)
+
 # Widget value -> option value conversions (`Control.transform`).
 TRANSFORMS = {
     # -100..100 amount -> the pipeline's multiplier (Contrast, Saturation, the mask targets).
@@ -139,6 +144,12 @@ CONTROLS: tuple[Control, ...] = (
     _slider("curve_mid", "c-p2", "Midtones", 64, 192, 128, section="curve", composite="curve"),
     _slider("curve_highlights", "c-p3", "Highlights", 128, 255, 192, section="curve", composite="curve"),
     _slider("curve_white", "c-p4", "Whites", 192, 255, 255, section="curve", composite="curve"),
+    # Per-channel R/G/B curves (F13): the same five points per channel, feeding "curve_channels".
+    *(_slider(f"curve_{channel}_{point}", f"c-{channel}-p{index}", label, low, high, default, section="curve", composite="curve_channels")
+      for channel in CURVE_CHANNELS
+      for index, (point, label, low, high, default) in enumerate((
+          ("black", "Blacks", 0, 64, 0), ("shadows", "Shadows", 0, 128, 64), ("mid", "Midtones", 64, 192, 128),
+          ("highlights", "Highlights", 128, 255, 192), ("white", "Whites", 192, 255, 255)))),
     # --- Presence and Detail ----------------------------------------------------------------------
     _slider("texture", "d-text", "Texture", -100, 100, section="presence", option=True, stage=_D,
             help="Enhances or softens fine surface detail (skin pores, fabric, foliage) without affecting large tonal shapes."),
@@ -263,6 +274,19 @@ def curve_fixed_points(values: dict) -> list[tuple[int, int]]:
         (x, values.get(key, CONTROLS_BY_KEY[key].default))
         for x, key in zip((0, 64, 128, 192, 255), ("curve_black", "curve_shadows", "curve_mid", "curve_highlights", "curve_white"))
     ]
+
+
+def curve_channels_from(values: dict) -> dict | None:
+    """The "curve_channels" option: {channel: five [x, y] points} for each R/G/B curve that isn't a
+    straight line, or None when none is (or the curve is disabled)."""
+    if not values.get("curve_enabled"):
+        return None
+    channels = {}
+    for channel in CURVE_CHANNELS:
+        points = [(x, values.get(f"curve_{channel}_{point}", CONTROLS_BY_KEY[f"curve_{channel}_{point}"].default)) for x, point in zip(CURVE_X, CURVE_POINTS)]
+        if any(x != y for x, y in points):
+            channels[channel] = points
+    return channels or None
 
 
 def aspect_code_from(values: dict) -> str | None:

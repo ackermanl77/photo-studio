@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.controls import ASPECT_RATIOS, RECIPE_KEYS_NOT_IN_OPTIONS, aspect_code_from, controls_to_options, curve_fixed_points, hsl_bands_from
+from app.controls import ASPECT_RATIOS, RECIPE_KEYS_NOT_IN_OPTIONS, aspect_code_from, controls_to_options, curve_channels_from, curve_fixed_points, hsl_bands_from
 
 __all__ = ["ASPECT_RATIOS", "PER_PHOTO_ONLY_KEYS", "RECIPE_KEYS_NOT_IN_OPTIONS", "merge_curve_points", "recipe_to_options", "without_per_photo_only_keys"]
 
@@ -74,6 +74,9 @@ def recipe_to_options(recipe: dict) -> dict:
     options.update(controls_to_options(recipe, include_photo_specific=False))
     if recipe.get("curve_enabled"):
         options["curve"] = merge_curve_points(curve_fixed_points(recipe), recipe.get("curve_extra_points", []))
+    curve_channels = curve_channels_from(recipe)
+    if curve_channels:
+        options["curve_channels"] = curve_channels
     hsl_bands = hsl_bands_from(recipe)
     if hsl_bands:
         options["hsl_bands"] = hsl_bands

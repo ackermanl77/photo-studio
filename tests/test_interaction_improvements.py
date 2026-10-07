@@ -339,6 +339,25 @@ def test_curve_point_moves_with_up_down_within_its_bounds(tmp_path):
 
 
 @needs_node
+def test_a_channel_curve_commits_its_own_keys_and_takes_no_extra_points(tmp_path):
+    keys = ("curve_b_black", "curve_b_shadows", "curve_b_mid", "curve_b_highlights", "curve_b_white")
+    html = _curve_editor_html([(0, 0), (64, 64), (128, 128), (192, 192), (255, 255)], [(0, 64), (0, 128), (64, 192), (128, 255), (192, 255)],
+                              [(30, 40)], keys=keys, color="#539bf5")
+    prelude = """
+      const svgEl = document.getElementById('curve-svg');
+      for (let i = 0; i < 5; i++) { const c = document.createElement('circle'); c.className = 'pt fixed'; c.dataset.idx = i; svgEl.appendChild(c); }
+    """
+    scenario = """
+      const shadows = document.getElementById('curve-svg').querySelectorAll('.pt.fixed')[1];
+      key(shadows, 'ArrowUp', {shiftKey: true}); flushTimers();
+      document.getElementById('curve-bg').dispatch('click', {clientX: 50, clientY: 50});
+    """
+    out = _run_editor(tmp_path, html, scenario, prelude)
+    assert out["commits"] == [{"curve_enabled": True, "curve_b_black": 0, "curve_b_shadows": 74, "curve_b_mid": 128, "curve_b_highlights": 192, "curve_b_white": 255}]
+    assert "#539bf5" in html and "[30, 40]" not in html  # its colour; the master curve's extra points stay off it
+
+
+@needs_node
 def test_dragging_the_zoomed_view_commits_the_new_center(tmp_path):
     # A 50x40 view of a 100x80 photo at 200 %, shown 400x300 px in the fake layout.
     html = _pan_viewer_html(_background((50, 40)), "cv-nav", (0.5, 0.5), 2.0, (100, 80))[0]
