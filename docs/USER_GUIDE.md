@@ -226,7 +226,10 @@ sub-tabs:
   Light/Hard Light/Vivid Light/Linear Light/Pin Light/Hard Mix; the Comparative group:
   Difference/Exclusion/Subtract/Divide; and Hue/Saturation/Color/Luminosity — the same set
   Photoshop's own Layers panel offers), plus **⬆️ Up** / **⬇️ Down** to reorder the stack (the last
-  layer listed sits on top), **📄 Duplicate**, and **🗑️ Remove**.
+  layer listed sits on top), **📄 Duplicate**, and **🗑️ Remove**. **Layer mask** shows the layer
+  only where one of the ◉ Masks selections is (its own softness, invert and opacity apply), and
+  **Invert layer mask** flips it — e.g. a texture layer that covers only the sky. Build the
+  selection on the Masks tab; leave its target sliders at 0 if it should only mask the layer.
 
 ### The Pen Tool
 

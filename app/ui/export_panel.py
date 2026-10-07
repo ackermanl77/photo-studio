@@ -164,7 +164,7 @@ def export_multiple_section(ctx) -> None:
                     multi_source = Image.open(io.BytesIO(backend_client.export_via_backend(
                         ctx.upload_bytes, ctx.upload_name, _full_options(ctx) | {"ai_upscale": False}, {"format": "PNG", "metadata": "all"},
                         combined_mask_png(mask_source_key, mask_source, ctx.mask_signature) if ctx.shared_mask_layers else None,
-                        layers_payload(ctx.layers_signature, tuple(ctx.full_canvas)) if ctx.layers_signature else None,
+                        layers_payload(ctx.layers_signature, tuple(ctx.full_canvas), 1.0, mask_source_key, mask_source) if ctx.layers_signature else None,
                         combined_mask_png(mask_source_key, mask_source, ctx.removal_signature) if ctx.removal_active else None,
                         **({"local_masks_bytes": local_masks_payload([combined_mask_png(mask_source_key, mask_source, signature) for signature in ctx.own_signatures])} if ctx.own_signatures else {}),
                     )))
