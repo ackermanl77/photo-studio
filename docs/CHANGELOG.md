@@ -43,7 +43,14 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
   faces (and the golden images) are unchanged. Tested on the public-domain portrait with a
   skin-coloured patch beside it.
 
-Suite: 709 passed / 12 skipped.
+- **F8 remainder: XMP sidecars** (`app/xmp_sidecar.py`). The Library reads `xmp:Rating` (-1 =
+  rejected) and `dc:subject` keywords from a photo's sidecar when it catalogues the photo for the
+  first time, and with "Also write ratings and tags to XMP sidecars" writes every rating, reject and
+  tag change back (`IMG_0001.xmp` beside RAW files, `photo.jpg.xmp` beside others; an existing file
+  with either name is used). Rewriting keeps the rest of an existing sidecar, its namespace prefixes
+  included (tested with a Lightroom-style `crs:` sidecar).
+
+Suite: 716 passed / 12 skipped.
 
 ## 2026-10-06 -- v0.2.0
 

@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 from app.batch_release import FileLike, stream_to_zip
 from app.config import user_data_dir, user_data_file
 from app.custom_presets import PresetStore
-from app.library import index_folder, thumbnail
+from app.library import index_folder, save_rating, thumbnail
 from app.major_features import PhotoCatalog
 from app.painted_masks import inline_painted_masks
 from app.preset_exchange import export_presets, import_presets
@@ -157,6 +157,17 @@ def library_section(ctx) -> None:
             is_rejected = "rejected" in existing["tags"]
 
             st.caption(f"{cursor + 1} / {len(rec)} — {Path(current_path).name}" + (" — 🚫 rejected" if is_rejected else ""))
+            write_xmp = st.checkbox(
+                "Also write ratings and tags to XMP sidecars", key="lib-xmp-write",
+                help="Saves each rating, reject flag and tag change in a .xmp file next to the photo, which "
+                     "Lightroom, Capture One, Bridge and darktable read. Existing sidecars keep everything else "
+                     "they hold. Ratings already in sidecars are always read when a folder is first scanned.",
+            )
+
+            def _save(rating: int, tags) -> None:
+                problem = save_rating(catalog, current_path, rating, tags, write_xmp=write_xmp)
+                if problem:
+                    st.toast(problem, icon="⚠️")
             try:
                 # The cached thumbnail, not the full-size file decoded on every rerun.
                 st.image(str(thumbnail(current_path, user_data_dir() / "thumbs")), width=240)
@@ -180,17 +191,17 @@ def library_section(ctx) -> None:
                 for i in range(5):
                     label = "⭐" if i < existing["rating"] else "☆"
                     if star_cols[i].button(label, key=f"lib-star-{i + 1}", use_container_width=True):
-                        catalog.upsert(current_path, rating=i + 1, tags=existing["tags"])
+                        _save(i + 1, existing["tags"])
                         request_rerun()
 
                 clear_col, reject_col = st.columns(2)
                 if clear_col.button("Clear rating", key="lib-clear-btn", use_container_width=True):
-                    catalog.upsert(current_path, rating=0, tags=existing["tags"])
+                    _save(0, existing["tags"])
                     request_rerun()
                 reject_label = "🚫 Un-reject" if is_rejected else "🚫 Reject"
                 if reject_col.button(reject_label, key="lib-reject-btn", use_container_width=True):
                     new_tags = [t for t in existing["tags"] if t != "rejected"] if is_rejected else existing["tags"] + ["rejected"]
-                    catalog.upsert(current_path, rating=existing["rating"], tags=new_tags)
+                    _save(existing["rating"], new_tags)
                     request_rerun()
 
                 visible_tags = ", ".join(t for t in existing["tags"] if t != "rejected")
@@ -199,7 +210,7 @@ def library_section(ctx) -> None:
                     new_tags = [t.strip() for t in tags_text.split(",") if t.strip()]
                     if is_rejected:
                         new_tags.append("rejected")
-                    catalog.upsert(current_path, rating=existing["rating"], tags=new_tags)
+                    _save(existing["rating"], new_tags)
                     st.toast("Tags saved", icon="🏷️")
 
             components.html(static_text("library_shortcuts.html"), height=0)

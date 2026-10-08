@@ -329,7 +329,9 @@ Three modes, selected via the radio buttons at the top of the tab.
 - **Folder** + **Scan Folder** — indexes every JPG/PNG/WEBP/TIFF and camera RAW file in a folder
   (recursively), showing a live progress bar as it works. Scanning doesn't touch the files
   themselves, and rescanning keeps the ratings and tags you've already given. The catalog is shown
-  the next time you open the app, without scanning again.
+  the next time you open the app, without scanning again. A photo scanned for the first time takes
+  its rating, reject flag and keywords from an **XMP sidecar** next to it (`IMG_0001.xmp` or
+  `photo.jpg.xmp`, as Lightroom, Capture One, Bridge and darktable write them), if it has one.
 - **Thumbnail grid** — the matching photos as thumbnails (cached, RAW files via their embedded
   preview), each with **✏️ Edit** to open it in the editor. Your current adjustments are kept, so a
   look carries over to the next photo of a shoot; **↺** resets them.
@@ -340,6 +342,10 @@ Three modes, selected via the radio buttons at the top of the tab.
   - Five star buttons to rate (or **Clear rating**).
   - **🚫 Reject** to flag a photo (stored as a tag, doesn't affect its rating).
   - A comma-separated **Tags** field, with **Save tags**.
+  - **Also write ratings and tags to XMP sidecars** — off by default; when on, every rating,
+    reject and tag change is also saved in the photo's `.xmp` sidecar (rejected = rating -1), so
+    other photo applications see your cull. An existing sidecar keeps everything else it holds
+    (develop settings included); a damaged one is left alone and a warning says so.
   - **✏️ Edit this photo** — opens the current photo in the editor.
   - **Keyboard shortcuts** (work whenever this panel is visible and you're not typing in a text
     field): **1–5** to rate, **0** to clear the rating, **X** to toggle reject, **←/→** to move
