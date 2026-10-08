@@ -29,6 +29,13 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
   uninstaller. Verified with a self-signed test certificate: a real `-Installer -Sign` build signed and
   timestamped the exe, the uninstaller and the installer.
 
+- **P4 remainder:** Temperature/Tint on an 8-bit image is three per-channel lookup tables (the
+  same float32 products, bit-identical; 0.21 -> 0.03 s at 24 MP) and a single broadcast multiply in
+  16-bit mode; Highlights/Shadows computes its shift as `new_base - base` with in-place weights,
+  only for the side in use (0.83 -> 0.66 s; at most 1 level apart from before). The guided filter
+  stays exact: a subsampled "fast guided filter" would save another ~0.2 s but shift the base by
+  up to ~1 level and make previews and exports differ slightly.
+
 Suite: 706 passed / 12 skipped.
 
 ## 2026-10-06 -- v0.2.0
