@@ -7,6 +7,7 @@ from PIL import Image, UnidentifiedImageError
 
 from app.major_features import PhotoCatalog
 from app.raw_import import SUPPORTED_EXTENSIONS, is_raw_path
+from app.xmp_sidecar import REJECTED_TAG, read_sidecar, write_sidecar
 
 # Every format the editor opens, camera RAW included (it used to skip RAW entirely).
 IMAGE_EXTENSIONS = SUPPORTED_EXTENSIONS
@@ -36,6 +37,21 @@ def image_info(path: str | Path) -> dict[str, object]:
             return {"path": str(source), "name": source.name, "width": image.width, "height": image.height, "format": image.format, "bytes": source.stat().st_size}
     except (OSError, UnidentifiedImageError) as error:
         return {"path": str(source), "name": source.name, "error": str(error)}
+
+
+def save_rating(catalog: PhotoCatalog, path: str | Path, rating: int, tags, write_xmp: bool = False) -> str | None:
+    """Store a rating/tags change in the catalog and, with `write_xmp`, in the photo's XMP
+    sidecar too (the "rejected" tag becomes xmp:Rating -1). Returns a message when the sidecar
+    couldn't be written -- the catalog is updated either way."""
+    tags = list(tags)
+    catalog.upsert(path, rating=rating, tags=tags)
+    if not write_xmp:
+        return None
+    try:
+        write_sidecar(path, rating, [t for t in tags if t != REJECTED_TAG], rejected=REJECTED_TAG in tags)
+    except (OSError, ValueError) as error:
+        return f"Couldn't write the XMP sidecar: {error}"
+    return None
 
 
 def thumbnail(path: str | Path, destination: str | Path, size: tuple[int, int] = (320, 320)) -> Path:
@@ -81,10 +97,15 @@ def _raw_preview(source: Path) -> Image.Image | None:
 
 
 
-def index_folder(folder: str | Path, database: str | Path, recursive: bool = True, progress=None) -> list[dict[str, object]]:
+def index_folder(folder: str | Path, database: str | Path, recursive: bool = True, progress=None,
+                 import_xmp: bool = True) -> list[dict[str, object]]:
     """`progress`, when given, is called as `progress(index, total, info)` after each file --
     same shape as app.batch_release.process_files()'s own `progress` callback -- so the frontend's
-    "Scan Folder" button can drive an st.progress() bar the same way Run Batch already does."""
+    "Scan Folder" button can drive an st.progress() bar the same way Run Batch already does.
+
+    With `import_xmp`, a photo catalogued for the first time takes its rating, reject flag and
+    keywords from its XMP sidecar (app.xmp_sidecar), if it has one; photos already in the catalog
+    keep what was set here."""
     catalog = PhotoCatalog(database)
     paths = scan_folder(folder, recursive)
     total = len(paths)
@@ -92,7 +113,11 @@ def index_folder(folder: str | Path, database: str | Path, recursive: bool = Tru
     for index, path in enumerate(paths, 1):
         info = image_info(path)
         if "error" not in info:
-            catalog.ensure(path)
+            if catalog.ensure(path) and import_xmp:
+                sidecar = read_sidecar(path)
+                if sidecar is not None:
+                    tags = sidecar["tags"] + ([REJECTED_TAG] if sidecar["rejected"] else [])
+                    catalog.upsert(path, rating=sidecar["rating"], tags=tags)
             records.append(info)
         if progress:
             progress(index, total, info)

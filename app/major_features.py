@@ -231,11 +231,13 @@ class PhotoCatalog:
         with self._connect() as connection:
             connection.execute("INSERT INTO photos(path, rating, tags) VALUES (?, ?, ?) ON CONFLICT(path) DO UPDATE SET rating=excluded.rating, tags=excluded.tags", (str(path), rating, tag_text))
 
-    def ensure(self, path: str | Path) -> None:
+    def ensure(self, path: str | Path) -> bool:
         """Add `path` unrated if it isn't catalogued yet -- a rescan must not reset the ratings and
-        tags already given (index_folder() used upsert(), which overwrote them with 0 / none)."""
+        tags already given (index_folder() used upsert(), which overwrote them with 0 / none).
+        True when it was added just now."""
         with self._connect() as connection:
-            connection.execute("INSERT OR IGNORE INTO photos(path, rating, tags) VALUES (?, 0, '')", (str(path),))
+            cursor = connection.execute("INSERT OR IGNORE INTO photos(path, rating, tags) VALUES (?, 0, '')", (str(path),))
+            return cursor.rowcount > 0
 
     def get(self, path: str | Path) -> dict[str, object]:
         with self._connect() as connection:
