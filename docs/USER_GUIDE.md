@@ -298,8 +298,11 @@ radius, and an invert checkbox.
 
 - **Skin Smoothing** — 0 leaves skin untouched (the default); increase to smooth detected skin
   tones.
-- The tab also reports how many faces it detected in the photo (informational only — not required
-  for smoothing to work, which is tone-based rather than face-located).
+- **Only around detected faces** (on by default) — smooths skin tones only around the faces the
+  app finds, so a wall, wooden floor or sand in skin-like colours elsewhere in the photo stays
+  sharp. When no face is found (or face detection isn't available), every skin-toned area is
+  smoothed, as with the option off.
+- The tab also reports how many faces it detected in the photo.
 
 ## 12. Presets (✦ Presets & Library → ✦ Presets)
 

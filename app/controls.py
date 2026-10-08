@@ -171,6 +171,9 @@ CONTROLS: tuple[Control, ...] = (
     # --- Portrait ---------------------------------------------------------------------------------
     _slider("portrait_smoothing", "port-sm", "Skin Smoothing", 0.0, 1.0, 0.0, step=0.01, section="portrait", option=True,
             help="0 leaves skin untouched. Increase to smooth detected skin tones."),
+    _check("portrait_faces_only", "port-faces", "Only around detected faces", True, section="portrait", option=True,
+           help="Smooth skin tones only around the faces found in the photo, so walls, wood or sand in "
+                "skin-like colours stay sharp. With no face found, every skin-toned area is smoothed."),
     # --- Masks: the shared selection's target adjustments -------------------------------------------
     _slider("mask_target_exposure_ev", "m-tev", "Target Exposure (EV)", -5.0, 5.0, 0.0, step=0.05, section="mask_targets", option="mask_exposure_ev",
             help="Exposure change in stops, applied only inside the combined mask's selected area."),

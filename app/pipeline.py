@@ -27,7 +27,7 @@ from app.geometry import geometry_output_size
 from app.high_bit import attach, attached, decode_high_bit, to_image
 from app.image_processor import PhotoProcessor
 from app.layer_workspace import LayerWorkspace, WorkspaceLayer
-from app.portrait_tools import smooth_skin
+from app.portrait_tools import detect_faces, smooth_skin
 from app.presets import apply_preset
 from app.professional_color import ICC_TRANSFORM_ERRORS, normalize_to_srgb, srgb_icc_bytes
 from app.raw_import import is_raw_path
@@ -299,7 +299,12 @@ def run_pipeline(
 
     # Portrait
     if options.get("portrait_smoothing", 0.0) > 0:
-        processor.image = smooth_skin(processor.image, options["portrait_smoothing"], blur_radius=_SKIN_BLUR_RADIUS * scale)
+        # Faces are found on the image being edited (after geometry), so the boxes line up; with
+        # none found (or detection unavailable) every skin-toned pixel is smoothed, as before.
+        faces = detect_faces(processor.image) if options.get("portrait_faces_only", True) else None
+        processor.image = smooth_skin(
+            processor.image, options["portrait_smoothing"], blur_radius=_SKIN_BLUR_RADIUS * scale, faces=faces
+        )
 
     checkpoint()
     # Crop -- an explicit crop_box (full-resolution pixels) takes priority over a named aspect.

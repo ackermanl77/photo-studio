@@ -33,7 +33,7 @@ PINNED_WIDGET_KEYS = {
     "lens_perspective_v": "lens-persp-v", "lens_profile": "lens-profile",
     "lens_vignette_amount": "lens-vignette-amt", "lens_vignette_midpoint": "lens-vignette-mid",
     "mask_target_contrast_amount": "m-tcontrast", "mask_target_exposure_ev": "m-tev",
-    "mask_target_saturation_amount": "m-tsaturation", "portrait_smoothing": "port-sm",
+    "mask_target_saturation_amount": "m-tsaturation", "portrait_smoothing": "port-sm", "portrait_faces_only": "port-faces",
     "preset": "tone-preset", "removal_radius": "rm-radius", "rotate": "geo-rotate",
     "saturation_amount": "c-saturation", "shadows": "t-shad", "sharpen": "d-sharp",
     "straighten": "geo-straighten", "temperature": "c-temp", "texture": "d-text", "tint": "c-tint",
