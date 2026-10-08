@@ -69,6 +69,9 @@ def portrait_section(ctx) -> None:
     section_header("Face & Skin Retouching", "portrait")
     # 0 by default: skin smoothing is opt-in.
     ctx.values["portrait_smoothing"] = render_control("portrait_smoothing")
+    ctx.values["portrait_faces_only"] = render_control(
+        "portrait_faces_only", disabled=not ctx.values["portrait_smoothing"] or face_detection_backend() == "none"
+    )
     if face_detection_backend() == "none":
         st.caption("👤 Face detection is unavailable in this OpenCV build (see System Health).")
     elif tab_visible():

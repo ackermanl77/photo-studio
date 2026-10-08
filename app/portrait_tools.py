@@ -107,12 +107,38 @@ def skin_mask(image: Image.Image) -> Image.Image:
     return Image.fromarray(combined, mode="L")
 
 
-def smooth_skin(image: Image.Image, strength: float = 0.25, blur_radius: float = 2.0) -> Image.Image:
+# A face box covers brow to chin; the region skin smoothing may touch is an ellipse around it,
+# wider and taller (forehead, cheeks, jaw, neck), feathered over a fraction of the box size.
+FACE_REGION_SCALE = (1.5, 1.8)
+FACE_REGION_FEATHER = 0.2
+
+
+def face_region_mask(size: tuple[int, int], boxes) -> Image.Image:
+    """An "L" mask, 255 inside a feathered ellipse around each face box (x, y, width, height)."""
+    width, height = size
+    mask = np.zeros((height, width), dtype=np.uint8)
+    feather = 0.0
+    for x, y, box_w, box_h in boxes:
+        center = (int(round(x + box_w / 2)), int(round(y + box_h * 0.55)))  # a little low: the neck
+        axes = (max(1, int(round(box_w * FACE_REGION_SCALE[0] / 2))), max(1, int(round(box_h * FACE_REGION_SCALE[1] / 2))))
+        cv2.ellipse(mask, center, axes, 0, 0, 360, 255, thickness=-1)
+        feather = max(feather, FACE_REGION_FEATHER * max(box_w, box_h))
+    if feather > 0:
+        mask = cv2.GaussianBlur(mask, (0, 0), feather / 2)
+    return Image.fromarray(mask, mode="L")
+
+
+def smooth_skin(image: Image.Image, strength: float = 0.25, blur_radius: float = 2.0, faces=None) -> Image.Image:
     """`blur_radius` is in `image`'s own pixels -- app.pipeline scales it down for a reduced-size
-    interactive preview so the preview softens skin as much as the full-resolution export does."""
+    interactive preview so the preview softens skin as much as the full-resolution export does.
+    `faces` (boxes from detect_faces) limits the smoothing to skin around those faces, so walls,
+    wood and sand in skin-like colours elsewhere stay sharp; None or [] smooths every skin-toned
+    pixel, as before."""
     strength = max(0.0, min(1.0, float(strength)))
     source = np.asarray(image.convert("RGB"), dtype=np.float32)
     blurred = np.asarray(image.filter(ImageFilter.GaussianBlur(max(0.0, float(blur_radius)))), dtype=np.float32)
     mask = np.asarray(skin_mask(image), dtype=np.float32) / 255.0
+    if faces:
+        mask *= np.asarray(face_region_mask(image.size, faces), dtype=np.float32) / 255.0
     blend = mask[..., None] * strength
     return Image.fromarray(np.clip(source * (1.0 - blend) + blurred * blend, 0, 255).astype(np.uint8), mode="RGB")

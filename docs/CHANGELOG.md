@@ -36,7 +36,14 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
   stays exact: a subsampled "fast guided filter" would save another ~0.2 s but shift the base by
   up to ~1 level and make previews and exports differ slightly.
 
-Suite: 706 passed / 12 skipped.
+- **B6 remainder: face-aware skin smoothing.** Portrait's new "Only around detected faces"
+  (`portrait_faces_only`, on by default) multiplies the skin-tone mask by feathered ellipses
+  around the faces YuNet finds on the image being edited (`face_region_mask()`), so skin-coloured
+  backgrounds stay sharp; with no face found it falls back to the global mask, so photos without
+  faces (and the golden images) are unchanged. Tested on the public-domain portrait with a
+  skin-coloured patch beside it.
+
+Suite: 709 passed / 12 skipped.
 
 ## 2026-10-06 -- v0.2.0
 

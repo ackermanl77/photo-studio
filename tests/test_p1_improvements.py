@@ -600,3 +600,31 @@ def test_large_photos_preview_through_a_proxy_and_export_at_full_resolution(monk
     at.run(timeout=60)
     at.run(timeout=60)
     assert seen_sizes[-1] == (4000, 3000)  # the 1:1 zoom views render real pixels
+
+
+def test_skin_smoothing_can_be_limited_to_the_detected_faces():
+    """B6: with "Only around detected faces" (the default) a skin-coloured, textured patch far from
+    the face keeps its texture; without it -- or with no face in the photo -- it is smoothed."""
+    from app.pipeline import run_pipeline
+    from app.portrait_tools import detect_faces, face_detection_backend, face_region_mask
+
+    if face_detection_backend() == "none":
+        pytest.skip("no face detector in this OpenCV build")
+    portrait = Image.open(ASSETS / "portrait_public_domain.jpg").convert("RGB")
+    canvas = Image.new("RGB", (portrait.width * 2, portrait.height), (90, 90, 90))
+    canvas.paste(portrait, (0, 0))
+    rng = np.random.default_rng(3)
+    patch = np.clip(np.array([200, 150, 120]) + rng.normal(0, 8, (120, 120, 3)), 0, 255).astype(np.uint8)
+    patch_box = (portrait.width + 100, 150, portrait.width + 220, 270)  # well away from the face
+    canvas.paste(Image.fromarray(patch), patch_box[:2])
+    faces = detect_faces(canvas)
+    assert len(faces) == 1
+    assert np.asarray(face_region_mask(canvas.size, faces).crop(patch_box)).max() == 0
+
+    def patch_std(**options):
+        result = run_pipeline(canvas, dict({"portrait_smoothing": 1.0}, **options))
+        return float(np.asarray(result.crop(patch_box), dtype=np.float32).std(axis=(0, 1)).mean())
+
+    original = float(np.asarray(canvas.crop(patch_box), dtype=np.float32).std(axis=(0, 1)).mean())  # texture per channel
+    assert patch_std() == pytest.approx(original, abs=0.5)  # default: faces only
+    assert patch_std(portrait_faces_only=False) < original * 0.8
