@@ -7,6 +7,30 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-07 -- F13 feature gaps, code signing (still version 0.2.0, not tagged yet)
+
+- **Tone and colour (F13):** Whites/Blacks sliders, per-channel R/G/B tone curves, and a Black & White mixer.
+- **Repair → Heal (`app/heal.py`):** the best-matching nearby patch per spot, Poisson-blended with
+  `cv2.seamlessClone`; falls back to inpaint at the border or for huge regions (~0.7 s for three spots at
+  24 MP).
+- **Layer masks** from Masks selections.
+- **History list:** the 📌 popover lists the last 30 Undo steps, each named after what it changed
+  (`EditHistory.steps()`/`describe_change()`); a click jumps there through `_pending_restore`.
+- **Lens → "From the photo's lens" (`app/lens_lookup.py`):** EXIF camera/lens/focal/aperture looked up
+  in lensfun (optional `lensfunpy`, `requirements-raw.txt`, pinned in `constraints-cpu.txt`) and the Lens
+  sliders least-squares fitted to its correction fields (~3/4 of a zoom's distortion field). The
+  desktop build bundles lensfun's database and `--self-test` requires it (`lensfun_lenses`, 1304 lenses).
+- **R2:** System Health shows the logs folder and opens it. **T5:** `.github/workflows/perf.yml` runs the
+  24 MP budgets on Windows weekly and on demand.
+- **Code signing:** `build_release.ps1 -Sign` takes the thumbprint from `-CertificateThumbprint` or
+  `CODESIGN_THUMBPRINT`, checks the certificate and finds signtool before the build, signs
+  `PhotoStudio.exe` with an explicit thumbprint and timestamp (`CODESIGN_TIMESTAMP_URL`, default DigiCert),
+  and with `-Installer` passes Inno Setup a `codesign` tool so `PhotoStudio.iss` signs the installer and its
+  uninstaller. Verified with a self-signed test certificate: a real `-Installer -Sign` build signed and
+  timestamped the exe, the uninstaller and the installer.
+
+Suite: 706 passed / 12 skipped.
+
 ## 2026-10-06 -- v0.2.0
 
 Release of everything below since v0.1.0 (2026-09-17), on Streamlit 1.65 and, for the GPU pack,
