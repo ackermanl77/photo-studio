@@ -113,7 +113,7 @@ python -m pytest -q -n auto           # parallel (pytest-xdist, in requirements-
 python -m pytest -q -m "not slow"     # skip the AppTest-driven frontend tests
 ```
 
-Run this yourself before trusting a pass count; the last recorded run is in `docs/PROJECT_STATUS.md` ("Verification": 639 passed, 11 skipped on 2026-10-03).
+Run this yourself before trusting a pass count; the last recorded run is in `docs/PROJECT_STATUS.md` ("Verification": 706 passed, 12 skipped on 2026-10-07).
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the same `compileall` + `pytest -n auto` on every push and pull request on Windows and Ubuntu with Python 3.12 and 3.14 (installing `requirements-dev.txt`), plus a job that installs `requirements-raw.txt` and decodes a real (generated) DNG. `requirements-desktop.txt` (pywebview/PyInstaller) is build-only. The test images are generated in code (`tests/synthetic_assets.py`); the only binary fixtures are `tests/assets/portrait_public_domain.jpg` and the golden images in `tests/golden/`.
 

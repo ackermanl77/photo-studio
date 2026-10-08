@@ -104,6 +104,14 @@ and desktop/Start-menu shortcuts, and adds a "GPU pack" component when `-GpuPack
 uninstaller asks whether to delete `%LOCALAPPDATA%\PhotoStudio` (presets, catalog, logs, a GPU pack
 kept there); a silent uninstall (`/SUPPRESSMSGBOXES`) keeps it.
 
+**Code signing.** `build_release.ps1 -Sign` (thumbprint from `-CertificateThumbprint` or
+`CODESIGN_THUMBPRINT`) checks the certificate and finds signtool (PATH, else the newest Windows Kits 10)
+before the build, signs `PhotoStudio.exe` (SHA-256, RFC 3161 timestamp from `CODESIGN_TIMESTAMP_URL`,
+default DigiCert), and with `-Installer` passes Inno Setup a `codesign` tool: `PhotoStudio.iss` turns on
+`SignTool`/`SignedUninstaller` under `#ifdef Sign`, so the installer and its uninstaller are signed too.
+Checked on 2026-10-07 with a self-signed test certificate (all three signed and timestamped). Releases
+aren't signed with a trusted certificate yet, so SmartScreen still warns; `release.yml` doesn't sign.
+
 ## Verification
 
 Run `python -m compileall -q app` and `python -m pytest -q -n auto` (or without `-n auto`) yourself
@@ -111,10 +119,10 @@ before relying on a pass count (`-m "not slow"` skips the AppTest-driven tests; 
 python -m pytest -m perf` runs the 24 MP budgets). CI (`.github/workflows/ci.yml`) runs the same on
 Windows and Ubuntu with Python 3.12 and 3.14, plus a `raw-decode` job with `requirements-raw.txt`.
 
-Last run 2026-10-03 on Windows 11 / Python 3.14.7 with the dev `.venv`'s packages: `compileall` clean;
-`pytest -q` **639 passed, 11 skipped** in 174 s (serially). The 11 skips are by design: nine
-photo-specific or UI-only controls in `tests/test_parity_golden.py` and the two opt-in
-`PHOTO_PERF_TESTS` budgets. That venv has CUDA torch 2.14 and Real-ESRGAN, so the GPU-export and
+Last run 2026-10-07 on Windows 11 / Python 3.14.7 with the dev `.venv`'s packages: `compileall` clean;
+`pytest -q -n auto` **706 passed, 12 skipped** in 23 s (639/11 on 2026-10-03). The 12 skips are by
+design: nine photo-specific or UI-only controls in `tests/test_parity_golden.py`, the two opt-in
+`PHOTO_PERF_TESTS` budgets, and the no-file-manager fallback of "Open logs folder" (Windows always has one). That venv has CUDA torch 2.14 and Real-ESRGAN, so the GPU-export and
 AI Upscale tests ran; without torch the ones that need it skip (CI).
 
 Release checks last run on 2026-10-01 (Windows 11, RTX 5080): `build_release.ps1` built both profiles
@@ -125,8 +133,12 @@ download (same SHA-256, Microsoft-signed). The packaged exe was launched headles
 ports bound to 127.0.0.1, `/process` returns 401 without the token or with a wrong one and 200 with it,
 the window uses the bundled `WebView2Runtime`, and a second launch exits in under a second without
 starting servers. The startup-failure dialog was checked by reading the code only, not by triggering it.
-Real CUDA Real-ESRGAN with 12 forced tiles matched an untiled run (PSNR 59 dB, no seams, no NaNs). The
-GitHub workflows have not been run.
+Real CUDA Real-ESRGAN with 12 forced tiles matched an untiled run (PSNR 59 dB, no seams, no NaNs). CI (`ci.yml`) is green on `master` (2026-10-07); the tag-triggered `release.yml` hasn't run since
+`v0.1.0`, and `v0.2.0` waits until GitHub Actions artifact uploads work again (the account's free
+monthly artifact storage ran out on 2026-10-07 and resets on 1 November).
+
+2026-10-07: a `-SkipArchive -Installer -Sign` build with the lensfun database bundled passed `--self-test`
+and produced a signed exe, uninstaller and installer (self-signed test certificate).
 
 2026-10-02: the installer was built (`-Installer`) and installed/uninstalled silently, which found and
 fixed the per-user install, the silent-uninstall prompt and a leftover registry key (`c78612b`); its
