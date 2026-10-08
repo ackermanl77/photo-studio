@@ -24,6 +24,7 @@ from app.painted_masks import resolve_painted_mask
 from app.professional_tools import preview_image
 from app.ui.state import consume_new_commit, request_rerun, show_component
 from app.ui_editors import _paint_editor_html, _wand_picker_html
+from app.i18n import t, t_format, t_option
 
 SELECTION_KINDS = ["Luminance", "Color", "Horizontal gradient", "Vertical gradient", "Radial", "Painted", "Magic Wand"]
 
@@ -71,15 +72,15 @@ def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image,
     for layer in layers:
         layer.setdefault("id", uuid.uuid4().hex)  # selections saved before ids existed
 
-    with st.expander("➕ Add a selection", expanded=not layers):
-        new_kind = st.selectbox("Selection Type", SELECTION_KINDS, key=f"{key_prefix}-new-kind")
+    with st.expander(t("➕ Add a selection"), expanded=not layers):
+        new_kind = st.selectbox(t("Selection Type"), SELECTION_KINDS, key=f"{key_prefix}-new-kind", format_func=t_option)
         if new_kind == "Magic Wand":
-            new_tolerance = st.slider("Tolerance", 1, 150, 40, key=f"{key_prefix}-wand-tol")
-            new_contiguous = st.checkbox("Contiguous (connected region only)", value=True, key=f"{key_prefix}-wand-contig")
-            st.caption("Click a point on the photo below to select similar colors around it.")
+            new_tolerance = st.slider(t("Tolerance"), 1, 150, 40, key=f"{key_prefix}-wand-tol")
+            new_contiguous = st.checkbox(t("Contiguous (connected region only)"), value=True, key=f"{key_prefix}-wand-contig")
+            st.caption(t("Click a point on the photo below to select similar colors around it."))
             show_component(lambda: _wand_picker_html(preview_image(source, (480, 480)), key_prefix))
             with st.container(key=f"{key_prefix}-wand-hidden"):
-                pending_wand = st.text_area("Magic wand click", key=f"{key_prefix}-wand-data", label_visibility="collapsed")
+                pending_wand = st.text_area(t("Magic wand click"), key=f"{key_prefix}-wand-data", label_visibility="collapsed")
             if consume_new_commit(pending_wand, f"{key_prefix}-wand-committed"):
                 try:
                     click = json.loads(pending_wand)
@@ -91,10 +92,10 @@ def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image,
                     layers.append(_new_selection(f"Magic Wand {len(layers) + 1}", "Magic Wand", params))
                     request_rerun()
         elif new_kind == "Painted":
-            st.caption('Paint directly on the photo below — brush, radial, or gradient, plus an eraser. Click "Add to selections" inside the canvas when done.')
+            st.caption(t('Paint directly on the photo below — brush, radial, or gradient, plus an eraser. Click "Add to selections" inside the canvas when done.'))
             show_component(lambda: _paint_editor_html(preview_image(source, (480, 480)), key_prefix))
             with st.container(key=f"{key_prefix}-paint-hidden"):
-                pending_paint = st.text_area("Painted mask data", key=f"{key_prefix}-paint-data", label_visibility="collapsed")
+                pending_paint = st.text_area(t("Painted mask data"), key=f"{key_prefix}-paint-data", label_visibility="collapsed")
             # A fresh editor iframe starts blank, so only a genuine new painting produces new data;
             # clicking "Add to selections" again without drawing is a no-op, not a duplicate.
             if consume_new_commit(pending_paint, f"{key_prefix}-paint-committed"):
@@ -103,76 +104,76 @@ def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image,
         else:
             new_params: dict = {}
             if new_kind == "Luminance":
-                new_params["low"] = st.slider("Min Luma", 0, 255, 0, key=f"{key_prefix}-new-lmin")
-                new_params["high"] = st.slider("Max Luma", 0, 255, 255, key=f"{key_prefix}-new-lmax")
+                new_params["low"] = st.slider(t("Min Luma"), 0, 255, 0, key=f"{key_prefix}-new-lmin")
+                new_params["high"] = st.slider(t("Max Luma"), 0, 255, 255, key=f"{key_prefix}-new-lmax")
             elif new_kind == "Color":
-                new_color_hex = st.color_picker("Target Color", "#806450", key=f"{key_prefix}-new-color")
+                new_color_hex = st.color_picker(t("Target Color"), "#806450", key=f"{key_prefix}-new-color")
                 new_params["color"] = tuple(int(new_color_hex.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
-                new_params["tolerance"] = st.slider("Color Tolerance", 0, 255, 50, key=f"{key_prefix}-new-ctol")
+                new_params["tolerance"] = st.slider(t("Color Tolerance"), 0, 255, 50, key=f"{key_prefix}-new-ctol")
             elif new_kind == "Radial":
                 radial_c1, radial_c2 = st.columns(2)
-                new_params["center_x"] = radial_c1.slider("Center X", 0.0, 1.0, 0.5, 0.01, key=f"{key_prefix}-new-rcx")
-                new_params["center_y"] = radial_c2.slider("Center Y", 0.0, 1.0, 0.5, 0.01, key=f"{key_prefix}-new-rcy")
-                new_params["radius"] = radial_c1.slider("Radius", 0.05, 1.5, 0.5, 0.01, key=f"{key_prefix}-new-rr")
-                new_params["feather"] = radial_c2.slider("Feather", 0.01, 1.0, 0.25, 0.01, key=f"{key_prefix}-new-rf")
-            new_soften = st.slider("Soften edges (px)", 0, 40, 0, key=f"{key_prefix}-new-soften")
-            new_invert = st.checkbox("Invert selection", key=f"{key_prefix}-new-invert")
-            new_name = st.text_input("Layer name", value=f"{new_kind} {len(layers) + 1}", key=f"{key_prefix}-new-name")
-            if st.button("Add selection", key=f"{key_prefix}-add-btn"):
+                new_params["center_x"] = radial_c1.slider(t("Center X"), 0.0, 1.0, 0.5, 0.01, key=f"{key_prefix}-new-rcx")
+                new_params["center_y"] = radial_c2.slider(t("Center Y"), 0.0, 1.0, 0.5, 0.01, key=f"{key_prefix}-new-rcy")
+                new_params["radius"] = radial_c1.slider(t("Radius"), 0.05, 1.5, 0.5, 0.01, key=f"{key_prefix}-new-rr")
+                new_params["feather"] = radial_c2.slider(t("Feather"), 0.01, 1.0, 0.25, 0.01, key=f"{key_prefix}-new-rf")
+            new_soften = st.slider(t("Soften edges (px)"), 0, 40, 0, key=f"{key_prefix}-new-soften")
+            new_invert = st.checkbox(t("Invert selection"), key=f"{key_prefix}-new-invert")
+            new_name = st.text_input(t("Layer name"), value=f"{new_kind} {len(layers) + 1}", key=f"{key_prefix}-new-name")
+            if st.button(t("Add selection"), key=f"{key_prefix}-add-btn"):
                 layers.append(_new_selection(new_name.strip() or new_kind, new_kind, new_params, new_soften, new_invert))
                 request_rerun()
 
     for idx, layer in enumerate(layers):
         layer_id = layer["id"]
         status_icon = "✅" if layer["enabled"] else "⬜"
-        with st.expander(f"{status_icon} {layer['name']} — {layer['kind']}", expanded=False):
-            layer["name"] = st.text_input("Name", layer["name"], key=f"{key_prefix}-name-{layer_id}")
-            layer["enabled"] = st.checkbox("Enabled", layer["enabled"], key=f"{key_prefix}-en-{layer_id}")
-            layer["invert"] = st.checkbox("Invert", layer["invert"], key=f"{key_prefix}-inv-{layer_id}")
+        with st.expander(t("{0} {1} — {2}").format(t(status_icon), t(layer['name']), t(layer['kind'])), expanded=False):
+            layer["name"] = st.text_input(t("Name"), layer["name"], key=f"{key_prefix}-name-{layer_id}")
+            layer["enabled"] = st.checkbox(t("Enabled"), layer["enabled"], key=f"{key_prefix}-en-{layer_id}")
+            layer["invert"] = st.checkbox(t("Invert"), layer["invert"], key=f"{key_prefix}-inv-{layer_id}")
             if include_opacity:
-                layer["opacity"] = st.slider("Opacity", 0.0, 1.0, layer["opacity"], 0.05, key=f"{key_prefix}-op-{layer_id}")
-            layer["soften"] = st.slider("Soften edges (px)", 0, 40, layer.get("soften", 0), key=f"{key_prefix}-sf-{layer_id}")
+                layer["opacity"] = st.slider(t("Opacity"), 0.0, 1.0, layer["opacity"], 0.05, key=f"{key_prefix}-op-{layer_id}")
+            layer["soften"] = st.slider(t("Soften edges (px)"), 0, 40, layer.get("soften", 0), key=f"{key_prefix}-sf-{layer_id}")
             combine_choices = list(COMBINE_MODES)
             layer["combine"] = st.selectbox(
-                "Combine with the selections above", combine_choices, index=combine_choices.index(layer.get("combine", "add")),
-                format_func=lambda mode: {"add": "Add (union)", "subtract": "Subtract", "intersect": "Intersect"}[mode],
+                t("Combine with the selections above"), combine_choices, index=combine_choices.index(layer.get("combine", "add")),
+                format_func=t_format(lambda mode: {"add": "Add (union)", "subtract": "Subtract", "intersect": "Intersect"}[mode]),
                 key=f"{key_prefix}-comb-{layer_id}", disabled=idx == 0 or layer.get("adjust", False),
             )
             if layer["kind"] == "Radial":
                 params = layer["params"]
                 edit_c1, edit_c2 = st.columns(2)
-                params["center_x"] = edit_c1.slider("Center X", 0.0, 1.0, float(params.get("center_x", 0.5)), 0.01, key=f"{key_prefix}-rcx-{layer_id}")
-                params["center_y"] = edit_c2.slider("Center Y", 0.0, 1.0, float(params.get("center_y", 0.5)), 0.01, key=f"{key_prefix}-rcy-{layer_id}")
-                params["radius"] = edit_c1.slider("Radius", 0.05, 1.5, float(params.get("radius", 0.5)), 0.01, key=f"{key_prefix}-rr-{layer_id}")
-                params["feather"] = edit_c2.slider("Feather", 0.01, 1.0, float(params.get("feather", 0.25)), 0.01, key=f"{key_prefix}-rf-{layer_id}")
+                params["center_x"] = edit_c1.slider(t("Center X"), 0.0, 1.0, float(params.get("center_x", 0.5)), 0.01, key=f"{key_prefix}-rcx-{layer_id}")
+                params["center_y"] = edit_c2.slider(t("Center Y"), 0.0, 1.0, float(params.get("center_y", 0.5)), 0.01, key=f"{key_prefix}-rcy-{layer_id}")
+                params["radius"] = edit_c1.slider(t("Radius"), 0.05, 1.5, float(params.get("radius", 0.5)), 0.01, key=f"{key_prefix}-rr-{layer_id}")
+                params["feather"] = edit_c2.slider(t("Feather"), 0.01, 1.0, float(params.get("feather", 0.25)), 0.01, key=f"{key_prefix}-rf-{layer_id}")
             if include_opacity:
                 # Per-selection adjustment set (B8): applied on its own with these values instead of
                 # joining the combined mask the Target sliders drive.
-                layer["adjust"] = st.checkbox("Own adjustments", layer.get("adjust", False), key=f"{key_prefix}-own-{layer_id}")
+                layer["adjust"] = st.checkbox(t("Own adjustments"), layer.get("adjust", False), key=f"{key_prefix}-own-{layer_id}")
                 if layer["adjust"]:
                     adjustments = layer.setdefault("adjustments", {})
                     own_c1, own_c2 = st.columns(2)
-                    adjustments["exposure_ev"] = own_c1.slider("Exposure (EV)", -5.0, 5.0, float(adjustments.get("exposure_ev", 0.0)), 0.05, key=f"{key_prefix}-own-ev-{layer_id}")
-                    adjustments["contrast"] = own_c2.slider("Contrast", -100, 100, int(adjustments.get("contrast", 0)), key=f"{key_prefix}-own-ct-{layer_id}")
-                    adjustments["saturation"] = own_c1.slider("Saturation", -100, 100, int(adjustments.get("saturation", 0)), key=f"{key_prefix}-own-sat-{layer_id}")
-                    adjustments["clarity"] = own_c2.slider("Clarity", -100, 100, int(adjustments.get("clarity", 0)), key=f"{key_prefix}-own-cl-{layer_id}")
-                    adjustments["temperature"] = own_c1.slider("Temperature", -100, 100, int(adjustments.get("temperature", 0)), key=f"{key_prefix}-own-tmp-{layer_id}")
-                    adjustments["tint"] = own_c2.slider("Tint", -100, 100, int(adjustments.get("tint", 0)), key=f"{key_prefix}-own-tnt-{layer_id}")
+                    adjustments["exposure_ev"] = own_c1.slider(t("Exposure (EV)"), -5.0, 5.0, float(adjustments.get("exposure_ev", 0.0)), 0.05, key=f"{key_prefix}-own-ev-{layer_id}")
+                    adjustments["contrast"] = own_c2.slider(t("Contrast"), -100, 100, int(adjustments.get("contrast", 0)), key=f"{key_prefix}-own-ct-{layer_id}")
+                    adjustments["saturation"] = own_c1.slider(t("Saturation"), -100, 100, int(adjustments.get("saturation", 0)), key=f"{key_prefix}-own-sat-{layer_id}")
+                    adjustments["clarity"] = own_c2.slider(t("Clarity"), -100, 100, int(adjustments.get("clarity", 0)), key=f"{key_prefix}-own-cl-{layer_id}")
+                    adjustments["temperature"] = own_c1.slider(t("Temperature"), -100, 100, int(adjustments.get("temperature", 0)), key=f"{key_prefix}-own-tmp-{layer_id}")
+                    adjustments["tint"] = own_c2.slider(t("Tint"), -100, 100, int(adjustments.get("tint", 0)), key=f"{key_prefix}-own-tnt-{layer_id}")
             if layer["kind"] == "Painted":
                 # The one kind whose shape can't be re-derived from numeric params -- a second pass
                 # at the canvas needs its own toggle.
-                if st.checkbox("🎨 Edit Painting", key=f"{key_prefix}-editpaint-toggle-{layer_id}"):
+                if st.checkbox(t("🎨 Edit Painting"), key=f"{key_prefix}-editpaint-toggle-{layer_id}"):
                     edit_prefix = f"{key_prefix}-ep-{layer_id}"
                     show_component(lambda: _paint_editor_html(
                         preview_image(source, (480, 480)), edit_prefix,
                         preload_mask_b64=resolve_painted_mask(layer["params"]), commit_label="💾 Update Painting",
                     ))
                     with st.container(key=f"{edit_prefix}-paint-hidden"):
-                        pending_edit = st.text_area("Edited painted mask data", key=f"{edit_prefix}-paint-data", label_visibility="collapsed")
+                        pending_edit = st.text_area(t("Edited painted mask data"), key=f"{edit_prefix}-paint-data", label_visibility="collapsed")
                     if consume_new_commit(pending_edit, f"{edit_prefix}-paint-committed"):
                         layer["params"] = {"mask_ref": intern_painted_mask(pending_edit)}
                         request_rerun()
-            if st.button("🗑️ Remove", key=f"{key_prefix}-rm-{layer_id}"):
+            if st.button(t("🗑️ Remove"), key=f"{key_prefix}-rm-{layer_id}"):
                 layers.pop(idx)
                 request_rerun()
                 break  # never keep iterating a list just mutated (see the module docstring)

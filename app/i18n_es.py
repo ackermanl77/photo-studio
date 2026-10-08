@@ -1,0 +1,705 @@
+"""Spanish interface text (see app/i18n.py): English source string -> Spanish.
+
+Keys are the exact English strings the UI passes to t(), including emoji and "{0}" placeholders
+(which the translation keeps, in any order). A missing entry simply shows the English text.
+"""
+
+ES = {
+    # --- Page, opening a photo, language -----------------------------------------------------------
+    "⚡ Professional Photo Workstation": "⚡ Estación profesional de fotografía",
+    "🌐 Language": "🌐 Idioma",
+    "Interface language. Remembered for the next launch.": "Idioma de la interfaz. Se recuerda para el próximo inicio.",
+    "Open Image": "Abrir imagen",
+    "Open image (JPG, PNG, WEBP, TIFF, or Camera RAW). Original is never overwritten.":
+        "Abrir imagen (JPG, PNG, WEBP, TIFF o RAW de cámara). El original nunca se sobrescribe.",
+    "📂 Open any JPG, PNG, WEBP, TIFF, or camera RAW file.": "📂 Abre cualquier archivo JPG, PNG, WEBP, TIFF o RAW de cámara.",
+    "📁 Open a saved project (.photoproject)": "📁 Abrir un proyecto guardado (.photoproject)",
+    "Project file": "Archivo de proyecto",
+    "👆 Upload an image above, load a saved project, or click \"Try a sample photo\" to open the editing workspace.":
+        "👆 Sube una imagen arriba, carga un proyecto guardado o haz clic en \"Probar con una foto de ejemplo\" para abrir el espacio de edición.",
+    "🖼️ Try a sample photo": "🖼️ Probar con una foto de ejemplo",
+    "No photo of your own handy? Load a small bundled placeholder image so you can explore every tool right away.":
+        "¿No tienes una foto a mano? Carga una pequeña imagen de ejemplo incluida para explorar todas las herramientas de inmediato.",
+    "Load Project": "Cargar proyecto",
+    '<div class="panel-header-title">🛠️ Tool Workspace</div>': '<div class="panel-header-title">🛠️ Herramientas</div>',
+    "⚠️ '{0}' is {1:.0f} MB -- over this app's {2} MB limit per photo.":
+        "⚠️ '{0}' ocupa {1:.0f} MB, más que el límite de {2} MB por foto de esta aplicación.",
+    "⚠️ Couldn't open '{0}' — the file may be corrupted, incomplete, or not a supported image format.":
+        "⚠️ No se pudo abrir '{0}': el archivo puede estar dañado, incompleto o no ser un formato de imagen compatible.",
+    "⚠️ Could not open this project file: {0}": "⚠️ No se pudo abrir este archivo de proyecto: {0}",
+
+    # --- Tabs -------------------------------------------------------------------------------------
+    "☼ Basic": "☼ Básico",
+    "🎨 Curves & Color": "🎨 Curvas y color",
+    "🔬 Detail": "🔬 Detalle",
+    "⛶ Geometry": "⛶ Geometría",
+    "◉ Local": "◉ Local",
+    "◈ Layers": "◈ Capas",
+    "✨ Effects": "✨ Efectos",
+    "⬇ Export": "⬇ Exportar",
+    "✦ Presets & Library": "✦ Ajustes preestablecidos y biblioteca",
+    "◉ Masks": "◉ Máscaras",
+    "🩹 Repair": "🩹 Reparar",
+    "◌ Portrait": "◌ Retrato",
+    "✦ Presets": "✦ Ajustes preestablecidos",
+    "☰ Library & Batch": "☰ Biblioteca y lotes",
+
+    # --- Sections and shared words ------------------------------------------------------------------
+    "modified": "modificado",
+    "↺ Reset {0}": "↺ Restablecer {0}",
+    "Reset the {0} controls to their defaults": "Restablecer los controles de {0} a sus valores predeterminados",
+    "Tone": "Tono",
+    "Color": "Color",
+    "Presence": "Presencia",
+    "Detail": "Detalle",
+    "Effects": "Efectos",
+    "Layers": "Capas",
+    "Lens": "Objetivo",
+    "Crop": "Recorte",
+    "Rotate & Straighten": "Rotar y enderezar",
+    "Lens Corrections": "Correcciones de objetivo",
+    "Crop / Aspect Ratio": "Recorte / relación de aspecto",
+    "Noise Reduction & Sharpening": "Reducción de ruido y enfoque",
+    "📈 RGB Tone Curve": "📈 Curva de tonos RGB",
+    "Color Mixer (HSL)": "Mezclador de color (HSL)",
+    "Black & White": "Blanco y negro",
+    "Mask Layers": "Capas de máscara",
+    "Mask targets": "Ajustes de la máscara",
+    "Remove Objects": "Eliminar objetos",
+    "Face & Skin Retouching": "Retoque de rostro y piel",
+    "Export settings": "Ajustes de exportación",
+
+    # --- Controls (app/controls.py) ----------------------------------------------------------------
+    "Preset Look": "Estilo preestablecido",
+    "None": "Ninguno",
+    "Exposure (EV)": "Exposición (EV)",
+    "In stops of light: +1 doubles the light, -1 halves it. Bright highlights roll off smoothly instead of clipping.":
+        "En pasos de luz: +1 duplica la luz, -1 la reduce a la mitad. Las altas luces se suavizan en lugar de recortarse.",
+    "Contrast": "Contraste",
+    "Spreads tones apart around midtone gray -- positive makes shadows darker and highlights brighter, negative flattens them.":
+        "Separa los tonos alrededor del gris medio: positivo oscurece las sombras y aclara las altas luces; negativo los aplana.",
+    "Highlights": "Altas luces",
+    "Recovers or boosts the brightest parts of the image -- negative pulls blown highlights back, positive brightens them further.":
+        "Recupera o realza las partes más claras de la imagen: negativo recupera las altas luces quemadas, positivo las aclara aún más.",
+    "Shadows": "Sombras",
+    "Lifts or deepens the darkest parts of the image -- positive opens up shadow detail, negative deepens shadows.":
+        "Aclara u oscurece las partes más oscuras de la imagen: positivo revela detalle en las sombras, negativo las profundiza.",
+    "Whites": "Blancos",
+    "Sets the white point -- positive pushes the brightest tones toward pure white, negative pulls them down. Midtones barely move.":
+        "Fija el punto blanco: positivo lleva los tonos más claros hacia el blanco puro, negativo los baja. Los medios tonos apenas cambian.",
+    "Blacks": "Negros",
+    "Sets the black point -- negative deepens the darkest tones toward pure black, positive lifts them. Midtones barely move.":
+        "Fija el punto negro: negativo lleva los tonos más oscuros hacia el negro puro, positivo los aclara. Los medios tonos apenas cambian.",
+    "Midtones": "Medios tonos",
+    "Temperature (Cool/Warm)": "Temperatura (frío/cálido)",
+    "Shifts the overall white balance -- negative cools the image toward blue, positive warms it toward orange.":
+        "Cambia el balance de blancos general: negativo enfría la imagen hacia el azul, positivo la calienta hacia el naranja.",
+    "Tint (Green/Magenta)": "Matiz (verde/magenta)",
+    "Corrects a color cast along the green/magenta axis, independent of Temperature.":
+        "Corrige una dominante de color en el eje verde/magenta, independiente de la temperatura.",
+    "Saturation": "Saturación",
+    "Uniformly boosts or reduces color intensity across the whole image -- -100 is grayscale, 0 is unchanged.":
+        "Aumenta o reduce la intensidad del color por igual en toda la imagen: -100 es escala de grises, 0 no cambia nada.",
+    "Vibrance": "Intensidad",
+    "A smarter saturation boost -- protects skin tones and already-saturated colors, pushing washed-out ones harder instead.":
+        "Un aumento de saturación más inteligente: protege los tonos de piel y los colores ya saturados, y realza más los apagados.",
+    "Convert to Black & White": "Convertir a blanco y negro",
+    "Converts the photo to black and white. The sliders below brighten or darken the gray of each original colour.":
+        "Convierte la foto a blanco y negro. Los controles de abajo aclaran u oscurecen el gris de cada color original.",
+    "Enable RGB Curve": "Activar curva RGB",
+    "Texture": "Textura",
+    "Enhances or softens fine surface detail (skin pores, fabric, foliage) without affecting large tonal shapes.":
+        "Realza o suaviza el detalle fino de las superficies (poros, tela, follaje) sin afectar a las formas tonales grandes.",
+    "Clarity": "Claridad",
+    "Boosts or reduces midtone contrast at a larger scale than Texture -- adds a sense of punch/depth; negative gives a soft, dreamy look.":
+        "Aumenta o reduce el contraste de los medios tonos a mayor escala que Textura: añade fuerza y profundidad; negativo da un aspecto suave y onírico.",
+    "Dehaze": "Eliminar neblina",
+    "Reduces atmospheric haze (Dark Channel Prior, a classical algorithm -- not AI). Pushed too high, it can crush shadows or halo around strong edges.":
+        "Reduce la neblina atmosférica (Dark Channel Prior, un algoritmo clásico, no IA). Si se exagera, puede empastar las sombras o crear halos en los bordes marcados.",
+    "Denoise": "Reducir ruido",
+    "Smooths luminance noise/grain -- higher removes more noise but can soften fine detail.":
+        "Suaviza el ruido/grano de luminancia: un valor más alto elimina más ruido pero puede suavizar el detalle fino.",
+    "Color Noise": "Ruido de color",
+    "Independent chroma (color speckle) denoising strength, on top of Denoise's luminance/detail smoothing -- push higher than Denoise to clean up color blotches without softening detail as much. Has no effect while Denoise is 0.":
+        "Intensidad independiente de reducción de ruido cromático (motas de color), además del suavizado de luminancia de Reducir ruido: súbelo más que Reducir ruido para limpiar manchas de color sin suavizar tanto el detalle. No tiene efecto mientras Reducir ruido esté en 0.",
+    "Sharpen (Unsharp Mask)": "Enfocar (máscara de enfoque)",
+    "Increases edge contrast to make the image look crisper -- applied last in the Detail group, after Texture/Clarity/Denoise.":
+        "Aumenta el contraste de los bordes para que la imagen se vea más nítida; se aplica al final del grupo Detalle, después de Textura/Claridad/Reducir ruido.",
+    "Amount": "Cantidad",
+    "Negative darkens the corners; positive brightens them.": "Negativo oscurece las esquinas; positivo las aclara.",
+    "Midpoint": "Punto medio",
+    "Skin Smoothing": "Suavizado de piel",
+    "0 leaves skin untouched. Increase to smooth detected skin tones.": "0 deja la piel intacta. Súbelo para suavizar los tonos de piel detectados.",
+    "Only around detected faces": "Solo alrededor de los rostros detectados",
+    "Smooth skin tones only around the faces found in the photo, so walls, wood or sand in skin-like colours stay sharp. With no face found, every skin-toned area is smoothed.":
+        "Suaviza los tonos de piel solo alrededor de los rostros encontrados en la foto, para que paredes, madera o arena de colores parecidos a la piel sigan nítidos. Si no se encuentra ningún rostro, se suaviza toda zona con tono de piel.",
+    "Target Exposure (EV)": "Exposición de la máscara (EV)",
+    "Exposure change in stops, applied only inside the combined mask's selected area.":
+        "Cambio de exposición en pasos, aplicado solo dentro del área seleccionada por la máscara combinada.",
+    "Target Contrast": "Contraste de la máscara",
+    "Contrast adjustment applied only inside the combined mask's selected area.":
+        "Ajuste de contraste aplicado solo dentro del área seleccionada por la máscara combinada.",
+    "Target Saturation": "Saturación de la máscara",
+    "Saturation adjustment applied only inside the combined mask's selected area.":
+        "Ajuste de saturación aplicado solo dentro del área seleccionada por la máscara combinada.",
+    "Aspect Ratio": "Relación de aspecto",
+    "Original": "Original",
+    "Free-form": "Libre",
+    "Custom": "Personalizada",
+    "1:1 Square": "1:1 Cuadrado",
+    "4:5 Portrait": "4:5 Vertical",
+    "5:4 Landscape": "5:4 Horizontal",
+    "3:2 Landscape": "3:2 Horizontal",
+    "16:9 Widescreen": "16:9 Panorámico",
+    "9:16 Story": "9:16 Historia",
+    "Ratio width": "Ancho de la proporción",
+    "Ratio height": "Alto de la proporción",
+    "Swap orientation (portrait ↔ landscape)": "Intercambiar orientación (vertical ↔ horizontal)",
+    "Rotation": "Rotación",
+    "⇆ Flip horizontal": "⇆ Voltear horizontalmente",
+    "⇅ Flip vertical": "⇅ Voltear verticalmente",
+    "Straighten (°)": "Enderezar (°)",
+    "Rotates the photo by a small angle to level a tilted horizon -- positive turns it clockwise.":
+        "Gira la foto un ángulo pequeño para nivelar un horizonte inclinado; positivo la gira en sentido horario.",
+    "Constrain crop": "Restringir recorte",
+    "Crop to the largest rectangle that Lens corrections, keystone and straighten leave fully covered -- no black or smeared corners.":
+        "Recorta al mayor rectángulo que las correcciones de objetivo, la perspectiva y el enderezado dejan totalmente cubierto, sin esquinas negras ni estiradas.",
+    "Repair Softness": "Suavidad de la reparación",
+    "How far the repair blends into the surrounding area -- higher softens a wider edge.":
+        "Cuánto se funde la reparación con la zona que la rodea: un valor más alto suaviza un borde más ancho.",
+    "Repair Method": "Método de reparación",
+    "Fill paints the area over from its edges (best for wires, small objects on smooth areas). Heal copies the best-matching nearby patch and blends it in, keeping real texture (best for spots and blemishes on skin, sand or grass).":
+        "Rellenar pinta el área a partir de sus bordes (ideal para cables u objetos pequeños sobre zonas lisas). Corregir copia el parche cercano más parecido y lo funde, conservando la textura real (ideal para manchas e imperfecciones en piel, arena o césped).",
+    "Fill": "Rellenar",
+    "Heal": "Corregir",
+    "Lens Profile": "Perfil de objetivo",
+    "Distortion": "Distorsión",
+    "Negative corrects barrel distortion (straight lines bowing outward); positive corrects pincushion (bowing inward).":
+        "Negativo corrige la distorsión de barril (líneas rectas curvadas hacia fuera); positivo corrige la de cojín (curvadas hacia dentro).",
+    "Vignette Amount": "Cantidad de viñeta",
+    "Negative darkens the corners (adds a vignette); positive brightens them (removes one).":
+        "Negativo oscurece las esquinas (añade viñeta); positivo las aclara (la elimina).",
+    "Vignette Midpoint": "Punto medio de la viñeta",
+    "How far from center the vignette effect starts -- higher concentrates it closer to the corners.":
+        "A qué distancia del centro empieza la viñeta: un valor más alto la concentra cerca de las esquinas.",
+    "Chromatic Aberration": "Aberración cromática",
+    "Corrects red/cyan and blue/yellow fringing near high-contrast edges.":
+        "Corrige los halos rojo/cian y azul/amarillo cerca de los bordes de alto contraste.",
+    "Vertical Keystone": "Perspectiva vertical",
+    "Corrects converging vertical lines (e.g. a building shot from below) -- positive narrows the top edge, negative narrows the bottom.":
+        "Corrige líneas verticales convergentes (p. ej. un edificio fotografiado desde abajo): positivo estrecha el borde superior, negativo el inferior.",
+    "Horizontal Keystone": "Perspectiva horizontal",
+    "Corrects converging horizontal lines (e.g. a wall shot at an angle) -- positive narrows the left edge, negative narrows the right.":
+        "Corrige líneas horizontales convergentes (p. ej. una pared fotografiada en ángulo): positivo estrecha el borde izquierdo, negativo el derecho.",
+    "Hue": "Tono",
+    "Intensity": "Intensidad",
+    "Balance": "Equilibrio",
+    "Shifts where shadows end and highlights begin -- negative gives shadows more of the tonal range, positive gives highlights more.":
+        "Desplaza dónde terminan las sombras y empiezan las altas luces: negativo da más rango tonal a las sombras, positivo a las altas luces.",
+    "Luminance": "Luminancia",
+
+    # --- Colours, bands, channels ------------------------------------------------------------------
+    "Red": "Rojo",
+    "Orange": "Naranja",
+    "Yellow": "Amarillo",
+    "Green": "Verde",
+    "Aqua": "Aguamarina",
+    "Blue": "Azul",
+    "Purple": "Púrpura",
+    "Magenta": "Magenta",
+    "Luma": "Luma",
+    "RGB": "RGB",
+
+    # --- Lens profiles, grids, positions, export profiles ------------------------------------------
+    "Wide-angle prime (heavy barrel)": "Gran angular fijo (barril fuerte)",
+    "Standard zoom (mild barrel)": "Zoom estándar (barril leve)",
+    "Telephoto zoom (mild pincushion)": "Teleobjetivo zoom (cojín leve)",
+    "Fisheye": "Ojo de pez",
+    "Rule of Thirds": "Regla de los tercios",
+    "Grid 4x4": "Cuadrícula 4x4",
+    "Golden Ratio": "Proporción áurea",
+    "Web": "Web",
+    "Social": "Redes sociales",
+    "Print": "Impresión",
+    "Archive": "Archivo",
+    "Top Left": "Arriba a la izquierda",
+    "Top Right": "Arriba a la derecha",
+    "Bottom Left": "Abajo a la izquierda",
+    "Bottom Right": "Abajo a la derecha",
+    "Center": "Centro",
+    "Screen": "Pantalla",
+    "Matte paper": "Papel mate",
+    "Glossy paper": "Papel brillante",
+
+    # --- Blend modes (Photoshop's Spanish names) ---------------------------------------------------
+    "Normal": "Normal",
+    "Darken": "Oscurecer",
+    "Multiply": "Multiplicar",
+    "Color Burn": "Subexponer color",
+    "Linear Burn": "Subexposición lineal",
+    "Darker Color": "Color más oscuro",
+    "Lighten": "Aclarar",
+    "Color Dodge": "Sobreexponer color",
+    "Linear Dodge (Add)": "Sobreexposición lineal (añadir)",
+    "Lighter Color": "Color más claro",
+    "Overlay": "Superponer",
+    "Soft Light": "Luz suave",
+    "Hard Light": "Luz fuerte",
+    "Vivid Light": "Luz intensa",
+    "Linear Light": "Luz lineal",
+    "Pin Light": "Luz focal",
+    "Hard Mix": "Mezcla definida",
+    "Difference": "Diferencia",
+    "Exclusion": "Exclusión",
+    "Subtract": "Restar",
+    "Divide": "Dividir",
+    "Luminosity": "Luminosidad",
+
+    # --- Canvas, history, snapshots, guides --------------------------------------------------------
+    "**History**": "**Historial**",
+    "🔍 1:1 / Fit": "🔍 1:1 / Ajustar",
+    "Toggle a true 1:1 view (Z)": "Alternar una vista real 1:1 (Z)",
+    "👁 Before / After": "👁 Antes / después",
+    "Show the original (B)": "Mostrar el original (B)",
+    "Toggle the composition grid (G)": "Alternar la cuadrícula de composición (G)",
+    "Original Untouched": "Original sin editar",
+    "Current Edited Image": "Imagen editada actual",
+    "〰️ **Waveform monitor**: an extra scope for checking exposure across the frame, next to the histogram above.":
+        "〰️ **Monitor de forma de onda**: un instrumento adicional para comprobar la exposición a lo ancho del encuadre, junto al histograma de arriba.",
+    "⚠️ Show clipping": "⚠️ Mostrar recorte",
+    "Highlights blocked shadows (blue) and blown highlights (red).": "Resalta las sombras empastadas (azul) y las altas luces quemadas (rojo).",
+    "History and Named Snapshots -- jump to any earlier step, or bookmark the current look under a name":
+        "Historial e instantáneas con nombre: vuelve a cualquier paso anterior o guarda el aspecto actual con un nombre",
+    "**Named Snapshots**": "**Instantáneas con nombre**",
+    "Bookmark the current look under a name and jump back to it any time -- unlike Undo/Redo, restoring a snapshot never discards it (or any other saved snapshot).":
+        "Guarda el aspecto actual con un nombre y vuelve a él cuando quieras; a diferencia de Deshacer/Rehacer, restaurar una instantánea nunca la descarta (ni a ninguna otra guardada).",
+    "Snapshot name": "Nombre de la instantánea",
+    "Name for the bookmark you're about to save.": "Nombre del marcador que vas a guardar.",
+    "📌 Save Snapshot": "📌 Guardar instantánea",
+    "No edits yet.": "Todavía no hay ediciones.",
+    "Undo (Ctrl+Z)": "Deshacer (Ctrl+Z)",
+    "Redo (Ctrl+Shift+Z)": "Rehacer (Ctrl+Mayús+Z)",
+    "Reset all adjustments to defaults": "Restablecer todos los ajustes a sus valores predeterminados",
+    "Zoom View": "Zoom",
+    "⇄ Split View": "⇄ Vista dividida",
+    "Drag to compare before/after": "Arrastra para comparar antes/después",
+    "👁️ Original": "👁️ Original",
+    "🧭 Guides & Grid": "🧭 Guías y cuadrícula",
+    "View-only -- never affects the exported image. The free-form Crop tool's corner handles snap to these lines.":
+        "Solo de visualización: nunca afecta a la imagen exportada. Las esquinas del recorte libre se ajustan a estas líneas.",
+    "Grid overlay": "Cuadrícula superpuesta",
+    "〰️ Show waveform monitor": "〰️ Mostrar monitor de forma de onda",
+    "Horizontal position vs. luminance/RGB intensity, like a video editor's waveform scope.":
+        "Posición horizontal frente a intensidad de luminancia/RGB, como el monitor de forma de onda de un editor de vídeo.",
+    "Waveform channels": "Canales de la forma de onda",
+    "No snapshots saved yet.": "Todavía no hay instantáneas guardadas.",
+    "↩️ Restore": "↩️ Restaurar",
+    "Restore snapshot '{0}'": "Restaurar la instantánea '{0}'",
+    "Delete snapshot '{0}'": "Eliminar la instantánea '{0}'",
+    "🔍 Fit": "🔍 Ajustar",
+    "Orientation": "Orientación",
+    "Horizontal": "Horizontal",
+    "Vertical": "Vertical",
+    "Position %": "Posición %",
+    "➕ Add": "➕ Añadir",
+    "Navigator click": "Clic en el navegador",
+    "Pan Horizontal": "Desplazamiento horizontal",
+    "Pan Vertical": "Desplazamiento vertical",
+    "Type a name before saving a snapshot": "Escribe un nombre antes de guardar una instantánea",
+    "{0} older step(s) -- reachable with Undo.": "{0} paso(s) anteriores, accesibles con Deshacer.",
+    '<div class="panel-header-title canvas-live-view" title="{0}">🖼️ Live View: <span>{1}</span></div>':
+        '<div class="panel-header-title canvas-live-view" title="{0}">🖼️ Vista en vivo: <span>{1}</span></div>',
+    "🗑️ Remove": "🗑️ Quitar",
+    "{0} -- {1}%, drag to pan": "{0}: {1}%, arrastra para desplazarte",
+    "Snapshot '{0}' saved": "Instantánea '{0}' guardada",
+    "Restored snapshot '{0}'": "Instantánea '{0}' restaurada",
+    "{0} guide at {1:.0f}%": "Guía {0} al {1:.0f}%",
+
+    # --- Export ------------------------------------------------------------------------------------
+    "Used by the 💾 Save button under the canvas (format and quality sit next to it).":
+        "Los usa el botón 💾 Guardar bajo el lienzo (el formato y la calidad están junto a él).",
+    "File name": "Nombre de archivo",
+    "Fields: {stem} (original name), {date}, {width}, {height}, {format}. The extension is added for you.":
+        "Campos: {stem} (nombre original), {date}, {width}, {height}, {format}. La extensión se añade automáticamente.",
+    "Save these settings as": "Guardar estos ajustes como",
+    "💾 Save preset": "💾 Guardar ajuste",
+    "**Project File**": "**Archivo de proyecto**",
+    "Save every adjustment (plus the source image and any layers) into one file you can reopen later.":
+        "Guarda todos los ajustes (además de la imagen original y las capas) en un solo archivo que podrás volver a abrir.",
+    "💾 Save Project (.photoproject)": "💾 Guardar proyecto (.photoproject)",
+    "Text, Shape and Path layers stay editable when the project is reopened.":
+        "Las capas de texto, forma y trazado siguen siendo editables al volver a abrir el proyecto.",
+    "Export preset": "Ajuste de exportación",
+    "Apply": "Aplicar",
+    "Delete this export preset": "Eliminar este ajuste de exportación",
+    "Resize (long edge)": "Redimensionar (lado largo)",
+    "Output sharpening": "Enfoque de salida",
+    "Applied after the resize, for where the image will be seen.": "Se aplica después de redimensionar, según dónde se verá la imagen.",
+    "Metadata": "Metadatos",
+    "EXIF from the original photo (camera, lens, capture time, copyright...). The color profile is always kept.":
+        "EXIF de la foto original (cámara, objetivo, fecha de captura, copyright...). El perfil de color siempre se conserva.",
+    "Remove GPS location": "Quitar la ubicación GPS",
+    "Keep all": "Conservar todo",
+    "Copyright & camera only": "Solo copyright y cámara",
+    "Strip all": "Quitar todo",
+    "8-bit": "8 bits",
+    "16-bit": "16 bits",
+    "0° clockwise": "0° en sentido horario",
+    "90° clockwise": "90° en sentido horario",
+    "180° clockwise": "180° en sentido horario",
+    "270° clockwise": "270° en sentido horario",
+    "Bit depth": "Profundidad de bits",
+    "16-bit (PNG/TIFF only) keeps smooth skies and gradients free of banding for further editing or print. Renders at full resolution when you click Save.":
+        "16 bits (solo PNG/TIFF) mantiene cielos y degradados suaves sin bandas para seguir editando o imprimir. Se renderiza a resolución completa al hacer clic en Guardar.",
+    "Use GPU for export resize/sharpen": "Usar la GPU para redimensionar/enfocar al exportar",
+    "Optional CUDA path for final resize and output sharpening. Needs the optional GPU pack or CUDA-enabled PyTorch; file encoding stays on the CPU. If CUDA is missing or fails, export falls back to the CPU.":
+        "Ruta CUDA opcional para el redimensionado final y el enfoque de salida. Requiere el paquete GPU opcional o PyTorch con CUDA; la codificación del archivo sigue en la CPU. Si falta CUDA o falla, la exportación usa la CPU.",
+    "AI Upscale (Real-ESRGAN)": "Ampliación con IA (Real-ESRGAN)",
+    "Neural super-resolution -- the one deliberate exception to this app's otherwise classical, CPU-only adjustments (see docs/PROJECT_STATUS.md). Runs on the processing backend (GPU when available, much slower on CPU) after every other edit, when you click Save.":
+        "Superresolución neuronal: la única excepción deliberada a los ajustes clásicos y solo de CPU de esta aplicación (ver docs/PROJECT_STATUS.md). Se ejecuta en el motor de procesamiento (en la GPU si está disponible; mucho más lento en la CPU) después de todas las demás ediciones, al hacer clic en Guardar.",
+    "Export preset name": "Nombre del ajuste de exportación",
+    "🏷️ Watermark": "🏷️ Marca de agua",
+    "Optional text stamp applied only to exported files, not the canvas preview.":
+        "Texto opcional que se estampa solo en los archivos exportados, no en la vista previa del lienzo.",
+    "Watermark text (blank = none)": "Texto de la marca de agua (vacío = ninguna)",
+    "📦 Export Multiple Sizes": "📦 Exportar varios tamaños",
+    "Sizes to include": "Tamaños a incluir",
+    "Web and Social carry no EXIF at all; this also strips the location from Print and Archive.":
+        "Web y Redes sociales no llevan EXIF; esto también quita la ubicación de Impresión y Archivo.",
+    "Prepare ZIP": "Preparar ZIP",
+    "Export Format": "Formato de exportación",
+    "Quality": "Calidad",
+    "💾 Save {0}": "💾 Guardar {0}",
+    "Original size": "Tamaño original",
+    "Off": "Desactivado",
+    "Type a name before saving an export preset": "Escribe un nombre antes de guardar un ajuste de exportación",
+    "Position": "Posición",
+    "Opacity %": "Opacidad %",
+    "Font size": "Tamaño de letra",
+    "⬇️ Download ZIP": "⬇️ Descargar ZIP",
+    "⚠️ This project would be about {0:.0f} MB -- over the {1} MB a project can be reopened with. Remove or shrink some image layers.":
+        "⚠️ Este proyecto ocuparía unos {0:.0f} MB, más de los {1} MB con los que se puede volver a abrir un proyecto. Quita o reduce algunas capas de imagen.",
+    "Export preset '{0}' saved": "Ajuste de exportación '{0}' guardado",
+    "Rendering at full resolution…": "Renderizando a resolución completa…",
+
+    # --- Layers ------------------------------------------------------------------------------------
+    "**Layer Styles**": "**Estilos de capa**",
+    "Drop Shadow": "Sombra paralela",
+    "Casts a soft shadow behind this layer's own silhouette, offset and blurred below.":
+        "Proyecta una sombra suave detrás de la silueta de esta capa, desplazada y desenfocada según los valores de abajo.",
+    "Outer Glow": "Resplandor exterior",
+    "Adds a soft halo of color radiating outward from this layer's silhouette.":
+        "Añade un halo suave de color que irradia hacia fuera desde la silueta de esta capa.",
+    "Stroke": "Trazo",
+    "Outlines this layer's silhouette with a solid-color border.": "Contornea la silueta de esta capa con un borde de color sólido.",
+    "Color Overlay": "Superposición de color",
+    "Tints this layer's visible pixels with a flat color, blended by the opacity below.":
+        "Tiñe los píxeles visibles de esta capa con un color plano, mezclado según la opacidad de abajo.",
+    "Closed Path": "Trazado cerrado",
+    "Layer mask": "Máscara de capa",
+    "Show this layer only where a selection from ◉ Local → ◉ Masks is. Build the selection there; it can be one that isn't used for adjustments.":
+        "Muestra esta capa solo donde hay una selección de ◉ Local → ◉ Máscaras. Crea la selección allí; puede ser una que no se use para ajustes.",
+    "Invert layer mask": "Invertir máscara de capa",
+    "Shadow Opacity": "Opacidad de la sombra",
+    "How dark/visible the shadow is, independent of the layer's own opacity.":
+        "Lo oscura/visible que es la sombra, independiente de la opacidad de la propia capa.",
+    "Pen path points": "Puntos del trazado de pluma",
+    "🗑️ Clear Points": "🗑️ Borrar puntos",
+    "➕ Add a layer": "➕ Añadir una capa",
+    "Layer type": "Tipo de capa",
+    "Image": "Imagen",
+    "Text": "Texto",
+    "Shape": "Forma",
+    "Pen": "Pluma",
+    "No layers yet — add one above.": "Todavía no hay capas: añade una arriba.",
+    "Listed bottom-to-top: the last layer here sits on top, same as the composite order.":
+        "Se listan de abajo arriba: la última capa queda encima, igual que en el orden de composición.",
+    "None (whole layer)": "Ninguna (toda la capa)",
+    "Selection: ": "Selección: ",
+    "Offset X": "Desplazamiento X",
+    "Horizontal shadow displacement in pixels -- negative shifts it left, positive right.":
+        "Desplazamiento horizontal de la sombra en píxeles: negativo la mueve a la izquierda, positivo a la derecha.",
+    "Offset Y": "Desplazamiento Y",
+    "Vertical shadow displacement in pixels -- negative shifts it up, positive down.":
+        "Desplazamiento vertical de la sombra en píxeles: negativo la mueve hacia arriba, positivo hacia abajo.",
+    "Blur": "Desenfoque",
+    "How soft the shadow's edge is -- 0 is a hard-edged silhouette, higher spreads it into a soft blur.":
+        "Lo suave que es el borde de la sombra: 0 es una silueta de borde duro, un valor más alto la difumina.",
+    "How far the glow spreads outward from the layer's edge.": "Hasta dónde se extiende el resplandor desde el borde de la capa.",
+    "Glow Opacity": "Opacidad del resplandor",
+    "How strong/visible the glow is.": "Lo intenso/visible que es el resplandor.",
+    "Width": "Ancho",
+    "Border thickness in pixels.": "Grosor del borde en píxeles.",
+    "Stroke Opacity": "Opacidad del trazo",
+    "How solid/visible the outline is.": "Lo sólido/visible que es el contorno.",
+    "Overlay Opacity": "Opacidad de la superposición",
+    "How strongly the color tints the layer -- 0 has no effect, 1 fully replaces its color.":
+        "Con qué fuerza tiñe el color la capa: 0 no tiene efecto, 1 reemplaza su color por completo.",
+    "Add Text Layer": "Añadir capa de texto",
+    "Add Shape Layer": "Añadir capa de forma",
+    "🎨 Content": "🎨 Contenido",
+    "✨ Styles": "✨ Estilos",
+    "⚙️ Settings": "⚙️ Ajustes",
+    "Name": "Nombre",
+    "Visible": "Visible",
+    "Opacity": "Opacidad",
+    "Blend Mode": "Modo de fusión",
+    "Click points on the photo below to trace a path, then \"Add Path Layer\" when done.":
+        "Haz clic en puntos de la foto de abajo para trazar un camino y luego en \"Añadir capa de trazado\" cuando termines.",
+    "➕ Add Path Layer": "➕ Añadir capa de trazado",
+    "Layer image": "Imagen de la capa",
+    "Alignment": "Alineación",
+    "⬆️ Up": "⬆️ Subir",
+    "⬇️ Down": "⬇️ Bajar",
+    "📄 Duplicate": "📄 Duplicar",
+    "Font size (% of short edge)": "Tamaño de letra (% del lado corto)",
+    "Relative to the photo, so the text looks the same at any resolution.":
+        "Relativo a la foto, para que el texto se vea igual a cualquier resolución.",
+    "Horizontal position (%)": "Posición horizontal (%)",
+    "Vertical position (%)": "Posición vertical (%)",
+    "Rectangle": "Rectángulo",
+    "Ellipse": "Elipse",
+    "Line": "Línea",
+    "Polygon": "Polígono",
+    "Star": "Estrella",
+    "Left": "Izquierda",
+    "Right": "Derecha",
+    "Width (%)": "Ancho (%)",
+    "Height (%)": "Alto (%)",
+    "Fill Color": "Color de relleno",
+    "Outline": "Contorno",
+    "Stretch to fill the photo": "Estirar para llenar la foto",
+    "Off: the image keeps its proportions and can be moved, scaled and rotated.":
+        "Desactivado: la imagen conserva sus proporciones y se puede mover, escalar y girar.",
+    "Sides": "Lados",
+    "Points": "Puntas",
+    "Thickness (px)": "Grosor (px)",
+    "Scale (%)": "Escala (%)",
+    "100 % fits the image inside the photo.": "100 % ajusta la imagen dentro de la foto.",
+    "⚠️ Couldn't read that layer image — it may be corrupted.": "⚠️ No se pudo leer esa imagen de capa: puede estar dañada.",
+    "Inner Radius": "Radio interior",
+    "Fill Opacity": "Opacidad del relleno",
+    "Outline Color": "Color del contorno",
+    "Outline Width": "Ancho del contorno",
+    "Stroke Color": "Color del trazo",
+    "Stroke Width": "Ancho del trazo",
+
+    # --- Rendering status --------------------------------------------------------------------------
+    "⚡ Fast preview -- a full-resolution render follows when you pause.":
+        "⚡ Vista previa rápida: al hacer una pausa se renderiza a resolución completa.",
+    "⏳ Rendering full resolution…": "⏳ Renderizando a resolución completa…",
+    "✨ Full-resolution view": "✨ Vista a resolución completa",
+    "⚡ Fast preview (the full-resolution render didn't finish; it is still used for Save).":
+        "⚡ Vista previa rápida (el renderizado a resolución completa no terminó; se sigue usando para Guardar).",
+
+    # --- Selections (Masks / Repair) ---------------------------------------------------------------
+    "Horizontal gradient": "Degradado horizontal",
+    "Vertical gradient": "Degradado vertical",
+    "Radial": "Radial",
+    "Painted": "Pintada",
+    "Magic Wand": "Varita mágica",
+    "➕ Add a selection": "➕ Añadir una selección",
+    "Selection Type": "Tipo de selección",
+    "Tolerance": "Tolerancia",
+    "Contiguous (connected region only)": "Contigua (solo la región conectada)",
+    "Click a point on the photo below to select similar colors around it.":
+        "Haz clic en un punto de la foto de abajo para seleccionar los colores parecidos a su alrededor.",
+    "Enabled": "Activada",
+    "Invert": "Invertir",
+    "Soften edges (px)": "Suavizar bordes (px)",
+    "Combine with the selections above": "Combinar con las selecciones de arriba",
+    "Magic wand click": "Clic de la varita mágica",
+    "Paint directly on the photo below — brush, radial, or gradient, plus an eraser. Click \"Add to selections\" inside the canvas when done.":
+        "Pinta directamente sobre la foto de abajo: pincel, radial o degradado, además de un borrador. Haz clic en \"Add to selections\" dentro del lienzo cuando termines.",
+    "Invert selection": "Invertir selección",
+    "Layer name": "Nombre de la capa",
+    "Add selection": "Añadir selección",
+    "Add (union)": "Sumar (unión)",
+    "Intersect": "Intersecar",
+    "Center X": "Centro X",
+    "Center Y": "Centro Y",
+    "Radius": "Radio",
+    "Feather": "Difuminar",
+    "Own adjustments": "Ajustes propios",
+    "🎨 Edit Painting": "🎨 Editar pintura",
+    "Min Luma": "Luma mínima",
+    "Max Luma": "Luma máxima",
+    "Temperature": "Temperatura",
+    "Tint": "Matiz",
+    "Target Color": "Color objetivo",
+    "Color Tolerance": "Tolerancia de color",
+
+    # --- Basic tab ---------------------------------------------------------------------------------
+    "✨ Auto Enhance": "✨ Mejora automática",
+    "Measure this photo and set exposure, black/white points, white balance and vibrance to suit it":
+        "Analiza esta foto y ajusta la exposición, los puntos negro/blanco, el balance de blancos y la intensidad para ella",
+    "🎞️ Preset Look": "🎞️ Estilo preestablecido",
+    "🎯 Pick White Balance": "🎯 Elegir balance de blancos",
+    "Click a spot in the photo that should be neutral gray or white -- Temperature and Tint above are set to whatever would neutralize it. A starting point to fine-tune from, not a guaranteed perfect result.":
+        "Haz clic en un punto de la foto que debería ser gris neutro o blanco: la Temperatura y el Matiz de arriba se ajustan para neutralizarlo. Es un punto de partida para afinar, no un resultado perfecto garantizado.",
+    "White balance click": "Clic de balance de blancos",
+    "Auto Enhance: {0}": "Mejora automática: {0}",
+    "this photo already looks balanced": "esta foto ya se ve equilibrada",
+    "exposure {0:+.2f} EV": "exposición {0:+.2f} EV",
+    "black/white points {0}/{1}": "puntos negro/blanco {0}/{1}",
+    "temperature {0:+d}, tint {1:+d}": "temperatura {0:+d}, matiz {1:+d}",
+    "vibrance +{0}": "intensidad +{0}",
+    "denoise": "reducción de ruido",
+
+    # --- Curves & Color tab ------------------------------------------------------------------------
+    "Adjust Hue, Saturation, and Luminance independently for each color band, like a professional editor's Color Mixer.":
+        "Ajusta el tono, la saturación y la luminancia de cada banda de color por separado, como el mezclador de color de un editor profesional.",
+    "Drag a point on the curve, or use the sliders for exact values. Red/Green/Blue curves shift one colour channel -- e.g. lift Blue in the shadows for a cool cast.":
+        "Arrastra un punto de la curva o usa los controles para valores exactos. Las curvas Rojo/Verde/Azul desplazan un solo canal de color; p. ej. sube el Azul en las sombras para un tono frío.",
+    "⚫ Black & White": "⚫ Blanco y negro",
+    "Brighten or darken the gray each original colour turns into -- e.g. darken Blue for a dramatic sky. Applies while the conversion is on.":
+        "Aclara u oscurece el gris en que se convierte cada color original; p. ej. oscurece el Azul para un cielo dramático. Se aplica mientras la conversión esté activada.",
+    "🎨 Color Grading (Split Toning)": "🎨 Gradación de color (virado dividido)",
+    "Tint shadows, midtones, and highlights toward independent colors — the same three-range color grading every professional editor offers, separate from the global Temperature/Tint.":
+        "Tiñe las sombras, los medios tonos y las altas luces hacia colores independientes: la misma gradación de color en tres rangos que ofrece todo editor profesional, separada de la Temperatura/Matiz global.",
+    "🎯 Soft Proof: Gamut Warning": "🎯 Prueba en pantalla: aviso de gama",
+    "Highlights, in magenta, pixels that get clipped when this app's own sRGB pipeline converts the photo's embedded color profile. Not a simulation of a specific printer/press profile -- there's no profile database bundled -- just where this app's own color management can't fully represent the source.":
+        "Resalta en magenta los píxeles que se recortan cuando el flujo sRGB de esta aplicación convierte el perfil de color incrustado de la foto. No simula un perfil de impresora o imprenta concreto (no se incluye ninguna base de datos de perfiles); solo muestra dónde la gestión de color de esta aplicación no puede representar el original por completo.",
+    "Show out-of-gamut pixels": "Mostrar píxeles fuera de gama",
+    "This photo has no embedded color profile to check against, so there's nothing to proof.":
+        "Esta foto no tiene un perfil de color incrustado con el que comparar, así que no hay nada que probar.",
+    "Could not read this photo's embedded color profile.": "No se pudo leer el perfil de color incrustado de esta foto.",
+
+    # --- Detail / Effects tabs ---------------------------------------------------------------------
+    "Texture, Clarity and Dehaze are in **☼ Basic → Presence**; output sharpening for a delivery size is in **⬇ Export**.":
+        "Textura, Claridad y Eliminar neblina están en **☼ Básico → Presencia**; el enfoque de salida para un tamaño de entrega está en **⬇ Exportar**.",
+    "Creative finishing touches applied to the final, already-cropped frame -- separate from the Lens corrections' vignette, which runs before Crop.":
+        "Retoques creativos finales aplicados al encuadre ya recortado, independientes de la viñeta de las correcciones de objetivo, que se aplica antes del recorte.",
+    "**Post-Crop Vignette**": "**Viñeta tras el recorte**",
+    "**Film Grain**": "**Grano de película**",
+
+    # --- Geometry tab ------------------------------------------------------------------------------
+    "⟲ Rotate left": "⟲ Girar a la izquierda",
+    "Rotate 90° counter-clockwise": "Girar 90° en sentido antihorario",
+    "⟳ Rotate right": "⟳ Girar a la derecha",
+    "Rotate 90° clockwise": "Girar 90° en sentido horario",
+    "Auto": "Automático",
+    "Detect the photo's dominant horizontal/vertical lines and level them":
+        "Detecta las líneas horizontales/verticales dominantes de la foto y las nivela",
+    "📷 **From the photo's lens** looks the camera and lens up in the lensfun database (from the photo's EXIF) and fits the sliders below to its calibration at this focal length and aperture.":
+        "📷 **Desde el objetivo de la foto** busca la cámara y el objetivo en la base de datos lensfun (a partir del EXIF de la foto) y ajusta los controles de abajo a su calibración para esta distancia focal y apertura.",
+    "The lens database (lensfunpy) isn't installed, so only the category starting points below are available.":
+        "La base de datos de objetivos (lensfunpy) no está instalada, así que solo están disponibles los puntos de partida por categoría de abajo.",
+    "📷 From the photo's lens": "📷 Desde el objetivo de la foto",
+    "Or start from a typical lens category, then fine-tune with the sliders below.":
+        "O parte de una categoría de objetivo típica y luego afina con los controles de abajo.",
+    "Loads this profile's starting values -- you can still adjust the sliders afterward.":
+        "Carga los valores iniciales de este perfil; después puedes seguir ajustando los controles.",
+    "Apply Profile Defaults": "Aplicar valores del perfil",
+    "**Perspective (Keystone)**": "**Perspectiva (trapecio)**",
+    "Not part of a lens profile -- this depends on the shooting angle, not the lens, so it isn't filled in by 'Apply Profile Defaults' above.":
+        "No forma parte de un perfil de objetivo: depende del ángulo de la toma, no del objetivo, así que 'Aplicar valores del perfil' no la rellena.",
+    "No dominant lines found to level": "No se encontraron líneas dominantes que nivelar",
+    "Free-form crop box": "Recuadro de recorte libre",
+    "Left (px)": "Izquierda (px)",
+    "Top (px)": "Arriba (px)",
+    "Width (px)": "Ancho (px)",
+    "Height (px)": "Alto (px)",
+    "Select a non-empty region.": "Selecciona una región que no esté vacía.",
+    "No crop applied — showing the full frame.": "Sin recorte: se muestra el encuadre completo.",
+    "Straighten set to {0:+.2f}°": "Enderezado ajustado a {0:+.2f}°",
+    "Center-cropping to {0}.": "Recortando al centro en {0}.",
+
+    # --- Layers tab --------------------------------------------------------------------------------
+    "Add any number of image, text, shape or pen-path layers, each with its own opacity, blend mode and styles -- composited on the processing backend when the image renders.":
+        "Añade tantas capas de imagen, texto, forma o trazado de pluma como quieras, cada una con su opacidad, modo de fusión y estilos; se componen en el motor de procesamiento al renderizar la imagen.",
+
+    # --- Presets & Library tab ---------------------------------------------------------------------
+    "**Preset Library**": "**Biblioteca de ajustes preestablecidos**",
+    "New Preset Name": "Nombre del nuevo ajuste",
+    "Save Current Look as Preset": "Guardar el aspecto actual como ajuste",
+    "**Export / Import Presets**": "**Exportar / importar ajustes**",
+    "Import presets (.json)": "Importar ajustes (.json)",
+    "↶ Undo / ↷ Redo and 📌 Named Snapshots are always available in the bar above the canvas; Save Project is in ⬇ Export.":
+        "↶ Deshacer / ↷ Rehacer y 📌 Instantáneas con nombre están siempre en la barra sobre el lienzo; Guardar proyecto está en ⬇ Exportar.",
+    "Tool": "Herramienta",
+    "Library Catalog": "Catálogo de la biblioteca",
+    "Batch Processor": "Procesamiento por lotes",
+    "System Health": "Estado del sistema",
+    "**Load a Preset**": "**Cargar un ajuste**",
+    "Preset to load": "Ajuste a cargar",
+    "📂 Apply": "📂 Aplicar",
+    "🗑️ Delete": "🗑️ Eliminar",
+    "⬇️ Export all presets": "⬇️ Exportar todos los ajustes",
+    "No saved presets to export yet.": "Todavía no hay ajustes guardados que exportar.",
+    "Import": "Importar",
+    "Folder": "Carpeta",
+    "Scan Folder": "Explorar carpeta",
+    "Search": "Buscar",
+    "Min Stars": "Estrellas mínimas",
+    "Move it aside and start fresh": "Apartarlo y empezar de nuevo",
+    "Saved: {0}": "Guardado: {0}",
+    "Type a name before saving a preset": "Escribe un nombre antes de guardar un ajuste",
+    "No photos match this search / star filter.": "Ninguna foto coincide con esta búsqueda / filtro de estrellas.",
+    "✏️ Edit opens the photo in the editor with the current adjustments kept (↺ resets them).":
+        "✏️ Editar abre la foto en el editor conservando los ajustes actuales (↺ los restablece).",
+    "**Rate & Flag**": "**Valorar y marcar**",
+    "Keyboard: 1-5 rate, 0 clears, X toggles reject, ←/→ move Prev/Next.":
+        "Teclado: 1-5 valora, 0 borra, X alterna rechazada, ←/→ anterior/siguiente.",
+    " — 🚫 rejected": " — 🚫 rechazada",
+    "Also write ratings and tags to XMP sidecars": "Escribir también valoraciones y etiquetas en archivos XMP",
+    "Saves each rating, reject flag and tag change in a .xmp file next to the photo, which Lightroom, Capture One, Bridge and darktable read. Existing sidecars keep everything else they hold. Ratings already in sidecars are always read when a folder is first scanned.":
+        "Guarda cada valoración, marca de rechazo y cambio de etiquetas en un archivo .xmp junto a la foto, que leen Lightroom, Capture One, Bridge y darktable. Los archivos XMP existentes conservan todo lo demás que contienen. Las valoraciones que ya estén en ellos siempre se leen la primera vez que se explora una carpeta.",
+    "Batch Files": "Archivos del lote",
+    "Profile": "Perfil",
+    "Use GPU for profile resizing": "Usar la GPU para redimensionar según el perfil",
+    "Optional CUDA resize for Web/Social output profiles. Needs CUDA-enabled PyTorch; if unavailable or if CUDA fails, the export falls back to CPU.":
+        "Redimensionado CUDA opcional para los perfiles de salida Web/Redes sociales. Requiere PyTorch con CUDA; si no está disponible o falla, la exportación usa la CPU.",
+    "Preset": "Ajuste preestablecido",
+    "A saved custom preset applies its full recipe (tone/color/detail/lens) to every photo in the batch -- the same thing Lightroom calls syncing develop settings across a shoot.":
+        "Un ajuste personalizado guardado aplica su receta completa (tono/color/detalle/objetivo) a cada foto del lote, lo que Lightroom llama sincronizar los ajustes de revelado de una sesión.",
+    "⏹ Stop": "⏹ Detener",
+    "Stop the running batch": "Detener el lote en curso",
+    "📂 Open logs folder": "📂 Abrir carpeta de registros",
+    "Show the app's log files (useful to attach to a bug report)":
+        "Muestra los archivos de registro de la aplicación (útiles para adjuntar a un informe de error)",
+    "No new presets to import — names already exist": "No hay ajustes nuevos que importar: los nombres ya existen",
+    "✏️ Edit this photo": "✏️ Editar esta foto",
+    "⬅ Prev": "⬅ Anterior",
+    "Next ➡": "Siguiente ➡",
+    "Rating (keys 1-5, 0 to clear, X to reject, ←/→ to move)": "Valoración (teclas 1-5, 0 para borrar, X para rechazar, ←/→ para moverse)",
+    "Clear rating": "Borrar valoración",
+    "Tags (comma-separated)": "Etiquetas (separadas por comas)",
+    "Save tags": "Guardar etiquetas",
+    "Run Batch": "Ejecutar lote",
+    "Download ZIP": "Descargar ZIP",
+    "⚠️ The saved presets file can't be read: `{0}`": "⚠️ No se puede leer el archivo de ajustes guardados: `{0}`",
+    "Applied preset '{0}'": "Ajuste '{0}' aplicado",
+    "Deleted preset '{0}'": "Ajuste '{0}' eliminado",
+    "Preset '{0}' saved": "Ajuste '{0}' guardado",
+    "Done — indexed {0} photo(s)": "Listo: {0} foto(s) indexada(s)",
+    "Indexed {0} photo(s)": "{0} foto(s) indexada(s)",
+    "✏️ Edit": "✏️ Editar",
+    "Preview unavailable.": "Vista previa no disponible.",
+    "Tags saved": "Etiquetas guardadas",
+    "Logs: `{0}`": "Registros: `{0}`",
+    "Moved the unreadable file to {0}": "El archivo ilegible se movió a {0}",
+    "Could not import presets: {0}": "No se pudieron importar los ajustes: {0}",
+    "Imported {0} preset(s)": "{0} ajuste(s) importado(s)",
+    "Scanning {0}/{1} — {2}": "Explorando {0}/{1} — {2}",
+    "Done — {0}/{1} succeeded": "Listo: {0}/{1} correctos",
+    "Couldn't open the folder: {0}": "No se pudo abrir la carpeta: {0}",
+    "{0} (no preview)": "{0} (sin vista previa)",
+
+    # --- Local tab ---------------------------------------------------------------------------------
+    "Build several named selections and combine them into one mask. The target adjustments below apply only where the combined mask is active; a selection with \"Own adjustments\" gets its own set instead.":
+        "Crea varias selecciones con nombre y combínalas en una máscara. Los ajustes de abajo se aplican solo donde la máscara combinada está activa; una selección con \"Ajustes propios\" tiene su propio conjunto.",
+    "Select the blemish or object to remove with the same selection tools as Masks. Fill paints the area over from its edges; Heal copies a matching nearby patch over it.":
+        "Selecciona la imperfección u objeto a eliminar con las mismas herramientas de selección que en Máscaras. Rellenar pinta el área a partir de sus bordes; Corregir copia encima un parche cercano parecido.",
+    "No mask layers yet — the sliders below have no effect until you add one.":
+        "Todavía no hay capas de máscara: los controles de abajo no tienen efecto hasta que añadas una.",
+    "👁️ Preview combined mask overlay": "👁️ Previsualizar la máscara combinada",
+    "No selections yet — nothing will be removed.": "Todavía no hay selecciones: no se eliminará nada.",
+    "👁️ Preview removal selection": "👁️ Previsualizar la selección a eliminar",
+    "👤 Face detection is unavailable in this OpenCV build (see System Health).":
+        "👤 La detección de rostros no está disponible en esta versión de OpenCV (ver Estado del sistema).",
+    "All mask layers are disabled — the sliders below have no effect.":
+        "Todas las capas de máscara están desactivadas: los controles de abajo no tienen efecto.",
+    "All selections are disabled — nothing will be removed.": "Todas las selecciones están desactivadas: no se eliminará nada.",
+    "👤 Detected faces: {0}": "👤 Rostros detectados: {0}",
+}

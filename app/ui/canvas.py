@@ -23,6 +23,7 @@ from app.refine_preview import POLL_SECONDS as REFINE_POLL_SECONDS
 from app.ui.processing import refine_status_view
 from app.ui.state import RECIPE_DEFAULTS, build_recipe, consume_new_commit, request_rerun, run_fragment
 from app.ui_editors import _before_after_html, _pan_viewer_html, _wand_picker_html
+from app.i18n import t, t_format, t_option
 
 
 def _toggle_one_to_one() -> None:
@@ -48,37 +49,37 @@ def _toggle_grid() -> None:
 
 def _snapshots_popover(history) -> None:
     with st.popover(
-        "📌", use_container_width=True,
-        help="History and Named Snapshots -- jump to any earlier step, or bookmark the current look under a name",
+        t("📌"), use_container_width=True,
+        help=t("History and Named Snapshots -- jump to any earlier step, or bookmark the current look under a name"),
     ):
-        st.markdown("**Named Snapshots**")
+        st.markdown(t("**Named Snapshots**"))
         st.caption(
-            "Bookmark the current look under a name and jump back to it any time -- unlike "
-            "Undo/Redo, restoring a snapshot never discards it (or any other saved snapshot)."
+            t("Bookmark the current look under a name and jump back to it any time -- unlike "
+            "Undo/Redo, restoring a snapshot never discards it (or any other saved snapshot).")
         )
         snap_new_name = st.text_input(
-            "Snapshot name", key="snap-name-in", label_visibility="collapsed", placeholder="Snapshot name",
-            help="Name for the bookmark you're about to save.",
+            t("Snapshot name"), key="snap-name-in", label_visibility="collapsed", placeholder=t("Snapshot name"),
+            help=t("Name for the bookmark you're about to save."),
         )
-        if st.button("📌 Save Snapshot", key="snap-save-btn", use_container_width=True):
+        if st.button(t("📌 Save Snapshot"), key="snap-save-btn", use_container_width=True):
             if snap_new_name.strip():
                 history.save_snapshot(snap_new_name.strip(), build_recipe())
-                st.toast(f"Snapshot '{snap_new_name.strip()}' saved", icon="📌")
+                st.toast(t("Snapshot '{0}' saved").format(t(snap_new_name.strip())), icon="📌")
                 request_rerun()
             else:
-                st.toast("Type a name before saving a snapshot", icon="⚠️")
+                st.toast(t("Type a name before saving a snapshot"), icon="⚠️")
         if not history.snapshot_names:
-            st.caption("No snapshots saved yet.")
+            st.caption(t("No snapshots saved yet."))
         # Keyed by the snapshot's own (stable) name; `break` after a mutation like every list.
         for snap_name in history.snapshot_names:
             snap_row1, snap_row2, snap_row3 = st.columns([2, 1, 0.6])
-            snap_row1.caption(snap_name)
-            if snap_row2.button("↩️ Restore", key=f"snap-restore-{snap_name}", use_container_width=True, help=f"Restore snapshot '{snap_name}'"):
+            snap_row1.caption(t(snap_name))
+            if snap_row2.button(t("↩️ Restore"), key=f"snap-restore-{snap_name}", use_container_width=True, help=t("Restore snapshot '{0}'").format(t(snap_name))):
                 st.session_state["_pending_restore"] = history.restore_snapshot(snap_name) or {}
-                st.toast(f"Restored snapshot '{snap_name}'", icon="↩️")
+                st.toast(t("Restored snapshot '{0}'").format(t(snap_name)), icon="↩️")
                 request_rerun()
                 break
-            if snap_row3.button("🗑️", key=f"snap-delete-{snap_name}", use_container_width=True, help=f"Delete snapshot '{snap_name}'"):
+            if snap_row3.button(t("🗑️"), key=f"snap-delete-{snap_name}", use_container_width=True, help=t("Delete snapshot '{0}'").format(t(snap_name))):
                 history.delete_snapshot(snap_name)
                 request_rerun()
                 break
@@ -92,10 +93,10 @@ HISTORY_LIST_STEPS = 30
 def _history_list(history) -> None:
     """The Undo steps as a list (F13): click one to jump there, like pressing Undo/Redo until it."""
     st.divider()
-    st.markdown("**History**")
+    st.markdown(t("**History**"))
     steps = history.steps()
     if len(steps) <= 1:
-        st.caption("No edits yet.")
+        st.caption(t("No edits yet."))
         return
     first_shown = max(0, len(steps) - HISTORY_LIST_STEPS)
     for index in range(len(steps) - 1, first_shown - 1, -1):
@@ -103,12 +104,12 @@ def _history_list(history) -> None:
         label = f"{'▶ ' if current else ''}{index}. {steps[index]}"
         # Keyed by step number: the list is rebuilt from history each run, and a jump never
         # renumbers steps (only a new edit after Undo drops the redo branch).
-        if st.button(label, key=f"hist-step-{index}", disabled=current, use_container_width=True, type="tertiary"):
+        if st.button(t(label), key=f"hist-step-{index}", disabled=current, use_container_width=True, type="tertiary"):
             st.session_state["_pending_restore"] = history.jump(index) or {}
             request_rerun()
             break
     if first_shown:
-        st.caption(f"{first_shown} older step(s) -- reachable with Undo.")
+        st.caption(t("{0} older step(s) -- reachable with Undo.").format(t(first_shown)))
 
 
 def canvas_header(ctx) -> None:
@@ -118,20 +119,20 @@ def canvas_header(ctx) -> None:
         # html.escape(): the file name is user-controlled and lands in an attribute and in markup.
         live_view_label = html.escape(f"{ctx.upload_name} ({ctx.output_size[0]}×{ctx.output_size[1]})")
         st.markdown(
-            f'<div class="panel-header-title canvas-live-view" title="{live_view_label}">🖼️ Live View: <span>{live_view_label}</span></div>',
+            t("<div class=\"panel-header-title canvas-live-view\" title=\"{0}\">🖼️ Live View: <span>{1}</span></div>").format(t(live_view_label), t(live_view_label)),
             unsafe_allow_html=True,
         )
     with top_undo:
-        if st.button("↶", key="hist-undo-btn", disabled=not history.can_undo, help="Undo (Ctrl+Z)", use_container_width=True, shortcut="Ctrl+Z"):
+        if st.button(t("↶"), key="hist-undo-btn", disabled=not history.can_undo, help=t("Undo (Ctrl+Z)"), use_container_width=True, shortcut="Ctrl+Z"):
             st.session_state["_pending_restore"] = history.undo() or {}
             request_rerun()
     with top_redo:
-        if st.button("↷", key="hist-redo-btn", disabled=not history.can_redo, help="Redo (Ctrl+Shift+Z)", use_container_width=True, shortcut="Ctrl+Shift+Z"):
+        if st.button(t("↷"), key="hist-redo-btn", disabled=not history.can_redo, help=t("Redo (Ctrl+Shift+Z)"), use_container_width=True, shortcut="Ctrl+Shift+Z"):
             st.session_state["_pending_restore"] = history.redo() or {}
             request_rerun()
     with top_reset:
         # The same recipe fields Undo/Redo cover; layers and the opened photo stay.
-        if st.button("↺", key="hist-reset-btn", help="Reset all adjustments to defaults", use_container_width=True):
+        if st.button(t("↺"), key="hist-reset-btn", help=t("Reset all adjustments to defaults"), use_container_width=True):
             st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": []}
             request_rerun()
     with top_snap:
@@ -140,19 +141,19 @@ def canvas_header(ctx) -> None:
         # Fit shows the whole photo; 100 % is a true 1:1 view of its pixels (full resolution even
         # for a proxy-previewed photo); 200 %/400 % enlarge those pixels.
         st.selectbox(
-            "Zoom View", [0.0, 1.0, 2.0, 4.0], key="cv-zoom", label_visibility="collapsed",
-            format_func=lambda z: "🔍 Fit" if z < 1 else ("🔍 100% (1:1)" if z == 1 else f"🔍 {int(z * 100)}%"),
+            t("Zoom View"), [0.0, 1.0, 2.0, 4.0], key="cv-zoom", label_visibility="collapsed",
+            format_func=t_format(lambda z: "🔍 Fit" if z < 1 else ("🔍 100% (1:1)" if z == 1 else f"🔍 {int(z * 100)}%")),
         )
     with top_c3:
-        compare_mode = st.checkbox("⇄ Split View", value=False, key="cv-split", help="Drag to compare before/after")
-        st.checkbox("👁️ Original", value=False, key="cv-orig", disabled=compare_mode)
+        compare_mode = st.checkbox(t("⇄ Split View"), value=False, key="cv-split", help=t("Drag to compare before/after"))
+        st.checkbox(t("👁️ Original"), value=False, key="cv-orig", disabled=compare_mode)
 
     # Keyboard shortcuts (native, F11): Z = 1:1 / Fit, B = before/after, G = grid. Ctrl+Z /
     # Ctrl+Shift+Z are on Undo/Redo, Ctrl+E on the Save button.
     key_c1, key_c2, key_c3 = st.columns(3)
-    key_c1.button("🔍 1:1 / Fit", key="kb-zoom-btn", on_click=_toggle_one_to_one, shortcut="Z", use_container_width=True, help="Toggle a true 1:1 view (Z)")
-    key_c2.button("👁 Before / After", key="kb-orig-btn", on_click=_toggle_original, shortcut="B", use_container_width=True, help="Show the original (B)")
-    key_c3.button("# Grid", key="kb-grid-btn", on_click=_toggle_grid, shortcut="G", use_container_width=True, help="Toggle the composition grid (G)")
+    key_c1.button(t("🔍 1:1 / Fit"), key="kb-zoom-btn", on_click=_toggle_one_to_one, shortcut="Z", use_container_width=True, help=t("Toggle a true 1:1 view (Z)"))
+    key_c2.button(t("👁 Before / After"), key="kb-orig-btn", on_click=_toggle_original, shortcut="B", use_container_width=True, help=t("Show the original (B)"))
+    key_c3.button(t("# Grid"), key="kb-grid-btn", on_click=_toggle_grid, shortcut="G", use_container_width=True, help=t("Toggle the composition grid (G)"))
 
     # Refine-on-pause status (P1): a fragment that polls only while a full-resolution render is
     # pending for a proxy preview, so a settled photo costs nothing.
@@ -166,26 +167,26 @@ def guides_panel() -> None:
         st.session_state.guides = []
     guides = st.session_state.guides
     grid_on = st.session_state.get("grid-type", "None") != "None" or bool(guides)
-    with st.expander("🧭 Guides & Grid" + (" ●" if grid_on else ""), expanded=False, key="sec-guides"):
-        st.caption("View-only -- never affects the exported image. The free-form Crop tool's corner handles snap to these lines.")
-        st.selectbox("Grid overlay", list(GRID_PRESETS), key="grid-type")
+    with st.expander(t("🧭 Guides & Grid" + (" ●" if grid_on else "")), expanded=False, key="sec-guides"):
+        st.caption(t("View-only -- never affects the exported image. The free-form Crop tool's corner handles snap to these lines."))
+        st.selectbox(t("Grid overlay"), list(GRID_PRESETS), key="grid-type", format_func=t_option)
         for guide in guides:
             guide.setdefault("id", uuid.uuid4().hex)
         add_col1, add_col2, add_col3 = st.columns([1, 1.4, 0.8])
         with add_col1:
-            new_guide_orientation = st.selectbox("Orientation", ["Horizontal", "Vertical"], key="guide-new-orientation", label_visibility="collapsed")
+            new_guide_orientation = st.selectbox(t("Orientation"), ["Horizontal", "Vertical"], key="guide-new-orientation", label_visibility="collapsed", format_func=t_option)
         with add_col2:
-            new_guide_position = st.slider("Position %", 0.0, 100.0, 50.0, key="guide-new-position", label_visibility="collapsed")
+            new_guide_position = st.slider(t("Position %"), 0.0, 100.0, 50.0, key="guide-new-position", label_visibility="collapsed")
         with add_col3:
-            if st.button("➕ Add", key="guide-add-btn"):
+            if st.button(t("➕ Add"), key="guide-add-btn"):
                 guides.append({"id": uuid.uuid4().hex, "orientation": new_guide_orientation.lower(), "position_pct": new_guide_position})
                 request_rerun()
         for idx, guide in enumerate(guides):
             guide_col1, guide_col2 = st.columns([3, 1])
             with guide_col1:
-                st.caption(f"{guide['orientation'].capitalize()} guide at {guide['position_pct']:.0f}%")
+                st.caption(t("{0} guide at {1:.0f}%").format(t(guide['orientation'].capitalize()), t(guide['position_pct'])))
             with guide_col2:
-                if st.button("🗑️ Remove", key=f"guide-rm-{guide['id']}"):
+                if st.button(t("🗑️ Remove"), key=f"guide-rm-{guide['id']}"):
                     guides.pop(idx)
                     request_rerun()
                     break
@@ -211,7 +212,7 @@ def canvas_view(edited_image: Image.Image, oriented_source: Image.Image) -> None
         nav_html, nav_height = _wand_picker_html(nav_view, "cv-nav", hint="Click to center the zoomed view there.")
         components.html(nav_html, height=nav_height)
         with st.container(key="cv-nav-wand-hidden"):
-            pending_nav = st.text_area("Navigator click", key="cv-nav-wand-data", label_visibility="collapsed")
+            pending_nav = st.text_area(t("Navigator click"), key="cv-nav-wand-data", label_visibility="collapsed")
         if consume_new_commit(pending_nav, "cv-nav-committed"):
             try:
                 nav_click = json.loads(pending_nav)
@@ -222,9 +223,9 @@ def canvas_view(edited_image: Image.Image, oriented_source: Image.Image) -> None
                 pass
         pan_c1, pan_c2 = st.columns(2)
         with pan_c1:
-            pan_x = st.slider("Pan Horizontal", 0.0, 1.0, 0.5, 0.0001, format="%.3f", key="cv-panx")
+            pan_x = st.slider(t("Pan Horizontal"), 0.0, 1.0, 0.5, 0.0001, format="%.3f", key="cv-panx")
         with pan_c2:
-            pan_y = st.slider("Pan Vertical", 0.0, 1.0, 0.5, 0.0001, format="%.3f", key="cv-pany")
+            pan_y = st.slider(t("Pan Vertical"), 0.0, 1.0, 0.5, 0.0001, format="%.3f", key="cv-pany")
 
     if compare_mode:
         # Split View: a draggable before/after slider sharing the zoom/pan of the normal view.
@@ -235,7 +236,7 @@ def canvas_view(edited_image: Image.Image, oriented_source: Image.Image) -> None
         compare_html, compare_height = _before_after_html(before_preview, after_preview)
         components.html(compare_html, height=compare_height + 10)
         return
-    st.markdown('<div class="canvas-container">', unsafe_allow_html=True)
+    st.markdown(t('<div class="canvas-container">'), unsafe_allow_html=True)
     if show_original:
         canvas_display, canvas_caption = preview_image(oriented_source), "Original Untouched"
     else:
@@ -248,10 +249,10 @@ def canvas_view(edited_image: Image.Image, oriented_source: Image.Image) -> None
         view_center = ((view_box[0] + view_box[2]) / 2 / edited_image.width, (view_box[1] + view_box[3]) / 2 / edited_image.height)
         pan_html, pan_height = _pan_viewer_html(canvas_display, "cv-nav", view_center, zoom_level, edited_image.size)
         components.html(pan_html, height=pan_height)
-        st.caption(f"{canvas_caption} -- {int(zoom_level * 100)}%, drag to pan")
+        st.caption(t("{0} -- {1}%, drag to pan").format(t(canvas_caption), t(int(zoom_level * 100))))
     else:
         st.image(canvas_display, caption=canvas_caption, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown(t('</div>'), unsafe_allow_html=True)
 
 
 def scopes_panel(edited_image: Image.Image) -> None:
@@ -264,22 +265,22 @@ def scopes_panel(edited_image: Image.Image) -> None:
     histogram["Pixel Value"] = [round(255 * (i + 0.5) / histogram_bins) for i in range(histogram_bins)]
     st.line_chart(histogram, x="Pixel Value", y=["Red", "Green", "Blue"], height=90, color=["#f87171", "#4ade80", "#60a5fa"])
 
-    st.caption("〰️ **Waveform monitor**: an extra scope for checking exposure across the frame, next to the histogram above.")
+    st.caption(t("〰️ **Waveform monitor**: an extra scope for checking exposure across the frame, next to the histogram above."))
     waveform_toggle_col, waveform_mode_col = st.columns([1, 1])
     with waveform_toggle_col:
         show_waveform = st.checkbox(
-            "〰️ Show waveform monitor", key="waveform-toggle",
-            help="Horizontal position vs. luminance/RGB intensity, like a video editor's waveform scope.",
+            t("〰️ Show waveform monitor"), key="waveform-toggle",
+            help=t("Horizontal position vs. luminance/RGB intensity, like a video editor's waveform scope."),
         )
     with waveform_mode_col:
         # Always rendered (disabled when off) so the channel choice survives toggling the scope.
         waveform_mode = st.radio(
-            "Waveform channels", ["Luma", "RGB"], key="waveform-mode", horizontal=True,
-            label_visibility="collapsed", disabled=not show_waveform,
+            t("Waveform channels"), ["Luma", "RGB"], key="waveform-mode", horizontal=True,
+            label_visibility="collapsed", disabled=not show_waveform, format_func=t_option,
         )
     if show_waveform:
         st.image(compute_waveform(scope_image, mode=waveform_mode), caption=f"Waveform ({waveform_mode})", use_container_width=True)
-    if st.checkbox("⚠️ Show clipping", key="clip-warning-toggle", help="Highlights blocked shadows (blue) and blown highlights (red)."):
+    if st.checkbox(t("⚠️ Show clipping"), key="clip-warning-toggle", help=t("Highlights blocked shadows (blue) and blown highlights (red).")):
         st.image(
             clipping_warning_overlay(scope_image),
             caption="Blue = shadows clipped to black, Red = highlights clipped to white",
