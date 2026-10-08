@@ -22,6 +22,7 @@ import streamlit.components.v1 as components
 from app.controls import CONTROLS_BY_KEY, RECIPE_WIDGET_KEYS, section_keys
 from app.edit_schema import recipe_defaults, sanitize_recipe
 from app.painted_masks import intern_recipe_painted_masks
+from app.i18n import t
 
 # Defaults (and every control's valid range/type) come from the app.controls registry, through
 # app.edit_schema.RECIPE_CONTROLS -- the table sanitize_recipe() clamps restored values against.
@@ -168,6 +169,7 @@ def section_label(title: str, *sections: str, extra_modified: bool = False) -> s
     """`title` plus a "●" when any control of these sections has been changed -- the label of a
     section's expander or header. Expanders that carry it are keyed, so the label change doesn't
     collapse them."""
+    title = t(title)
     return f"{title} {MODIFIED_MARK}" if extra_modified or sections_modified(*sections) else title
 
 
@@ -175,13 +177,13 @@ def section_header(title: str, *sections: str, extra_modified: bool = False) -> 
     """A bold section heading with the "modified" mark (a coloured dot plus the word, so it doesn't
     rely on colour alone)."""
     modified = extra_modified or sections_modified(*sections)
-    st.markdown(f"**{title}**" + (f" :orange[{MODIFIED_MARK}] :gray[modified]" if modified else ""))
+    st.markdown(f"**{t(title)}**" + (f" :orange[{MODIFIED_MARK}] :gray[{t('modified')}]" if modified else ""))
 
 
 def section_reset_button(section: str, label: str, *more_sections: str) -> None:
     """A "↺ Reset <label>" button that puts one or more sections' controls back to their defaults,
     through the same _pending_restore path as Undo/Reset."""
-    if st.button(f"↺ Reset {label}", key=f"reset-{section}-btn", help=f"Reset the {label} controls to their defaults"):
+    if st.button(t("↺ Reset {0}").format(t(label)), key=f"reset-{section}-btn", help=t("Reset the {0} controls to their defaults").format(t(label))):
         keys = [key for name in (section, *more_sections) for key in section_keys(name)]
         st.session_state["_pending_restore"] = {key: RECIPE_DEFAULTS[key] for key in keys}
         request_rerun()

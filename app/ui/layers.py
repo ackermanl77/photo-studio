@@ -24,6 +24,7 @@ from app.professional_tools import preview_image
 from app.ui.state import consume_new_commit, hex_to_rgba, request_rerun, show_component, tab_visible
 from app.ui_editors import _pen_editor_html
 from app.vector_shapes import SHAPE_TYPES, render_path_layer, render_shape_layer
+from app.i18n import t, t_format, t_option
 
 
 _STYLE_EFFECT_PREFIXES = ("drop_shadow", "outer_glow", "stroke", "color_overlay")
@@ -123,60 +124,60 @@ def render_layer_styles(layer: dict, layer_id: str) -> None:
     inside another, and this already lives inside the layer's own."""
     layer.setdefault("styles", {})
     styles = layer["styles"]
-    st.markdown("**Layer Styles**")
+    st.markdown(t("**Layer Styles**"))
 
     styles["drop_shadow_enabled"] = st.checkbox(
-        "Drop Shadow", styles.get("drop_shadow_enabled", False), key=f"l-ds-en-{layer_id}",
-        help="Casts a soft shadow behind this layer's own silhouette, offset and blurred below.",
+        t("Drop Shadow"), styles.get("drop_shadow_enabled", False), key=f"l-ds-en-{layer_id}",
+        help=t("Casts a soft shadow behind this layer's own silhouette, offset and blurred below."),
     )
     if styles["drop_shadow_enabled"]:
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            styles["drop_shadow_offset_x"] = st.slider("Offset X", -50, 50, int(styles.get("drop_shadow_offset_x", 8)), key=f"l-ds-ox-{layer_id}", help="Horizontal shadow displacement in pixels -- negative shifts it left, positive right.")
+            styles["drop_shadow_offset_x"] = st.slider(t("Offset X"), -50, 50, int(styles.get("drop_shadow_offset_x", 8)), key=f"l-ds-ox-{layer_id}", help=t("Horizontal shadow displacement in pixels -- negative shifts it left, positive right."))
         with c2:
-            styles["drop_shadow_offset_y"] = st.slider("Offset Y", -50, 50, int(styles.get("drop_shadow_offset_y", 8)), key=f"l-ds-oy-{layer_id}", help="Vertical shadow displacement in pixels -- negative shifts it up, positive down.")
+            styles["drop_shadow_offset_y"] = st.slider(t("Offset Y"), -50, 50, int(styles.get("drop_shadow_offset_y", 8)), key=f"l-ds-oy-{layer_id}", help=t("Vertical shadow displacement in pixels -- negative shifts it up, positive down."))
         with c3:
-            styles["drop_shadow_blur"] = st.slider("Blur", 0, 40, int(styles.get("drop_shadow_blur", 6)), key=f"l-ds-bl-{layer_id}", help="How soft the shadow's edge is -- 0 is a hard-edged silhouette, higher spreads it into a soft blur.")
+            styles["drop_shadow_blur"] = st.slider(t("Blur"), 0, 40, int(styles.get("drop_shadow_blur", 6)), key=f"l-ds-bl-{layer_id}", help=t("How soft the shadow's edge is -- 0 is a hard-edged silhouette, higher spreads it into a soft blur."))
         with c4:
-            styles["drop_shadow_color"] = st.color_picker("Color", styles.get("drop_shadow_color", "#000000"), key=f"l-ds-col-{layer_id}")
-        styles["drop_shadow_opacity"] = st.slider("Shadow Opacity", 0.0, 1.0, float(styles.get("drop_shadow_opacity", 0.6)), 0.01, key=f"l-ds-op-{layer_id}", help="How dark/visible the shadow is, independent of the layer's own opacity.")
+            styles["drop_shadow_color"] = st.color_picker(t("Color"), styles.get("drop_shadow_color", "#000000"), key=f"l-ds-col-{layer_id}")
+        styles["drop_shadow_opacity"] = st.slider(t("Shadow Opacity"), 0.0, 1.0, float(styles.get("drop_shadow_opacity", 0.6)), 0.01, key=f"l-ds-op-{layer_id}", help=t("How dark/visible the shadow is, independent of the layer's own opacity."))
 
     styles["outer_glow_enabled"] = st.checkbox(
-        "Outer Glow", styles.get("outer_glow_enabled", False), key=f"l-og-en-{layer_id}",
-        help="Adds a soft halo of color radiating outward from this layer's silhouette.",
+        t("Outer Glow"), styles.get("outer_glow_enabled", False), key=f"l-og-en-{layer_id}",
+        help=t("Adds a soft halo of color radiating outward from this layer's silhouette."),
     )
     if styles["outer_glow_enabled"]:
         c1, c2, c3 = st.columns(3)
         with c1:
-            styles["outer_glow_blur"] = st.slider("Blur", 0, 60, int(styles.get("outer_glow_blur", 10)), key=f"l-og-bl-{layer_id}", help="How far the glow spreads outward from the layer's edge.")
+            styles["outer_glow_blur"] = st.slider(t("Blur"), 0, 60, int(styles.get("outer_glow_blur", 10)), key=f"l-og-bl-{layer_id}", help=t("How far the glow spreads outward from the layer's edge."))
         with c2:
-            styles["outer_glow_color"] = st.color_picker("Color", styles.get("outer_glow_color", "#FFDC78"), key=f"l-og-col-{layer_id}")
+            styles["outer_glow_color"] = st.color_picker(t("Color"), styles.get("outer_glow_color", "#FFDC78"), key=f"l-og-col-{layer_id}")
         with c3:
-            styles["outer_glow_opacity"] = st.slider("Glow Opacity", 0.0, 1.0, float(styles.get("outer_glow_opacity", 0.75)), 0.01, key=f"l-og-op-{layer_id}", help="How strong/visible the glow is.")
+            styles["outer_glow_opacity"] = st.slider(t("Glow Opacity"), 0.0, 1.0, float(styles.get("outer_glow_opacity", 0.75)), 0.01, key=f"l-og-op-{layer_id}", help=t("How strong/visible the glow is."))
 
     styles["stroke_enabled"] = st.checkbox(
-        "Stroke", styles.get("stroke_enabled", False), key=f"l-st-en-{layer_id}",
-        help="Outlines this layer's silhouette with a solid-color border.",
+        t("Stroke"), styles.get("stroke_enabled", False), key=f"l-st-en-{layer_id}",
+        help=t("Outlines this layer's silhouette with a solid-color border."),
     )
     if styles["stroke_enabled"]:
         c1, c2, c3 = st.columns(3)
         with c1:
-            styles["stroke_width"] = st.slider("Width", 1, 40, int(styles.get("stroke_width", 4)), key=f"l-st-w-{layer_id}", help="Border thickness in pixels.")
+            styles["stroke_width"] = st.slider(t("Width"), 1, 40, int(styles.get("stroke_width", 4)), key=f"l-st-w-{layer_id}", help=t("Border thickness in pixels."))
         with c2:
-            styles["stroke_color"] = st.color_picker("Color", styles.get("stroke_color", "#FFFFFF"), key=f"l-st-col-{layer_id}")
+            styles["stroke_color"] = st.color_picker(t("Color"), styles.get("stroke_color", "#FFFFFF"), key=f"l-st-col-{layer_id}")
         with c3:
-            styles["stroke_opacity"] = st.slider("Stroke Opacity", 0.0, 1.0, float(styles.get("stroke_opacity", 1.0)), 0.01, key=f"l-st-op-{layer_id}", help="How solid/visible the outline is.")
+            styles["stroke_opacity"] = st.slider(t("Stroke Opacity"), 0.0, 1.0, float(styles.get("stroke_opacity", 1.0)), 0.01, key=f"l-st-op-{layer_id}", help=t("How solid/visible the outline is."))
 
     styles["color_overlay_enabled"] = st.checkbox(
-        "Color Overlay", styles.get("color_overlay_enabled", False), key=f"l-co-en-{layer_id}",
-        help="Tints this layer's visible pixels with a flat color, blended by the opacity below.",
+        t("Color Overlay"), styles.get("color_overlay_enabled", False), key=f"l-co-en-{layer_id}",
+        help=t("Tints this layer's visible pixels with a flat color, blended by the opacity below."),
     )
     if styles["color_overlay_enabled"]:
         c1, c2 = st.columns(2)
         with c1:
-            styles["color_overlay_color"] = st.color_picker("Color", styles.get("color_overlay_color", "#FF0000"), key=f"l-co-col-{layer_id}")
+            styles["color_overlay_color"] = st.color_picker(t("Color"), styles.get("color_overlay_color", "#FF0000"), key=f"l-co-col-{layer_id}")
         with c2:
-            styles["color_overlay_opacity"] = st.slider("Overlay Opacity", 0.0, 1.0, float(styles.get("color_overlay_opacity", 0.6)), 0.01, key=f"l-co-op-{layer_id}", help="How strongly the color tints the layer -- 0 has no effect, 1 fully replaces its color.")
+            styles["color_overlay_opacity"] = st.slider(t("Overlay Opacity"), 0.0, 1.0, float(styles.get("color_overlay_opacity", 0.6)), 0.01, key=f"l-co-op-{layer_id}", help=t("How strongly the color tints the layer -- 0 has no effect, 1 fully replaces its color."))
 
 
 def render_pen_path_editor(source: Image.Image, key_prefix: str, points: list[dict], closed: bool) -> tuple[list[dict], bool]:
@@ -188,7 +189,7 @@ def render_pen_path_editor(source: Image.Image, key_prefix: str, points: list[di
     since this helper has no way to know which."""
     show_component(lambda: _pen_editor_html(preview_image(source, (480, 480)), key_prefix, points, closed))
     with st.container(key=f"{key_prefix}-hidden"):
-        pending_points = st.text_area("Pen path points", key=f"{key_prefix}-data", label_visibility="collapsed")
+        pending_points = st.text_area(t("Pen path points"), key=f"{key_prefix}-data", label_visibility="collapsed")
     if consume_new_commit(pending_points, f"{key_prefix}-committed"):
         try:
             parsed = json.loads(pending_points)
@@ -203,8 +204,8 @@ def render_pen_path_editor(source: Image.Image, key_prefix: str, points: list[di
             pass
         else:
             request_rerun()
-    closed = st.checkbox("Closed Path", closed, key=f"{key_prefix}-closed")
-    if points and st.button("🗑️ Clear Points", key=f"{key_prefix}-clear"):
+    closed = st.checkbox(t("Closed Path"), closed, key=f"{key_prefix}-closed")
+    if points and st.button(t("🗑️ Clear Points"), key=f"{key_prefix}-clear"):
         points = []
         request_rerun()
     return points, closed
@@ -230,10 +231,10 @@ def render_layer_stack(source: Image.Image) -> str | None:
         layer.setdefault("id", uuid.uuid4().hex)
         layer.setdefault("kind", "image")  # backfill for layers added before Text layers existed
 
-    with st.expander("➕ Add a layer", expanded=not layers):
-        new_layer_kind = st.radio("Layer type", ["Image", "Text", "Shape", "Pen"], horizontal=True, key="l-new-kind")
+    with st.expander(t("➕ Add a layer"), expanded=not layers):
+        new_layer_kind = st.radio(t("Layer type"), ["Image", "Text", "Shape", "Pen"], horizontal=True, key="l-new-kind", format_func=t_option)
         if new_layer_kind == "Text":
-            if st.button("Add Text Layer", key="l-add-text-btn"):
+            if st.button(t("Add Text Layer"), key="l-add-text-btn"):
                 layers.append(
                     {
                         "id": uuid.uuid4().hex,
@@ -252,8 +253,8 @@ def render_layer_stack(source: Image.Image) -> str | None:
                 )
                 request_rerun()
         elif new_layer_kind == "Shape":
-            new_shape_type = st.selectbox("Shape", SHAPE_TYPES, key="l-new-shape-type")
-            if st.button("Add Shape Layer", key="l-add-shape-btn"):
+            new_shape_type = st.selectbox(t("Shape"), SHAPE_TYPES, key="l-new-shape-type", format_func=t_option)
+            if st.button(t("Add Shape Layer"), key="l-add-shape-btn"):
                 layers.append(
                     {
                         "id": uuid.uuid4().hex,
@@ -281,7 +282,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                 )
                 request_rerun()
         elif new_layer_kind == "Pen":
-            st.caption('Click points on the photo below to trace a path, then "Add Path Layer" when done.')
+            st.caption(t('Click points on the photo below to trace a path, then "Add Path Layer" when done.'))
             # draft_closed itself needs no separate write-back: it's the "l-path-draft-closed"
             # checkbox's own widget key, already persisted by Streamlit the moment that widget
             # renders -- re-assigning it here would violate the "never write into an
@@ -292,7 +293,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                 source, "l-path-draft", st.session_state.get("l-path-draft-points", []), st.session_state.get("l-path-draft-closed", False),
             )
             st.session_state["l-path-draft-points"] = draft_points
-            if st.button("➕ Add Path Layer", key="l-add-path-btn", disabled=len(draft_points) < 2):
+            if st.button(t("➕ Add Path Layer"), key="l-add-path-btn", disabled=len(draft_points) < 2):
                 layers.append(
                     {
                         "id": uuid.uuid4().hex,
@@ -319,7 +320,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                 st.session_state["l-path-draft-points"] = []
                 request_rerun()
         else:
-            new_layer_file = st.file_uploader("Layer image", type=["png", "jpg", "jpeg", "webp"], key="l-new-file")
+            new_layer_file = st.file_uploader(t("Layer image"), type=["png", "jpg", "jpeg", "webp"], key="l-new-file")
             # Streamlit keeps a file_uploader's value across reruns until the user picks a different
             # file or clears it -- adding on every rerun where it's truthy would append the same
             # layer over and over. file_id is a fresh identifier per upload, so this only fires once
@@ -332,7 +333,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                     try:
                         decoded = Image.open(io.BytesIO(new_layer_file.getvalue())).convert("RGBA")
                     except OSError:
-                        st.error("⚠️ Couldn't read that layer image — it may be corrupted.")
+                        st.error(t("⚠️ Couldn't read that layer image — it may be corrupted."))
                     else:
                         buffer = io.BytesIO()
                         decoded.save(buffer, format="PNG")
@@ -351,9 +352,9 @@ def render_layer_stack(source: Image.Image) -> str | None:
                         request_rerun()
 
     if not layers:
-        st.caption("No layers yet — add one above.")
+        st.caption(t("No layers yet — add one above."))
     else:
-        st.caption("Listed bottom-to-top: the last layer here sits on top, same as the composite order.")
+        st.caption(t("Listed bottom-to-top: the last layer here sits on top, same as the composite order."))
 
     blend_mode_choices = list(BLEND_MODE_LABELS)
     align_choices = ["left", "center", "right"]
@@ -361,31 +362,31 @@ def render_layer_stack(source: Image.Image) -> str | None:
         layer_id = layer["id"]
         status_icon = "✅" if layer["visible"] else "⬜"
         kind_label = {"text": "Text", "shape": layer.get("shape_type", "Shape"), "path": "Path"}.get(layer["kind"], BLEND_MODE_LABELS[layer["blend_mode"]])
-        with st.expander(f"{status_icon} {layer['name']} — {kind_label}", expanded=False):
+        with st.expander(t("{0} {1} — {2}").format(t(status_icon), t(layer['name']), t(kind_label)), expanded=False):
             # Sub-tabs inside the expander (allowed, unlike a nested expander). Every sub-tab body
             # still runs on every rerun, so the usual widget rules apply unchanged.
-            tab_content, tab_styles, tab_settings = st.tabs(["🎨 Content", "✨ Styles", "⚙️ Settings"])
+            tab_content, tab_styles, tab_settings = st.tabs([t("🎨 Content"), t("✨ Styles"), t("⚙️ Settings")])
             with tab_content:
                 if layer["kind"] == "text":
-                    layer["text"] = st.text_area("Text", layer.get("text", "Text"), key=f"l-text-{layer_id}")
+                    layer["text"] = st.text_area(t("Text"), layer.get("text", "Text"), key=f"l-text-{layer_id}")
                     text_col1, text_col2 = st.columns(2)
                     with text_col1:
                         if "font_size_pct" not in layer:  # a pixel size from an older layer -> % of the short edge
                             layer["font_size_pct"] = round(min(50.0, max(0.5, layer.get("font_size", 48) / min(source.size) * 100)), 1)
                         layer["font_size_pct"] = st.slider(
-                            "Font size (% of short edge)", 0.5, 50.0, float(layer["font_size_pct"]), 0.5, key=f"l-fsizepct-{layer_id}",
-                            help="Relative to the photo, so the text looks the same at any resolution.",
+                            t("Font size (% of short edge)"), 0.5, 50.0, float(layer["font_size_pct"]), 0.5, key=f"l-fsizepct-{layer_id}",
+                            help=t("Relative to the photo, so the text looks the same at any resolution."),
                         )
                     with text_col2:
-                        layer["color"] = st.color_picker("Color", layer.get("color", "#FFFFFF"), key=f"l-fcolor-{layer_id}")
+                        layer["color"] = st.color_picker(t("Color"), layer.get("color", "#FFFFFF"), key=f"l-fcolor-{layer_id}")
                     layer["align"] = st.selectbox(
-                        "Alignment", align_choices, index=align_choices.index(layer.get("align", "left")), key=f"l-falign-{layer_id}",
+                        t("Alignment"), align_choices, index=align_choices.index(layer.get("align", "left")), key=f"l-falign-{layer_id}", format_func=t_option,
                     )
                     pos_col1, pos_col2 = st.columns(2)
                     with pos_col1:
-                        layer["x_pct"] = st.slider("Horizontal position (%)", 0.0, 100.0, float(layer.get("x_pct", 50.0)), key=f"l-fx-{layer_id}")
+                        layer["x_pct"] = st.slider(t("Horizontal position (%)"), 0.0, 100.0, float(layer.get("x_pct", 50.0)), key=f"l-fx-{layer_id}")
                     with pos_col2:
-                        layer["y_pct"] = st.slider("Vertical position (%)", 0.0, 100.0, float(layer.get("y_pct", 50.0)), key=f"l-fy-{layer_id}")
+                        layer["y_pct"] = st.slider(t("Vertical position (%)"), 0.0, 100.0, float(layer.get("y_pct", 50.0)), key=f"l-fy-{layer_id}")
                     # A small live preview, computed locally (not through the backend) -- same
                     # "cheap enough to recompute every rerun" pattern as the Masks tab's combined
                     # overlay preview. A dark neutral background so light-colored text stays visible,
@@ -401,52 +402,52 @@ def render_layer_stack(source: Image.Image) -> str | None:
                         st.image(Image.alpha_composite(preview_bg, preview_text))
                 elif layer["kind"] == "shape":
                     layer["shape_type"] = st.selectbox(
-                        "Shape", SHAPE_TYPES, index=SHAPE_TYPES.index(layer.get("shape_type", "Rectangle")), key=f"l-shp-type-{layer_id}",
+                        t("Shape"), SHAPE_TYPES, index=SHAPE_TYPES.index(layer.get("shape_type", "Rectangle")), key=f"l-shp-type-{layer_id}", format_func=t_option,
                     )
                     shp_pos1, shp_pos2 = st.columns(2)
                     with shp_pos1:
-                        layer["x_pct"] = st.slider("Horizontal position (%)", 0.0, 100.0, float(layer.get("x_pct", 50.0)), key=f"l-shp-x-{layer_id}")
+                        layer["x_pct"] = st.slider(t("Horizontal position (%)"), 0.0, 100.0, float(layer.get("x_pct", 50.0)), key=f"l-shp-x-{layer_id}")
                     with shp_pos2:
-                        layer["y_pct"] = st.slider("Vertical position (%)", 0.0, 100.0, float(layer.get("y_pct", 50.0)), key=f"l-shp-y-{layer_id}")
+                        layer["y_pct"] = st.slider(t("Vertical position (%)"), 0.0, 100.0, float(layer.get("y_pct", 50.0)), key=f"l-shp-y-{layer_id}")
                     shp_size1, shp_size2 = st.columns(2)
                     with shp_size1:
-                        layer["width_pct"] = st.slider("Width (%)", 1.0, 100.0, float(layer.get("width_pct", 30.0)), key=f"l-shp-w-{layer_id}")
+                        layer["width_pct"] = st.slider(t("Width (%)"), 1.0, 100.0, float(layer.get("width_pct", 30.0)), key=f"l-shp-w-{layer_id}")
                     with shp_size2:
                         layer["height_pct"] = st.slider(
-                            "Height (%)", 1.0, 100.0, float(layer.get("height_pct", 30.0)), key=f"l-shp-h-{layer_id}", disabled=layer["shape_type"] == "Line",
+                            t("Height (%)"), 1.0, 100.0, float(layer.get("height_pct", 30.0)), key=f"l-shp-h-{layer_id}", disabled=layer["shape_type"] == "Line",
                         )
                     if layer["shape_type"] != "Ellipse":
-                        layer["rotation_deg"] = st.slider("Rotation", 0.0, 360.0, float(layer.get("rotation_deg", 0.0)), key=f"l-shp-rot-{layer_id}")
+                        layer["rotation_deg"] = st.slider(t("Rotation"), 0.0, 360.0, float(layer.get("rotation_deg", 0.0)), key=f"l-shp-rot-{layer_id}")
                     if layer["shape_type"] in ("Polygon", "Star"):
                         shp_sides1, shp_sides2 = st.columns(2)
                         with shp_sides1:
                             layer["sides"] = st.slider(
-                                "Sides" if layer["shape_type"] == "Polygon" else "Points", 3, 12, int(layer.get("sides", 5)), key=f"l-shp-sides-{layer_id}",
+                                t("Sides" if layer["shape_type"] == "Polygon" else "Points"), 3, 12, int(layer.get("sides", 5)), key=f"l-shp-sides-{layer_id}",
                             )
                         if layer["shape_type"] == "Star":
                             with shp_sides2:
-                                layer["inner_ratio"] = st.slider("Inner Radius", 0.05, 0.95, float(layer.get("inner_ratio", 0.5)), key=f"l-shp-inner-{layer_id}")
+                                layer["inner_ratio"] = st.slider(t("Inner Radius"), 0.05, 0.95, float(layer.get("inner_ratio", 0.5)), key=f"l-shp-inner-{layer_id}")
                     if layer["shape_type"] == "Line":
                         shp_line1, shp_line2 = st.columns(2)
                         with shp_line1:
-                            layer["line_thickness"] = st.slider("Thickness (px)", 1, 60, int(layer.get("line_thickness", 6)), key=f"l-shp-thick-{layer_id}")
+                            layer["line_thickness"] = st.slider(t("Thickness (px)"), 1, 60, int(layer.get("line_thickness", 6)), key=f"l-shp-thick-{layer_id}")
                         with shp_line2:
-                            layer["fill_color"] = st.color_picker("Color", layer.get("fill_color", "#FFFFFF"), key=f"l-shp-fcolor-{layer_id}")
+                            layer["fill_color"] = st.color_picker(t("Color"), layer.get("fill_color", "#FFFFFF"), key=f"l-shp-fcolor-{layer_id}")
                     else:
-                        layer["fill_enabled"] = st.checkbox("Fill", layer.get("fill_enabled", True), key=f"l-shp-fen-{layer_id}")
+                        layer["fill_enabled"] = st.checkbox(t("Fill"), layer.get("fill_enabled", True), key=f"l-shp-fen-{layer_id}")
                         if layer["fill_enabled"]:
                             shp_fill1, shp_fill2 = st.columns(2)
                             with shp_fill1:
-                                layer["fill_color"] = st.color_picker("Fill Color", layer.get("fill_color", "#FFFFFF"), key=f"l-shp-fcolor-{layer_id}")
+                                layer["fill_color"] = st.color_picker(t("Fill Color"), layer.get("fill_color", "#FFFFFF"), key=f"l-shp-fcolor-{layer_id}")
                             with shp_fill2:
-                                layer["fill_opacity"] = st.slider("Fill Opacity", 0.0, 1.0, float(layer.get("fill_opacity", 1.0)), 0.01, key=f"l-shp-fop-{layer_id}")
-                        layer["stroke_enabled"] = st.checkbox("Outline", layer.get("stroke_enabled", False), key=f"l-shp-sen-{layer_id}")
+                                layer["fill_opacity"] = st.slider(t("Fill Opacity"), 0.0, 1.0, float(layer.get("fill_opacity", 1.0)), 0.01, key=f"l-shp-fop-{layer_id}")
+                        layer["stroke_enabled"] = st.checkbox(t("Outline"), layer.get("stroke_enabled", False), key=f"l-shp-sen-{layer_id}")
                         if layer["stroke_enabled"]:
                             shp_stroke1, shp_stroke2 = st.columns(2)
                             with shp_stroke1:
-                                layer["stroke_color"] = st.color_picker("Outline Color", layer.get("stroke_color", "#000000"), key=f"l-shp-scolor-{layer_id}")
+                                layer["stroke_color"] = st.color_picker(t("Outline Color"), layer.get("stroke_color", "#000000"), key=f"l-shp-scolor-{layer_id}")
                             with shp_stroke2:
-                                layer["stroke_width"] = st.slider("Outline Width", 1, 40, int(layer.get("stroke_width", 4)), key=f"l-shp-sw-{layer_id}")
+                                layer["stroke_width"] = st.slider(t("Outline Width"), 1, 40, int(layer.get("stroke_width", 4)), key=f"l-shp-sw-{layer_id}")
                     # Same locally-computed live preview pattern as the Text branch above.
                     preview_ratio = min(260 / source.width, 260 / source.height, 1.0)
                     preview_size = (max(1, int(source.width * preview_ratio)), max(1, int(source.height * preview_ratio)))
@@ -463,42 +464,42 @@ def render_layer_stack(source: Image.Image) -> str | None:
                         source, f"l-path-{layer_id}", layer.get("points", []), layer.get("closed", False),
                     )
                     if layer["closed"]:
-                        layer["fill_enabled"] = st.checkbox("Fill", layer.get("fill_enabled", False), key=f"l-path-fen-{layer_id}")
+                        layer["fill_enabled"] = st.checkbox(t("Fill"), layer.get("fill_enabled", False), key=f"l-path-fen-{layer_id}")
                         if layer["fill_enabled"]:
                             path_fill1, path_fill2 = st.columns(2)
                             with path_fill1:
-                                layer["fill_color"] = st.color_picker("Fill Color", layer.get("fill_color", "#FFFFFF"), key=f"l-path-fcolor-{layer_id}")
+                                layer["fill_color"] = st.color_picker(t("Fill Color"), layer.get("fill_color", "#FFFFFF"), key=f"l-path-fcolor-{layer_id}")
                             with path_fill2:
-                                layer["fill_opacity"] = st.slider("Fill Opacity", 0.0, 1.0, float(layer.get("fill_opacity", 1.0)), 0.01, key=f"l-path-fop-{layer_id}")
-                    layer["stroke_enabled"] = st.checkbox("Stroke", layer.get("stroke_enabled", True), key=f"l-path-sen-{layer_id}")
+                                layer["fill_opacity"] = st.slider(t("Fill Opacity"), 0.0, 1.0, float(layer.get("fill_opacity", 1.0)), 0.01, key=f"l-path-fop-{layer_id}")
+                    layer["stroke_enabled"] = st.checkbox(t("Stroke"), layer.get("stroke_enabled", True), key=f"l-path-sen-{layer_id}")
                     if layer["stroke_enabled"]:
                         path_stroke1, path_stroke2 = st.columns(2)
                         with path_stroke1:
-                            layer["stroke_color"] = st.color_picker("Stroke Color", layer.get("stroke_color", "#FFFFFF"), key=f"l-path-scolor-{layer_id}")
+                            layer["stroke_color"] = st.color_picker(t("Stroke Color"), layer.get("stroke_color", "#FFFFFF"), key=f"l-path-scolor-{layer_id}")
                         with path_stroke2:
-                            layer["stroke_width"] = st.slider("Stroke Width", 1, 40, int(layer.get("stroke_width", 3)), key=f"l-path-sw-{layer_id}")
+                            layer["stroke_width"] = st.slider(t("Stroke Width"), 1, 40, int(layer.get("stroke_width", 3)), key=f"l-path-sw-{layer_id}")
                 else:
                     layer["stretch"] = st.checkbox(
-                        "Stretch to fill the photo", layer.get("stretch", "x_pct" not in layer), key=f"l-img-stretch-{layer_id}",
-                        help="Off: the image keeps its proportions and can be moved, scaled and rotated.",
+                        t("Stretch to fill the photo"), layer.get("stretch", "x_pct" not in layer), key=f"l-img-stretch-{layer_id}",
+                        help=t("Off: the image keeps its proportions and can be moved, scaled and rotated."),
                     )
                     if not layer["stretch"]:
                         img_c1, img_c2 = st.columns(2)
-                        layer["x_pct"] = img_c1.slider("Horizontal position (%)", 0.0, 100.0, float(layer.get("x_pct", 50.0)), key=f"l-img-x-{layer_id}")
-                        layer["y_pct"] = img_c2.slider("Vertical position (%)", 0.0, 100.0, float(layer.get("y_pct", 50.0)), key=f"l-img-y-{layer_id}")
-                        layer["scale_pct"] = img_c1.slider("Scale (%)", 1.0, 400.0, float(layer.get("scale_pct", 100.0)), key=f"l-img-scale-{layer_id}", help="100 % fits the image inside the photo.")
-                        layer["rotation_deg"] = img_c2.slider("Rotation", -180.0, 180.0, float(layer.get("rotation_deg", 0.0)), key=f"l-img-rot-{layer_id}")
+                        layer["x_pct"] = img_c1.slider(t("Horizontal position (%)"), 0.0, 100.0, float(layer.get("x_pct", 50.0)), key=f"l-img-x-{layer_id}")
+                        layer["y_pct"] = img_c2.slider(t("Vertical position (%)"), 0.0, 100.0, float(layer.get("y_pct", 50.0)), key=f"l-img-y-{layer_id}")
+                        layer["scale_pct"] = img_c1.slider(t("Scale (%)"), 1.0, 400.0, float(layer.get("scale_pct", 100.0)), key=f"l-img-scale-{layer_id}", help=t("100 % fits the image inside the photo."))
+                        layer["rotation_deg"] = img_c2.slider(t("Rotation"), -180.0, 180.0, float(layer.get("rotation_deg", 0.0)), key=f"l-img-rot-{layer_id}")
                     if tab_visible():
                         thumb = Image.open(io.BytesIO(base64.b64decode(layer["image_b64"])))
                         st.image(preview_image(thumb, (160, 160)))
             with tab_styles:
                 render_layer_styles(layer, layer_id)
             with tab_settings:
-                layer["name"] = st.text_input("Name", layer["name"], key=f"l-name-{layer_id}")
-                layer["visible"] = st.checkbox("Visible", layer["visible"], key=f"l-vis-{layer_id}")
-                layer["opacity"] = st.slider("Opacity", 0.0, 1.0, layer["opacity"], 0.01, key=f"l-op-{layer_id}")
+                layer["name"] = st.text_input(t("Name"), layer["name"], key=f"l-name-{layer_id}")
+                layer["visible"] = st.checkbox(t("Visible"), layer["visible"], key=f"l-vis-{layer_id}")
+                layer["opacity"] = st.slider(t("Opacity"), 0.0, 1.0, layer["opacity"], 0.01, key=f"l-op-{layer_id}")
                 layer["blend_mode"] = st.selectbox(
-                    "Blend Mode", blend_mode_choices, format_func=lambda mode: BLEND_MODE_LABELS[mode],
+                    t("Blend Mode"), blend_mode_choices, format_func=t_format(lambda mode: BLEND_MODE_LABELS[mode]),
                     index=blend_mode_choices.index(layer["blend_mode"]), key=f"l-blend-{layer_id}",
                 )
                 render_layer_mask_controls(layer, layer_id)
@@ -510,22 +511,22 @@ def render_layer_stack(source: Image.Image) -> str | None:
                 # request_rerun()) redraws the rest of the list correctly on the very next pass.
                 up_col, down_col, dup_col, rm_col = st.columns(4)
                 with up_col:
-                    if st.button("⬆️ Up", key=f"l-up-{layer_id}", disabled=idx == len(layers) - 1):
+                    if st.button(t("⬆️ Up"), key=f"l-up-{layer_id}", disabled=idx == len(layers) - 1):
                         layers[idx], layers[idx + 1] = layers[idx + 1], layers[idx]
                         request_rerun()
                         break
                 with down_col:
-                    if st.button("⬇️ Down", key=f"l-down-{layer_id}", disabled=idx == 0):
+                    if st.button(t("⬇️ Down"), key=f"l-down-{layer_id}", disabled=idx == 0):
                         layers[idx], layers[idx - 1] = layers[idx - 1], layers[idx]
                         request_rerun()
                         break
                 with dup_col:
-                    if st.button("📄 Duplicate", key=f"l-dup-{layer_id}"):
+                    if st.button(t("📄 Duplicate"), key=f"l-dup-{layer_id}"):
                         layers.insert(idx + 1, {**layer, "id": uuid.uuid4().hex, "name": f"{layer['name']} copy"})
                         request_rerun()
                         break
                 with rm_col:
-                    if st.button("🗑️ Remove", key=f"l-rm-{layer_id}"):
+                    if st.button(t("🗑️ Remove"), key=f"l-rm-{layer_id}"):
                         layers.pop(idx)
                         request_rerun()
                         break
@@ -545,11 +546,11 @@ def render_layer_mask_controls(layer: dict, layer_id: str) -> None:
     choices = [None, *selections]
     current = layer.get("mask_selection") if layer.get("mask_selection") in selections else None
     layer["mask_selection"] = st.selectbox(
-        "Layer mask", choices, index=choices.index(current), key=f"l-mask-{layer_id}",
-        format_func=lambda choice: "None (whole layer)" if choice is None else f"Selection: {selections[choice]}",
-        help="Show this layer only where a selection from ◉ Local → ◉ Masks is. Build the selection there; it can be one that isn't used for adjustments.",
+        t("Layer mask"), choices, index=choices.index(current), key=f"l-mask-{layer_id}",
+        format_func=t_format(lambda choice: "None (whole layer)" if choice is None else f"Selection: {selections[choice]}"),
+        help=t("Show this layer only where a selection from ◉ Local → ◉ Masks is. Build the selection there; it can be one that isn't used for adjustments."),
     )
-    layer["mask_invert"] = st.checkbox("Invert layer mask", layer.get("mask_invert", False), key=f"l-mask-inv-{layer_id}", disabled=layer["mask_selection"] is None)
+    layer["mask_invert"] = st.checkbox(t("Invert layer mask"), layer.get("mask_invert", False), key=f"l-mask-inv-{layer_id}", disabled=layer["mask_selection"] is None)
     if layer.get("mask_selection") and layer["mask_selection"] not in selections:
         layer["mask_selection"] = None
 

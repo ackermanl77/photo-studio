@@ -37,6 +37,7 @@ from app.reliability import image_digest
 from app.ui.layers import build_layers_payload, layers_payload
 from app.ui.selections import combined_mask_png, combined_mask_png_uncached, local_masks_payload
 from app.ui.state import in_fragment_rerun, request_rerun
+from app.i18n import t
 
 # The full-resolution caches keep a few recent entries (enough for Undo/Redo or nudging a slider
 # back) and drop them after an hour unused; thumbnail-sized ones can afford more.
@@ -253,13 +254,13 @@ def refine_status_view() -> None:
         request_rerun()
     status = tracker.status()
     if status == "waiting":
-        st.caption("⚡ Fast preview -- a full-resolution render follows when you pause.")
+        st.caption(t("⚡ Fast preview -- a full-resolution render follows when you pause."))
     elif status == "running":
-        st.caption("⏳ Rendering full resolution…")
+        st.caption(t("⏳ Rendering full resolution…"))
     elif status == "ready":
-        st.caption("✨ Full-resolution view")
+        st.caption(t("✨ Full-resolution view"))
     elif status == "failed":
-        st.caption("⚡ Fast preview (the full-resolution render didn't finish; it is still used for Save).")
+        st.caption(t("⚡ Fast preview (the full-resolution render didn't finish; it is still used for Save)."))
 
 
 def build_options(ctx) -> dict:
@@ -355,7 +356,7 @@ def render_edit(ctx) -> None:
         # A newer edit from this session replaced this render -- this run is already obsolete.
         st.stop()
     except RuntimeError as error:
-        st.error(f"⚠️ {error}")
+        st.error(t("⚠️ {0}").format(t(error)))
         st.stop()
     ctx.edited_image = edited_image
     # What an export will measure -- on a proxy preview, the real (full-resolution) output size.

@@ -9,6 +9,7 @@ from __future__ import annotations
 import streamlit as st
 
 from app.controls import CONTROLS_BY_KEY
+from app.i18n import t, t_format, t_option
 
 _UNSET = object()
 
@@ -23,10 +24,10 @@ def render_control(key: str, container=None, *, label: str | None = None, disabl
     kwargs = {"key": control.widget_key, "disabled": disabled, "label_visibility": label_visibility}
     help_text = control.help if help is _UNSET else help
     if help_text:
-        kwargs["help"] = help_text
+        kwargs["help"] = t(help_text)
     if on_change is not None:
         kwargs["on_change"] = on_change
-    text = label if label is not None else control.label
+    text = t(label if label is not None else control.label)
     widget = control.widget_type
     if widget == "slider":
         args = (text, control.minimum, control.maximum, control.default)
@@ -37,8 +38,7 @@ def render_control(key: str, container=None, *, label: str | None = None, disabl
         return target.checkbox(text, value=control.default, **kwargs)
     if widget == "selectbox":
         choices = list(control.choices)
-        if format_func is not None:
-            kwargs["format_func"] = format_func
+        kwargs["format_func"] = t_format(format_func) if format_func is not None else t_option
         return target.selectbox(text, choices, index=choices.index(control.default), **kwargs)
     if widget == "number_input":
         return target.number_input(text, control.minimum, control.maximum, control.default, **kwargs)

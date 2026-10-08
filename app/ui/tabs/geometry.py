@@ -18,6 +18,7 @@ from app.ui.processing import lens_corrected_source
 from app.ui.state import consume_new_commit, request_rerun, section_header, section_reset_button, show_component
 from app.ui.widgets import render_control
 from app.ui_editors import _crop_editor_html
+from app.i18n import t
 
 GEOMETRY_KEYS = (*section_keys("geometry"), *(key for key in section_keys("lens") if CONTROLS_BY_KEY[key].option))
 
@@ -27,10 +28,10 @@ def rotate_section(ctx) -> None:
     values = ctx.values
     rot_left_col, rot_right_col, rot_value_col = st.columns([1, 1, 1.2])
     current_rotation = int(st.session_state.get("geo-rotate", 0))
-    if rot_left_col.button("⟲ Rotate left", key="geo-rot-left-btn", use_container_width=True, help="Rotate 90° counter-clockwise"):
+    if rot_left_col.button(t("⟲ Rotate left"), key="geo-rot-left-btn", use_container_width=True, help=t("Rotate 90° counter-clockwise")):
         st.session_state["_pending_restore"] = {"rotate": (current_rotation - 90) % 360}
         request_rerun()
-    if rot_right_col.button("⟳ Rotate right", key="geo-rot-right-btn", use_container_width=True, help="Rotate 90° clockwise"):
+    if rot_right_col.button(t("⟳ Rotate right"), key="geo-rot-right-btn", use_container_width=True, help=t("Rotate 90° clockwise")):
         st.session_state["_pending_restore"] = {"rotate": (current_rotation + 90) % 360}
         request_rerun()
     values["rotate"] = render_control("rotate", rot_value_col, format_func=lambda angle: f"{angle}° clockwise", label_visibility="collapsed")
@@ -39,7 +40,7 @@ def rotate_section(ctx) -> None:
     values["flip_vertical"] = render_control("flip_vertical", flip_v_col)
     straighten_col, auto_col = st.columns([3, 1])
     values["straighten"] = render_control("straighten", straighten_col)
-    ctx.auto_level_requested = auto_col.button("Auto", key="geo-auto-btn", use_container_width=True, help="Detect the photo's dominant horizontal/vertical lines and level them")
+    ctx.auto_level_requested = auto_col.button(t("Auto"), key="geo-auto-btn", use_container_width=True, help=t("Detect the photo's dominant horizontal/vertical lines and level them"))
     values["constrain_crop"] = render_control("constrain_crop")
     section_reset_button("geometry", "Rotate & Straighten")
 
@@ -49,12 +50,12 @@ def lens_section(ctx) -> None:
     values = ctx.values
     available = lens_lookup.lensfun_available()
     st.caption(
-        "📷 **From the photo's lens** looks the camera and lens up in the lensfun database (from the "
+        t("📷 **From the photo's lens** looks the camera and lens up in the lensfun database (from the "
         "photo's EXIF) and fits the sliders below to its calibration at this focal length and aperture."
         if available else
-        "The lens database (lensfunpy) isn't installed, so only the category starting points below are available."
+        "The lens database (lensfunpy) isn't installed, so only the category starting points below are available.")
     )
-    if st.button("📷 From the photo's lens", key="lens-auto-btn", disabled=not available):
+    if st.button(t("📷 From the photo's lens"), key="lens-auto-btn", disabled=not available):
         match, message = lens_lookup.find_lens(ctx.source)
         # Kept with the photo it describes, so another photo doesn't show a stale match.
         st.session_state["_lens-auto-message"] = (ctx.source_digest, message)
@@ -63,12 +64,12 @@ def lens_section(ctx) -> None:
             request_rerun()
     lens_message = st.session_state.get("_lens-auto-message")
     if lens_message and lens_message[0] == ctx.source_digest:
-        st.caption(lens_message[1])
-    st.caption("Or start from a typical lens category, then fine-tune with the sliders below.")
+        st.caption(t(lens_message[1]))
+    st.caption(t("Or start from a typical lens category, then fine-tune with the sliders below."))
     values["lens_profile"] = render_control("lens_profile")
     # A caption rather than help=: st.button(help=...) adds a second focusable tooltip button.
-    st.caption("Loads this profile's starting values -- you can still adjust the sliders afterward.")
-    if st.button("Apply Profile Defaults", key="lens-apply-profile-btn"):
+    st.caption(t("Loads this profile's starting values -- you can still adjust the sliders afterward."))
+    if st.button(t("Apply Profile Defaults"), key="lens-apply-profile-btn"):
         profile_values = LENS_PROFILES[values["lens_profile"]]
         st.session_state["_pending_restore"] = {
             "lens_distortion": profile_values["distortion"],
@@ -79,8 +80,8 @@ def lens_section(ctx) -> None:
         request_rerun()
     for key in ("lens_distortion", "lens_vignette_amount", "lens_vignette_midpoint", "lens_chromatic_aberration"):
         values[key] = render_control(key)
-    st.markdown("**Perspective (Keystone)**")
-    st.caption("Not part of a lens profile -- this depends on the shooting angle, not the lens, so it isn't filled in by 'Apply Profile Defaults' above.")
+    st.markdown(t("**Perspective (Keystone)**"))
+    st.caption(t("Not part of a lens profile -- this depends on the shooting angle, not the lens, so it isn't filled in by 'Apply Profile Defaults' above."))
     for key in ("lens_perspective_v", "lens_perspective_h"):
         values[key] = render_control(key)
     section_reset_button("lens", "Lens")
@@ -98,7 +99,7 @@ def compute_geometry(ctx) -> None:
         level_base = geometry.apply_geometry(preview_image(ctx.source, (1024, 1024)), {**ctx.geometry_options, "straighten": 0.0, "constrain_crop": False})
         detected_angle = geometry.estimate_straighten_angle(level_base)
         st.session_state["_pending_restore"] = {"straighten": detected_angle}
-        st.toast(f"Straighten set to {detected_angle:+.2f}°" if detected_angle else "No dominant lines found to level", icon="📐")
+        st.toast(t("Straighten set to {0:+.2f}°").format(detected_angle) if detected_angle else t("No dominant lines found to level"), icon="📐")
         request_rerun()
 
 
@@ -146,7 +147,7 @@ def crop_section(ctx) -> None:
 
         show_component(build_editor)
         with st.container(key="crop-editor-hidden"):
-            pending_crop = st.text_area("Free-form crop box", key="crop-editor-data", label_visibility="collapsed")
+            pending_crop = st.text_area(t("Free-form crop box"), key="crop-editor-data", label_visibility="collapsed")
         if consume_new_commit(pending_crop, "crop-editor-committed"):
             try:
                 parsed_box = json.loads(pending_crop)
@@ -172,16 +173,16 @@ def crop_section(ctx) -> None:
             ("crop-num-left", "Left (px)", src_w - 1), ("crop-num-top", "Top (px)", src_h - 1),
             ("crop-num-width", "Width (px)", src_w), ("crop-num-height", "Height (px)", src_h),
         )):
-            num_col.number_input(num_label, min_value=0, max_value=max(1, num_max), step=1, key=num_key, on_change=_numeric_crop_changed)
+            num_col.number_input(t(num_label), min_value=0, max_value=max(1, num_max), step=1, key=num_key, on_change=_numeric_crop_changed)
         if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
             crop_box = None
-            st.warning("Select a non-empty region.")
+            st.warning(t("Select a non-empty region."))
         ctx.crop_box = crop_box
     elif crop_choice != "Original":
         from app.controls import aspect_code_from
 
         ctx.aspect_code = aspect_code_from(values)
-        st.caption(f"Center-cropping to {ctx.aspect_code}.")
+        st.caption(t("Center-cropping to {0}.").format(t(ctx.aspect_code)))
     else:
-        st.caption("No crop applied — showing the full frame.")
+        st.caption(t("No crop applied — showing the full frame."))
     section_reset_button("crop", "Crop")
