@@ -137,6 +137,16 @@ Real CUDA Real-ESRGAN with 12 forced tiles matched an untiled run (PSNR 59 dB, n
 `v0.1.0`, and `v0.2.0` waits until GitHub Actions artifact uploads work again (the account's free
 monthly artifact storage ran out on 2026-10-07 and resets on 1 November).
 
+2026-10-08: a full `-GpuPack -ExtraIndexUrl https://download.pytorch.org/whl/cu130 -Installer` build. The pack
+(`release-gpu-pack\gpu-pack`, 3.5 GB: torch/torchvision 2.14.1/0.29.1+cu130, Real-ESRGAN 0.3.0, the patched
+basicsr 1.4.2) passed the base exe's self-test (GPU pack active, AI Upscale importable), and the installer
+(2.16 GB with the pack) installed per user with the GPU-pack component selected (31,181 files, 4.35 GB); the
+installed app found `{app}\gpu-pack` by itself and its self-test passed. A real 4x AI Upscale through
+`PhotoStudio.exe --backend-child` /process, from the release folder and from the installed copy: 512x384 ->
+2048x1536 in 0.4 s warm (4-5 s the first time, including the weights download and CUDA start-up) on the RTX
+5080, about 0.9 GB of VRAM. The silent uninstall removed the folder, shortcuts and uninstall entry and kept
+the user data folder.
+
 2026-10-07: a `-SkipArchive -Installer -Sign` build with the lensfun database bundled passed `--self-test`
 and produced a signed exe, uninstaller and installer (self-signed test certificate).
 
@@ -149,9 +159,8 @@ GPU-pack component was not exercised. The CUDA export path was checked on an RTX
 Clean-up round, 2026-10-02: a scratch PyInstaller build of the CPU base (from a fresh venv, outside
 `release/`; 331 MB / 2,585 files without WebView2) passed `--self-test`, and with
 `PHOTO_STUDIO_GPU_PACK` pointing at a pack folder whose `site-packages` was the dev venv's (CUDA torch,
-Real-ESRGAN) it found the pack and really imported torch + Real-ESRGAN (`ai_upscale_importable`). A
-full `build_release.ps1 -GpuPack` (CUDA torch download, pip `--target`, pruning) and the installer's
-GPU-pack component were not run; the pack finishing step is covered by `tests/test_gpu_pack.py`.
+Real-ESRGAN) it found the pack and really imported torch + Real-ESRGAN (`ai_upscale_importable`). (The
+full `-GpuPack` build and the installer's GPU-pack component were checked on 2026-10-08, see above.)
 
 ### Streamlit upgrades
 
