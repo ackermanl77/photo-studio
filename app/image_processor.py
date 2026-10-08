@@ -289,17 +289,25 @@ class PhotoProcessor:
     def apply_temperature_tint(self, temperature: float = 0.0, tint: float = 0.0) -> "PhotoProcessor":
         temperature = max(-100.0, min(100.0, float(temperature))) / 100.0
         tint = max(-100.0, min(100.0, float(tint))) / 100.0
-        if self.hdr is not None and not temperature and not tint:
+        if not temperature and not tint:
             return self
-        arr = self.hdr * 255.0 if self.hdr is not None else np.array(self.image, dtype=np.float32)
-        arr[:, :, 0] *= 1.0 + temperature * 0.25
-        arr[:, :, 2] *= 1.0 - temperature * 0.25
-        arr[:, :, 1] *= 1.0 - tint * 0.2
-        arr[:, :, 0] *= 1.0 + tint * 0.1
-        arr[:, :, 2] *= 1.0 + tint * 0.1
+        # One gain pair per channel, applied in the original order: R and B get the temperature
+        # gain and then the tint gain, G only the tint gain.
+        gains = (
+            (np.float32(1.0 + temperature * 0.25), np.float32(1.0 + tint * 0.1)),
+            (np.float32(1.0), np.float32(1.0 - tint * 0.2)),
+            (np.float32(1.0 - temperature * 0.25), np.float32(1.0 + tint * 0.1)),
+        )
         if self.hdr is not None:
-            return self._set_hdr(arr / 255.0)
-        self.image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), mode="RGB")
+            factors = np.array([first * second for first, second in gains], dtype=np.float32)
+            return self._set_hdr(self.hdr * factors)
+        # 8-bit: a per-channel lookup table (P4) -- the same float32 products and truncation the
+        # per-pixel version computed, for 256 values instead of every pixel.
+        levels = np.arange(256, dtype=np.float32)
+        tables = []
+        for first, second in gains:
+            tables += np.clip((levels * first) * second, 0, 255).astype(np.uint8).tolist()
+        self.image = self.image.convert("RGB").point(tables)
         return self
 
     def apply_hsl_mixer(self, adjustments: dict[str, dict[str, float]]) -> "PhotoProcessor":
@@ -457,15 +465,26 @@ class PhotoProcessor:
         luminance = _luminance(arr)
         radius = max(1, int(round(TONE_BASE_RADIUS_FRACTION * max(self.image.size))))
         base = guided_filter(luminance, radius, 0.01)
-        detail = luminance - base
-        shadow_weight = np.clip((0.5 - base) / 0.5, 0.0, 1.0)
-        highlight_weight = np.clip((base - 0.5) / 0.5, 0.0, 1.0)
-        # Smoothstep so the weights ease in from the midtones instead of starting with a kink.
-        shadow_weight = shadow_weight * shadow_weight * (3 - 2 * shadow_weight)
-        highlight_weight = highlight_weight * highlight_weight * (3 - 2 * highlight_weight)
-        new_base = np.clip(base + (float(shadows) / 255.0) * shadow_weight * 1.6 + (float(highlights) / 255.0) * highlight_weight * 1.6, 0.0, 1.0)
-        delta = (new_base + detail - luminance) * 255.0
-        arr += delta[..., None]
+        # The new luminance is new_base + detail, so the shift is just new_base - base. The weights
+        # are computed in place, and only for a side that is used (P4: about half the time).
+        new_base = base.copy()
+        for amount, sign in ((shadows, -1.0), (highlights, 1.0)):
+            if not amount:
+                continue
+            weight = base - np.float32(0.5)  # shadows: (0.5 - base) / 0.5, highlights: (base - 0.5) / 0.5
+            weight *= np.float32(2.0 * sign)
+            np.clip(weight, 0.0, 1.0, out=weight)
+            # Smoothstep so the weight eases in from the midtones instead of starting with a kink.
+            square = weight * weight
+            weight *= np.float32(-2.0)
+            weight += np.float32(3.0)
+            weight *= square
+            weight *= np.float32(float(amount) / 255.0 * 1.6)
+            new_base += weight
+        np.clip(new_base, 0.0, 1.0, out=new_base)
+        new_base -= base
+        new_base *= np.float32(255.0)
+        arr += new_base[..., None]
         if self.hdr is not None:
             return self._set_hdr(arr / 255.0)
         self.image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), mode="RGB")

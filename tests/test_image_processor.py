@@ -341,3 +341,46 @@ def test_normal_image_loading_uses_raw_aware_adapter(tmp_path):
     processor = PhotoProcessor(source)
 
     assert processor.image.size == (12, 8)
+
+
+def _old_temperature_tint(array, temperature, tint):
+    """The per-pixel version P4 replaced with lookup tables (kept as the reference)."""
+    temperature, tint = temperature / 100.0, tint / 100.0
+    arr = array.astype(np.float32)
+    arr[:, :, 0] *= 1.0 + temperature * 0.25
+    arr[:, :, 2] *= 1.0 - temperature * 0.25
+    arr[:, :, 1] *= 1.0 - tint * 0.2
+    arr[:, :, 0] *= 1.0 + tint * 0.1
+    arr[:, :, 2] *= 1.0 + tint * 0.1
+    return np.clip(arr, 0, 255).astype(np.uint8)
+
+
+def test_temperature_tint_tables_match_the_per_pixel_formula():
+    from tests.synthetic_assets import photo_like
+
+    image = photo_like((96, 64))
+    for temperature, tint in ((40, -25), (-100, 100), (13, 0), (0, -7)):
+        processor = PhotoProcessor.from_image(image.copy())
+        processor.apply_temperature_tint(temperature, tint)
+        assert np.array_equal(np.asarray(processor.image), _old_temperature_tint(np.asarray(image), temperature, tint))
+    processor = PhotoProcessor.from_image(image.copy())
+    assert processor.apply_temperature_tint(0, 0).image is processor.image  # no-op, no copy
+
+
+def test_highlights_shadows_shift_equals_the_base_shift():
+    """P4 computes the luminance shift as new_base - base; same result as the old
+    new_base + detail - luminance, within a level."""
+    from app.image_processor import TONE_BASE_RADIUS_FRACTION, _luminance, guided_filter
+    from tests.synthetic_assets import photo_like
+
+    image = photo_like((160, 120))
+    arr = np.asarray(image, dtype=np.float32)
+    luminance = _luminance(arr)
+    base = guided_filter(luminance, max(1, round(TONE_BASE_RADIUS_FRACTION * 160)), 0.01)
+    shadow = np.clip((0.5 - base) / 0.5, 0, 1)
+    highlight = np.clip((base - 0.5) / 0.5, 0, 1)
+    shadow, highlight = shadow * shadow * (3 - 2 * shadow), highlight * highlight * (3 - 2 * highlight)
+    new_base = np.clip(base + (60 / 255.0) * shadow * 1.6 + (-45 / 255.0) * highlight * 1.6, 0, 1)
+    expected = np.clip(arr + ((new_base + (luminance - base) - luminance) * 255.0)[..., None], 0, 255).astype(np.uint8)
+    processor = PhotoProcessor.from_image(image.copy()).apply_highlights_shadows(highlights=-45, shadows=60)
+    assert np.abs(np.asarray(processor.image).astype(int) - expected.astype(int)).max() <= 1
