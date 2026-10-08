@@ -120,7 +120,7 @@ python -m pytest -m perf` runs the 24 MP budgets). CI (`.github/workflows/ci.yml
 Windows and Ubuntu with Python 3.12 and 3.14, plus a `raw-decode` job with `requirements-raw.txt`.
 
 Last run 2026-10-07 on Windows 11 / Python 3.14.7 with the dev `.venv`'s packages: `compileall` clean;
-`pytest -q -n auto` **706 passed, 12 skipped** in 23 s (639/11 on 2026-10-03). The 12 skips are by
+`pytest -q -n auto` **716 passed, 12 skipped** in 15 s (706 before the P3 leftovers, 639/11 on 2026-10-03). The 12 skips are by
 design: nine photo-specific or UI-only controls in `tests/test_parity_golden.py`, the two opt-in
 `PHOTO_PERF_TESTS` budgets, and the no-file-manager fallback of "Open logs folder" (Windows always has one). That venv has CUDA torch 2.14 and Real-ESRGAN, so the GPU-export and
 AI Upscale tests ran; without torch the ones that need it skip (CI).
