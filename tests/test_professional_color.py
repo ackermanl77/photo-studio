@@ -312,3 +312,13 @@ def test_estimate_white_balance_correction_actually_neutralizes_the_sampled_pixe
     corrected = PhotoProcessor.from_image(image).apply_temperature_tint(temp, tint).image
     r, g, b = corrected.getpixel((5, 5))
     assert max(r, g, b) - min(r, g, b) < 3
+
+
+def test_clipping_warning_overlay_margin_flags_near_clipped_tones():
+    image = Image.fromarray(np.array([[[250, 120, 120], [3, 120, 120], [120, 120, 120]]], dtype=np.uint8), mode="RGB")
+    plain = np.asarray(clipping_warning_overlay(image, highlight_color=(9, 9, 9), shadow_color=(7, 7, 7)))
+    margin = np.asarray(clipping_warning_overlay(image, shadow_threshold=5, highlight_threshold=250,
+                                                 highlight_color=(9, 9, 9), shadow_color=(7, 7, 7)))
+    assert tuple(plain[0, 0]) == (250, 120, 120) and tuple(plain[0, 1]) == (3, 120, 120)
+    assert tuple(margin[0, 0]) == (9, 9, 9) and tuple(margin[0, 1]) == (7, 7, 7)
+    assert tuple(margin[0, 2]) == (120, 120, 120)

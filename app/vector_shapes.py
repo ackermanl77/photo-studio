@@ -41,6 +41,19 @@ def _polygon_points(
     return points
 
 
+def _ellipse_points(center: tuple[float, float], radius_x: float, radius_y: float, rotation_deg: float) -> list[tuple[float, float]]:
+    """A rotated ellipse as a polygon, about one vertex per 2 px of its outline (at least 64), so the
+    facets stay under a pixel at the canvas's own resolution."""
+    perimeter = math.pi * (3 * (radius_x + radius_y) - math.sqrt((3 * radius_x + radius_y) * (radius_x + 3 * radius_y)))
+    count = max(64, int(perimeter / 2))
+    cx, cy = center
+    return [
+        _rotate_point((cx + radius_x * math.cos(2 * math.pi * i / count), cy + radius_y * math.sin(2 * math.pi * i / count)),
+                      center, rotation_deg)
+        for i in range(count)
+    ]
+
+
 def render_shape_layer(canvas_size: tuple[int, int], params: dict) -> Image.Image:
     """Render one parametric vector shape into a transparent RGBA image at the source photo's real
     pixel size. `params` (matching one entry of st.session_state.image_layers for a "shape"-kind
@@ -51,9 +64,9 @@ def render_shape_layer(canvas_size: tuple[int, int], params: dict) -> Image.Imag
         own width/height (independent axes -- a Polygon/Star with width_pct != height_pct stretches
         into an ellipse-like variant rather than staying perfectly regular, a deliberate creative
         option rather than forcing symmetry)
-      - rotation_deg: ignored for Ellipse (PIL has no rotated-ellipse primitive without falling back
-        to a many-sided polygon approximation, judged not worth it for how rarely a rotated oval
-        actually differs from an unrotated one)
+      - rotation_deg: turns the shape about its center (an Ellipse at a multiple of 180 degrees is
+        drawn with PIL's exact ellipse; any other angle as a finely sampled rotated polygon, since
+        PIL has no rotated-ellipse primitive)
       - fill_enabled/fill_color/fill_opacity, stroke_enabled/stroke_color/stroke_width: the shape's
         own vector fill/outline -- distinct from a Layer Style's "Stroke" effect (app.layer_styles),
         which dilates whatever silhouette a layer already has rather than defining the shape itself
@@ -85,7 +98,11 @@ def render_shape_layer(canvas_size: tuple[int, int], params: dict) -> Image.Imag
         return image
 
     if shape_type == "Ellipse":
-        draw.ellipse([cx - half_w, cy - half_h, cx + half_w, cy + half_h], fill=fill, outline=outline, width=stroke_width or 1)
+        if rotation % 180.0 == 0.0 or half_w == half_h:  # unrotated, or a circle: rotation changes nothing
+            draw.ellipse([cx - half_w, cy - half_h, cx + half_w, cy + half_h], fill=fill, outline=outline, width=stroke_width or 1)
+            return image
+        points = _ellipse_points((cx, cy), half_w, half_h, rotation)
+        draw.polygon(points, fill=fill, outline=outline, width=stroke_width or 1)
         return image
 
     if shape_type == "Rectangle":

@@ -217,6 +217,7 @@ def apply_watermark(
     opacity: int = 50,
     font_size: int = 32,
     color: tuple[int, int, int] = (255, 255, 255),
+    font: str = "",
 ) -> Image.Image:
     """Stamp semi-transparent text onto a copy of `image` -- a lightweight branding/proofing
     mark for exports, not a tamper-resistant signature. A blank/whitespace-only `text` is a
@@ -234,11 +235,11 @@ def apply_watermark(
     overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     size = max(1, int(font_size))
-    # The same TrueType lookup Text layers use (app.layer_workspace._load_font), so a watermark
-    # and a text layer look alike; it falls back to Pillow's own font when none is installed.
-    from app.layer_workspace import _load_font
+    # The same font lookup Text layers use (app.fonts): a name from the watermark's Font choice,
+    # or "" for the automatic default.
+    from app.fonts import load_font
 
-    font = _load_font(size)
+    font = load_font(font, size)
     bbox = draw.textbbox((0, 0), text, font=font)
     text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
     margin = max(4, int(size * 0.4))
@@ -265,6 +266,7 @@ def export_profile(
     exif: bytes | None = None,
     remove_gps: bool = False,
     gpu_export: bool = False,
+    watermark_font: str = "",
 ) -> tuple[bytes, str, str]:
     """`remove_gps` drops the GPS block from a profile that keeps EXIF (Print/Archive; Web and
     Social strip all EXIF anyway). `exif` overrides `image.info["exif"]` -- the frontend passes the *source* photo's EXIF,
@@ -295,7 +297,8 @@ def export_profile(
     if watermark_text and watermark_text.strip():
         # Applied after the resize above (not before) so position/margin/font-size are relative
         # to the actual exported pixel dimensions of each profile, not the source's.
-        result = apply_watermark(result, watermark_text, watermark_position, watermark_opacity, watermark_font_size)
+        result = apply_watermark(result, watermark_text, watermark_position, watermark_opacity, watermark_font_size,
+                                 font=watermark_font)
     output = io.BytesIO()
     format_name = profile["format"]
     save_kwargs = {"format": format_name}

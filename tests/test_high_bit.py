@@ -297,3 +297,79 @@ def test_the_export_panel_offers_16_bit_for_png_and_tiff_and_renders_it_on_the_b
     pixels = _decode16(captured["data"]())
     assert exports and exports[-1]["bit_depth"] == 16
     assert pixels.dtype == np.uint16 and len(np.unique(pixels[8, :, 0])) > 200
+
+
+def _processor_on(array: np.ndarray) -> PhotoProcessor:
+    image = Image.fromarray(np.clip(np.rint(array * 255), 0, 255).astype(np.uint8), mode="RGB")
+    return PhotoProcessor.from_image(image).enable_high_precision(array)
+
+
+def test_colour_and_detail_steps_compute_in_float_in_16_bit_mode():
+    from app.high_bit import texture_float, unsharp_float
+    from app.professional_color import color_grading_float, hsl_mixer_float, vibrance_float
+
+    rng = np.random.default_rng(3)
+    # Values between the 8-bit levels: an 8-bit step carried over would land on a 1/255 grid offset.
+    array = (rng.random((40, 50, 3), dtype=np.float32) * 0.8 + 0.1).astype(np.float32)
+    bands = {"Blue": {"hue": 10, "sat": 20, "lum": -10}, "Red": {"sat": -30}}
+    cases = [
+        (lambda p: p.apply_hsl_mixer(bands), hsl_mixer_float(array, bands)),
+        (lambda p: p.apply_vibrance(35), vibrance_float(array, 35)),
+        (lambda p: p.apply_color_grading(200, 30, 40, 10, 60, 20, 15), color_grading_float(array, 200, 30, 40, 10, 60, 20, 15)),
+        (lambda p: p.apply_texture_clarity(texture=40), texture_float(array, 2, 40)),
+        (lambda p: p.apply_sharpen(1.0, 150), unsharp_float(array, 1, 150, 3)),
+    ]
+    for step, expected in cases:
+        processor = step(_processor_on(array.copy()))
+        assert np.allclose(processor.hdr, expected, atol=1e-6)
+    grained = _processor_on(array.copy()).apply_film_grain(40).hdr
+    noise = grained - array
+    assert np.abs(noise).mean() > 0.005  # grain applied...
+    assert np.allclose(noise, noise[..., :1], atol=1e-6)  # ...monochromatic, the same on all channels
+    assert not np.allclose(noise * 255, np.rint(noise * 255), atol=1e-3)  # not quantized to 8-bit levels
+
+
+def test_the_8_bit_colour_steps_are_unchanged_by_the_float_versions():
+    from app.professional_color import apply_color_grading, apply_hsl_mixer, apply_vibrance
+
+    image = photo_like((64, 48))
+    bands = {"Blue": {"hue": 10, "sat": 20, "lum": -10}}
+    rgb = np.asarray(image, dtype=np.float32) / 255.0
+    from app.professional_color import color_grading_float, hsl_mixer_float, vibrance_float
+
+    assert np.array_equal(np.asarray(apply_hsl_mixer(image, bands)), np.clip(np.rint(hsl_mixer_float(rgb, bands) * 255), 0, 255).astype(np.uint8))
+    assert np.array_equal(np.asarray(apply_vibrance(image, 30)), np.clip(np.rint(vibrance_float(rgb, 30) * 255), 0, 255).astype(np.uint8))
+    graded = np.asarray(apply_color_grading(image, 200, 30))
+    assert np.abs(graded.astype(np.float32) - color_grading_float(rgb, 200, 30) * 255).max() < 1.0  # 8-bit floors
+
+
+def test_a_16_bit_tiff_keeps_the_exif_and_gps_sub_ifds_by_metadata_policy():
+    import tifffile
+    from PIL.TiffImagePlugin import IFDRational
+
+    exif = Image.Exif()
+    exif[0x010F] = "TestMaker"
+    camera = exif.get_ifd(0x8769)
+    camera[0x829A] = IFDRational(1, 250)  # ExposureTime
+    camera[0x8827] = 400  # ISO
+    camera[0x9003] = "2026:10:09 12:00:00"  # DateTimeOriginal
+    exif.get_ifd(0x8825)[1] = "N"  # GPSLatitudeRef
+    image = Image.new("RGB", (64, 8))
+    attach(image, np.linspace(0, 1, 64, dtype=np.float32)[None, :, None] * np.ones((8, 1, 3), np.float32))
+
+    def written(**settings):
+        content = encode_export(image, {"format": "TIFF", "bit_depth": 16, **settings}, exif=exif.tobytes())[0]
+        with tifffile.TiffFile(io.BytesIO(content)) as tiff:
+            page = tiff.pages[0]
+            assert page.dtype == np.uint16 and page.asarray().shape == (8, 64, 3)
+        reopened = Image.open(io.BytesIO(content)).getexif()
+        return dict(reopened.get_ifd(0x8769)), dict(reopened.get_ifd(0x8825))
+
+    camera_tags, gps_tags = written(metadata="all")
+    assert camera_tags[0x8827] == 400 and camera_tags[0x9003] == "2026:10:09 12:00:00"
+    assert float(camera_tags[0x829A]) == 1 / 250
+    assert gps_tags == {1: "N"}
+    assert written(metadata="all", remove_gps=True)[1] == {}
+    assert written(metadata="camera")[0][0x8827] == 400
+    assert written(metadata="none") == ({}, {})
+

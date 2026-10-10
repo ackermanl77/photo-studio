@@ -99,3 +99,61 @@ def test_save_rating_writes_the_sidecar_only_when_asked(tmp_path):
     assert find_sidecar(jpeg) is None
     assert save_rating(catalog, jpeg, 3, ["a", "rejected"], write_xmp=True) is None
     assert read_sidecar(jpeg) == {"rating": 0, "rejected": True, "tags": ["a"]}
+
+
+def _touch_later(path, seconds=10):
+    import os
+
+    stat = path.stat()
+    os.utime(path, (stat.st_atime + seconds, stat.st_mtime + seconds))
+
+
+def test_a_rescan_reads_a_sidecar_another_program_changed(tmp_path):
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    jpeg = _photo(folder, "a.jpg")
+    sidecar = folder / "a.jpg.xmp"
+    sidecar.write_text(LIGHTROOM_SIDECAR, encoding="utf-8")
+    database = tmp_path / "catalog.sqlite"
+    index_folder(folder, database)
+    catalog = PhotoCatalog(database)
+    catalog.upsert(jpeg, rating=1, tags=["mine"])
+    sidecar.write_text(LIGHTROOM_SIDECAR.replace("<xmp:Rating>3", "<xmp:Rating>5"), encoding="utf-8")
+    _touch_later(sidecar)  # Lightroom rated it after the last scan
+    index_folder(folder, database)
+    assert catalog.get(jpeg)["rating"] == 5
+    assert sorted(catalog.get(jpeg)["tags"]) == ["beach", "family"]
+
+
+def test_the_apps_own_sidecar_writes_are_not_reimported(tmp_path):
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    jpeg = _photo(folder, "a.jpg")
+    database = tmp_path / "catalog.sqlite"
+    index_folder(folder, database)
+    catalog = PhotoCatalog(database)
+    save_rating(catalog, jpeg, 4, ["x"], write_xmp=True)
+    catalog.upsert(jpeg, rating=2, tags=["y"])  # a later in-app change without writing the sidecar
+    index_folder(folder, database)
+    assert catalog.get(jpeg)["rating"] == 2
+
+
+def test_an_older_catalog_records_existing_sidecars_without_overwriting_ratings(tmp_path):
+    import sqlite3
+
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    jpeg = _photo(folder, "a.jpg")
+    sidecar = folder / "a.jpg.xmp"
+    sidecar.write_text(LIGHTROOM_SIDECAR, encoding="utf-8")
+    database = tmp_path / "catalog.sqlite"
+    with sqlite3.connect(database) as connection:  # the schema before sidecar times were tracked
+        connection.execute("CREATE TABLE photos (path TEXT PRIMARY KEY, rating INTEGER DEFAULT 0, tags TEXT DEFAULT '')")
+        connection.execute("INSERT INTO photos VALUES (?, 1, 'mine')", (str(jpeg),))
+    connection.close()
+    index_folder(folder, database)
+    catalog = PhotoCatalog(database)
+    assert catalog.get(jpeg)["rating"] == 1  # the first scan after upgrading only records the time
+    _touch_later(sidecar)
+    index_folder(folder, database)
+    assert catalog.get(jpeg)["rating"] == 3  # a change after that is picked up

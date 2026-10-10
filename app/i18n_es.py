@@ -268,6 +268,11 @@ ES = {
         "〰️ **Monitor de forma de onda**: un instrumento adicional para comprobar la exposición a lo ancho del encuadre, junto al histograma de arriba.",
     "⚠️ Show clipping": "⚠️ Mostrar recorte",
     "Highlights blocked shadows (blue) and blown highlights (red).": "Resalta las sombras empastadas (azul) y las altas luces quemadas (rojo).",
+    "Clipping margin": "Margen de recorte",
+    "Also flag tones within this many levels of pure black or white (0 = only fully clipped pixels).":
+        "Marca también los tonos a esta cantidad de niveles del negro o el blanco puros (0 = solo los píxeles recortados del todo).",
+    "Blue = shadows clipped to black, Red = highlights clipped to white":
+        "Azul = sombras recortadas a negro, rojo = altas luces recortadas a blanco",
     "History and Named Snapshots -- jump to any earlier step, or bookmark the current look under a name":
         "Historial e instantáneas con nombre: vuelve a cualquier paso anterior o guarda el aspecto actual con un nombre",
     "**Named Snapshots**": "**Instantáneas con nombre**",
@@ -376,6 +381,16 @@ ES = {
     "Position": "Posición",
     "Opacity %": "Opacidad %",
     "Font size": "Tamaño de letra",
+    "Font": "Fuente",
+    "🔤 Fonts": "🔤 Fuentes",
+    "Automatic (default)": "Automática (predeterminada)",
+    "{0} (not installed)": "{0} (no instalada)",
+    "Add a font (.ttf, .otf)": "Agregar una fuente (.ttf, .otf)",
+    "The font is copied into the app's data folder and listed in every Font choice.":
+        "La fuente se copia en la carpeta de datos de la aplicación y aparece en todas las listas de fuentes.",
+    "Font '{0}' added": "Fuente '{0}' agregada",
+    "That file isn't a TrueType or OpenType font.": "Ese archivo no es una fuente TrueType ni OpenType.",
+    "The font file is larger than 30 MB.": "El archivo de fuente pesa más de 30 MB.",
     "⬇️ Download ZIP": "⬇️ Descargar ZIP",
     "⚠️ This project would be about {0:.0f} MB -- over the {1} MB a project can be reopened with. Remove or shrink some image layers.":
         "⚠️ Este proyecto ocuparía unos {0:.0f} MB, más de los {1} MB con los que se puede volver a abrir un proyecto. Quita o reduce algunas capas de imagen.",
@@ -502,6 +517,10 @@ ES = {
     "Selection Type": "Tipo de selección",
     "Tolerance": "Tolerancia",
     "Contiguous (connected region only)": "Contigua (solo la región conectada)",
+    "Sample size": "Tamaño de muestra",
+    "Point": "Punto",
+    "Average the colour over a small square around the click -- steadier than a single pixel on noisy or textured areas.":
+        "Promedia el color en un pequeño cuadrado alrededor del clic: más estable que un solo píxel en zonas con ruido o textura.",
     "Click a point on the photo below to select similar colors around it.":
         "Haz clic en un punto de la foto de abajo para seleccionar los colores parecidos a su alrededor.",
     "Enabled": "Activada",
@@ -510,7 +529,7 @@ ES = {
     "Combine with the selections above": "Combinar con las selecciones de arriba",
     "Magic wand click": "Clic de la varita mágica",
     "Paint directly on the photo below — brush, radial, or gradient, plus an eraser. Click \"Add to selections\" inside the canvas when done.":
-        "Pinta directamente sobre la foto de abajo: pincel, radial o degradado, además de un borrador. Haz clic en \"Add to selections\" dentro del lienzo cuando termines.",
+        "Pinta directamente sobre la foto de abajo: pincel, radial o degradado, además de un borrador. Haz clic en \"Añadir a las selecciones\" dentro del lienzo cuando termines.",
     "Invert selection": "Invertir selección",
     "Layer name": "Nombre de la capa",
     "Add selection": "Añadir selección",
@@ -702,4 +721,45 @@ ES = {
         "Todas las capas de máscara están desactivadas: los controles de abajo no tienen efecto.",
     "All selections are disabled — nothing will be removed.": "Todas las selecciones están desactivadas: no se eliminará nada.",
     "👤 Detected faces: {0}": "👤 Rostros detectados: {0}",
+
+    # --- On-canvas editors (app/ui_editors.py) -----------------------------------------------------
+    "BEFORE": "ANTES",
+    "AFTER": "DESPUÉS",
+    "Before/after comparison position": "Posición de la comparación antes/después",
+    "Curve point {0} of 5 -- Up/Down arrows adjust it": "Punto {0} de 5 de la curva: las flechas arriba/abajo lo ajustan",
+    "Tone curve editor. Tab to a point, then use the Up and Down arrows.":
+        "Editor de la curva de tonos. Ve a un punto con Tab y usa las flechas arriba y abajo.",
+    "Click an empty spot on the curve to add a point, drag it, double-click to remove it.":
+        "Haz clic en un lugar vacío de la curva para añadir un punto, arrástralo y haz doble clic para quitarlo.",
+    "Drag a point up or down.": "Arrastra un punto hacia arriba o hacia abajo.",
+    "Keyboard: Tab to a point, Up/Down (Shift = x10).": "Teclado: Tab para ir a un punto, arriba/abajo (Mayús = x10).",
+    "Selection painter. [ and ] change the brush size; arrow keys move the last radial or gradient (Alt: its end point, Shift: 10x).":
+        "Pintor de selecciones. [ y ] cambian el tamaño del pincel; las flechas mueven el último radial o degradado (Alt: su punto final, Mayús: x10).",
+    "🖌 Brush": "🖌 Pincel",
+    "⭕ Radial": "⭕ Radial",
+    "📐 Gradient": "📐 Degradado",
+    "🧹 Erase": "🧹 Borrar",
+    "✖ Clear": "✖ Limpiar",
+    "Size": "Tamaño",
+    "Brush size ([ and ] keys)": "Tamaño del pincel (teclas [ y ])",
+    "➕ Add to selections": "➕ Añadir a las selecciones",
+    "💾 Update Painting": "💾 Actualizar pintura",
+    "Keys: [ / ] brush size. After a radial or gradient: arrows move it, Alt+arrows move its end point, Shift = x10.":
+        "Teclas: [ / ] tamaño del pincel. Tras un radial o degradado: las flechas lo mueven, Alt+flechas mueven su punto final, Mayús = x10.",
+    "Click anywhere on the photo to sample that color.": "Haz clic en cualquier punto de la foto para tomar ese color.",
+    "Click to center the zoomed view there.": "Haz clic para centrar ahí la vista ampliada.",
+    "Crop box. Tab to the box or a corner, then use the arrow keys (Shift = 10 pixels).":
+        "Recuadro de recorte. Ve al recuadro o a una esquina con Tab y usa las flechas (Mayús = 10 píxeles).",
+    "Crop box -- arrow keys move it": "Recuadro de recorte: las flechas lo mueven",
+    "Top-left crop corner -- arrow keys move it": "Esquina superior izquierda del recorte: las flechas la mueven",
+    "Bottom-right crop corner -- arrow keys move it": "Esquina inferior derecha del recorte: las flechas la mueven",
+    "Crop:": "Recorte:",
+    "drag a corner to resize, drag inside to move.": "arrastra una esquina para cambiar el tamaño, arrastra dentro para mover.",
+    "Pen path. Tab to a point; arrow keys move it, Alt+arrows move its curve handle, Shift = 10x, Delete removes it.":
+        "Trazado de pluma. Ve a un punto con Tab; las flechas lo mueven, Alt+flechas mueven su manejador de curva, Mayús = x10 y Supr lo quita.",
+    "Click the photo to add a point. Drag a point to move it, drag its amber handle to curve the path. Double-click a point to remove it. Keys: Tab to a point, arrows nudge it (Alt: its handle, Shift: x10), Delete removes it.":
+        "Haz clic en la foto para añadir un punto. Arrastra un punto para moverlo y su manejador ámbar para curvar el trazado. Haz doble clic en un punto para quitarlo. Teclas: Tab para ir a un punto, las flechas lo desplazan (Alt: su manejador, Mayús: x10) y Supr lo quita.",
+    "Zoomed photo. Drag to pan, or use the arrow keys (Shift = faster).":
+        "Foto ampliada. Arrastra para desplazarte o usa las flechas (Mayús = más rápido).",
+    "Drag the photo to pan (arrow keys work too).": "Arrastra la foto para desplazarte (también sirven las flechas).",
 }

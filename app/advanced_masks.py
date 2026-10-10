@@ -107,7 +107,11 @@ def soften_mask(mask: Image.Image, radius: int) -> Image.Image:
     return mask.convert("L").filter(ImageFilter.GaussianBlur(max(0, int(radius))))
 
 
-def magic_wand_mask(image: Image.Image, click_x: float, click_y: float, tolerance: int = 40, contiguous: bool = True) -> Image.Image:
+WAND_SAMPLE_SIZES = (1, 3, 5, 11)
+
+
+def magic_wand_mask(image: Image.Image, click_x: float, click_y: float, tolerance: int = 40, contiguous: bool = True,
+                    sample_size: int = 1) -> Image.Image:
     """Click-to-select: samples the color at (`click_x`, `click_y`) -- fractions 0..1 of the
     image, resolution-independent since the on-canvas picker shows a downscaled preview -- and
     selects pixels within `tolerance` of it. Non-contiguous mode is exactly color_mask() with the
@@ -115,19 +119,35 @@ def magic_wand_mask(image: Image.Image, click_x: float, click_y: float, toleranc
     mode (the traditional "magic wand" behavior, and the default) restricts the result to the
     single connected region reachable from the click point by flood fill, so clicking one red
     apple doesn't also select an unconnected red object elsewhere in the frame.
+
+    `sample_size` (1, 3, 5 or 11 px, Photoshop's "Sample Size"): above 1 the target is the average
+    colour of that square around the click, steadier than one possibly noisy/anti-aliased pixel,
+    and the contiguous fill compares every pixel with that average (a fixed range). 1 keeps the
+    original single-pixel, neighbour-to-neighbour fill exactly.
     """
     rgb = image.convert("RGB")
     width, height = rgb.size
     px = min(width - 1, max(0, int(click_x * width)))
     py = min(height - 1, max(0, int(click_y * height)))
+    half = max(0, int(sample_size) // 2)
+    if half:
+        window = np.asarray(rgb)[max(0, py - half):py + half + 1, max(0, px - half):px + half + 1]
+        target = tuple(int(round(v)) for v in window.reshape(-1, 3).mean(axis=0))
+    else:
+        target = rgb.getpixel((px, py))
     if not contiguous:
-        return color_mask(rgb, rgb.getpixel((px, py)), tolerance)
+        return color_mask(rgb, target, tolerance)
 
     bgr = cv2.cvtColor(np.array(rgb), cv2.COLOR_RGB2BGR)
     flood_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
     diff = (tolerance, tolerance, tolerance)
-    # FLOODFILL_MASK_ONLY: `bgr` itself is left untouched, only `flood_mask` is written; the fill
-    # value written into it (255, not the default 1) is packed into flags' upper byte.
-    cv2.floodFill(bgr, flood_mask, (px, py), (255, 255, 255), loDiff=diff, upDiff=diff, flags=4 | cv2.FLOODFILL_MASK_ONLY | (255 << 8))
+    flags = 4 | cv2.FLOODFILL_MASK_ONLY | (255 << 8)
+    if half:
+        # The seed carries the sampled average and FIXED_RANGE compares every pixel with it.
+        bgr[py, px] = target[::-1]
+        flags |= cv2.FLOODFILL_FIXED_RANGE
+    # FLOODFILL_MASK_ONLY: only `flood_mask` is used as output (the fill value written into it --
+    # 255, not the default 1 -- is packed into flags' upper byte).
+    cv2.floodFill(bgr, flood_mask, (px, py), (255, 255, 255), loDiff=diff, upDiff=diff, flags=flags)
     region = flood_mask[1:-1, 1:-1]
     return Image.fromarray(region, mode="L")

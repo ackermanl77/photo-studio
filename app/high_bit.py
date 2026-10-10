@@ -112,3 +112,24 @@ def decode_high_bit(content: bytes, filename: str) -> np.ndarray | None:
     if is_raw_path(filename):
         return decode_raw_array(BytesIO(content), bits=16).astype(np.float32) / 65535.0
     return _decode_standard_high_bit(content)
+
+
+def unsharp_float(array: np.ndarray, radius: float, percent: float, threshold: float = 3) -> np.ndarray:
+    """PIL's UnsharpMask (radius = blur sigma, percent, threshold in 8-bit levels) on float pixels
+    in [0, 1] -- used by Sharpen and the 16-bit export's output sharpening. OpenCV's Gaussian blur
+    stands in for Pillow's, which has no float mode."""
+    import cv2
+
+    blurred = cv2.GaussianBlur(np.asarray(array, dtype=np.float32), (0, 0), float(radius))
+    detail = array - blurred
+    detail[np.abs(detail) * 255.0 < threshold] = 0.0
+    return np.clip(array + detail * (float(percent) / 100.0), 0.0, 1.0)
+
+
+def texture_float(array: np.ndarray, radius: float, texture: float) -> np.ndarray:
+    """Texture (fine local contrast) on float pixels: the same detail-layer boost as the 8-bit
+    version, `texture` -100..100."""
+    import cv2
+
+    detail = array - cv2.GaussianBlur(np.asarray(array, dtype=np.float32), (0, 0), float(radius))
+    return np.clip(array + detail * (float(texture) / 100.0), 0.0, 1.0)

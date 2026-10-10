@@ -18,6 +18,7 @@ import streamlit as st
 from PIL import Image
 
 from app.layer_styles import apply_layer_styles
+from app import fonts
 from app.layer_workspace import WorkspaceLayer, layers_to_json, render_image_layer, render_text_layer
 from app.major_features import BLEND_MODE_LABELS
 from app.professional_tools import preview_image
@@ -77,7 +78,7 @@ def layer_dict_to_image(layer: dict, canvas_size: tuple[int, int], scale: float 
             font_size = float(layer.get("font_size", 48)) * scale
         content = render_text_layer(
             canvas_size, layer.get("text", ""), font_size, hex_to_rgba(layer.get("color", "#FFFFFF")),
-            layer.get("align", "left"), layer.get("x_pct", 50.0), layer.get("y_pct", 50.0),
+            layer.get("align", "left"), layer.get("x_pct", 50.0), layer.get("y_pct", 50.0), layer.get("font", ""),
         )
     elif layer.get("kind") == "shape":
         # fill_color/stroke_color are stored as st.color_picker hex strings, same UI convention as
@@ -180,6 +181,38 @@ def render_layer_styles(layer: dict, layer_id: str) -> None:
             styles["color_overlay_opacity"] = st.slider(t("Overlay Opacity"), 0.0, 1.0, float(styles.get("color_overlay_opacity", 0.6)), 0.01, key=f"l-co-op-{layer_id}", help=t("How strongly the color tints the layer -- 0 has no effect, 1 fully replaces its color."))
 
 
+def font_select(label: str, current: str, key: str) -> str:
+    """A Font choice: "" (the automatic default) plus every font app.fonts finds. A stored font this
+    machine doesn't have stays selectable (marked), so opening a project doesn't silently drop it."""
+    names = list(fonts.available_fonts())
+    options = ["", *names] if not current or current in names else ["", current, *names]
+    return st.selectbox(
+        label, options, index=options.index(current) if current in options else 0, key=key,
+        format_func=lambda name: t("Automatic (default)") if not name
+        else (name if name in names else t("{0} (not installed)").format(name)),
+    )
+
+
+def font_upload_section() -> None:
+    """"Add a font": install an uploaded .ttf/.otf once (it then appears in every Font choice)."""
+    upload = st.file_uploader(
+        t("Add a font (.ttf, .otf)"), type=["ttf", "otf", "ttc"], key="font-upload",
+        help=t("The font is copied into the app's data folder and listed in every Font choice."),
+    )
+    if upload is None:
+        return
+    installed = st.session_state.setdefault("_fonts_installed", set())
+    if upload.file_id in installed:  # a file_uploader keeps its file across reruns
+        return
+    installed.add(upload.file_id)
+    try:
+        name = fonts.install_font(upload.getvalue(), upload.name)
+    except ValueError as error:
+        st.error(t("⚠️ {0}").format(t(str(error))))
+    else:
+        st.toast(t("Font '{0}' added").format(name), icon="🔤")
+
+
 def render_pen_path_editor(source: Image.Image, key_prefix: str, points: list[dict], closed: bool) -> tuple[list[dict], bool]:
     """The on-canvas Pen tool editor (_pen_editor_html) plus its Closed Path/Clear controls --
     shared between the "Add a layer" draft flow (building a brand new path before it becomes a
@@ -241,6 +274,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                         "kind": "text",
                         "name": f"Text {len(layers) + 1}",
                         "text": "Text",
+                        "font": "",
                         "font_size_pct": 6.0,
                         "color": "#FFFFFF",
                         "align": "left",
@@ -312,12 +346,12 @@ def render_layer_stack(source: Image.Image) -> str | None:
                         "visible": True,
                     }
                 )
-                # Only the points draft is reset -- "l-path-draft-closed" is the Closed Path
-                # checkbox's own widget key, already instantiated this run, so it can't be written
-                # to directly (same rule as the comment above render_pen_path_editor's call). Left
-                # as whatever the user last set it to for the next new path being drafted, a minor,
-                # harmless carry-over rather than worth a bigger _pending_restore-style mechanism.
+                # The next path starts empty and open. "l-path-draft-closed" is the Closed Path
+                # checkbox's own, already instantiated widget key: it can't be assigned to (same
+                # rule as above), but deleting it is allowed, and the checkbox then comes back
+                # unchecked on the next run (its default is read with .get(..., False)).
                 st.session_state["l-path-draft-points"] = []
+                st.session_state.pop("l-path-draft-closed", None)
                 request_rerun()
         else:
             new_layer_file = st.file_uploader(t("Layer image"), type=["png", "jpg", "jpeg", "webp"], key="l-new-file")
@@ -369,6 +403,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
             with tab_content:
                 if layer["kind"] == "text":
                     layer["text"] = st.text_area(t("Text"), layer.get("text", "Text"), key=f"l-text-{layer_id}")
+                    layer["font"] = font_select(t("Font"), layer.get("font", ""), key=f"l-font-{layer_id}")
                     text_col1, text_col2 = st.columns(2)
                     with text_col1:
                         if "font_size_pct" not in layer:  # a pixel size from an older layer -> % of the short edge
@@ -396,7 +431,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                     preview_bg = Image.new("RGBA", preview_size, (40, 40, 40, 255))
                     preview_text = render_text_layer(
                         preview_size, layer["text"], layer["font_size_pct"] / 100.0 * min(preview_size), hex_to_rgba(layer["color"]),
-                        layer["align"], layer["x_pct"], layer["y_pct"],
+                        layer["align"], layer["x_pct"], layer["y_pct"], layer["font"],
                     )
                     if tab_visible():
                         st.image(Image.alpha_composite(preview_bg, preview_text))
@@ -416,8 +451,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                         layer["height_pct"] = st.slider(
                             t("Height (%)"), 1.0, 100.0, float(layer.get("height_pct", 30.0)), key=f"l-shp-h-{layer_id}", disabled=layer["shape_type"] == "Line",
                         )
-                    if layer["shape_type"] != "Ellipse":
-                        layer["rotation_deg"] = st.slider(t("Rotation"), 0.0, 360.0, float(layer.get("rotation_deg", 0.0)), key=f"l-shp-rot-{layer_id}")
+                    layer["rotation_deg"] = st.slider(t("Rotation"), 0.0, 360.0, float(layer.get("rotation_deg", 0.0)), key=f"l-shp-rot-{layer_id}")
                     if layer["shape_type"] in ("Polygon", "Star"):
                         shp_sides1, shp_sides2 = st.columns(2)
                         with shp_sides1:

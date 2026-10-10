@@ -4,7 +4,6 @@ from unittest import mock
 import numpy as np
 from PIL import Image
 
-from app import layer_workspace as layer_workspace_module
 from app.layer_workspace import LayerWorkspace, WorkspaceLayer, layers_from_json, layers_to_json, render_text_layer
 
 
@@ -87,7 +86,9 @@ def test_render_text_layer_falls_back_to_pillows_default_font_when_no_system_fon
     """On a machine (or CI runner) with none of the candidate TrueType fonts installed, this must
     still render legible text rather than raising -- confirmed here by forcing that path instead of
     depending on which fonts happen to be installed on whatever machine runs this test."""
-    with mock.patch.object(layer_workspace_module, "_FONT_CANDIDATES", ()):
+    from app import fonts
+
+    with mock.patch.object(fonts, "_DEFAULT_CANDIDATES", ()):
         image = render_text_layer((200, 100), "Hi", font_size=40)
 
     assert np.asarray(image)[:, :, 3].max() > 0

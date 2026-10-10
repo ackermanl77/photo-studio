@@ -209,8 +209,8 @@ the image renders.
 | Type | What you get |
 |---|---|
 | **Image** | Upload a PNG/JPG/WEBP to composite on top of your photo. It keeps its proportions (fitted inside the photo at 100 %) and can be moved, scaled and rotated; "Stretch to fill the photo" makes it cover the whole frame instead. |
-| **Text** | Type content, then set font size (a % of the photo's short edge, so it looks the same at any resolution), color, alignment (left/center/right), and position (as a % of the photo, placing the text block's own center). |
-| **Shape** | A vector Rectangle, Ellipse, Line, Polygon, or Star — position, size, and rotation (except Ellipse, which doesn't rotate), plus its own fill color/opacity and outline color/width. Polygon and Star also get a Sides/Points count; Star gets an Inner Radius controlling how sharp its points are. |
+| **Text** | Type content, then pick a **Font** (any font installed on this computer, or one you added under **🔤 Fonts**; "Automatic" is the default) and set font size (a % of the photo's short edge, so it looks the same at any resolution), color, alignment (left/center/right), and position (as a % of the photo, placing the text block's own center). |
+| **Shape** | A vector Rectangle, Ellipse, Line, Polygon, or Star — position, size, and rotation, plus its own fill color/opacity and outline color/width. Polygon and Star also get a Sides/Points count; Star gets an Inner Radius controlling how sharp its points are. |
 | **Pen** | Click points directly on the photo below to trace a freeform path, then **➕ Add Path Layer**. See [The Pen Tool](#the-pen-tool) below. |
 
 **The layer stack** — each layer's own expander (click its name to open it) splits into three
@@ -289,7 +289,7 @@ Masks and Repair (both under ◉ Local) share the same selection tools:
 | **Horizontal / Vertical gradient** | A smooth linear fade across the frame. |
 | **Radial** | A smooth fade outward from a center point — set its Center X/Y, Radius and Feather (also editable afterwards). |
 | **Painted** | Paint directly on the photo — freehand brush (with an eraser), a drag-out radial, or a drag-out gradient. Reopen it later with "🎨 Edit Painting" to continue painting on the same selection instead of starting over. |
-| **Magic Wand** | Click a point on the photo; selects similar colors around it. Contiguous mode (default) only grows outward from that connected region; unchecked, it selects every matching-color pixel anywhere in the frame. Tolerance controls how similar a color has to be. |
+| **Magic Wand** | Click a point on the photo; selects similar colors around it. Contiguous mode (default) only grows outward from that connected region; unchecked, it selects every matching-color pixel anywhere in the frame. Tolerance controls how similar a color has to be, and **Sample size** (Point, 3×3, 5×5, 11×11) averages the color around the click — steadier than a single pixel on noisy or textured areas. |
 
 Every selection (except Painted/Magic Wand's own click-based commit) also gets a name, an edge-soften
 radius, and an invert checkbox.
@@ -331,7 +331,8 @@ Three modes, selected via the radio buttons at the top of the tab.
   themselves, and rescanning keeps the ratings and tags you've already given. The catalog is shown
   the next time you open the app, without scanning again. A photo scanned for the first time takes
   its rating, reject flag and keywords from an **XMP sidecar** next to it (`IMG_0001.xmp` or
-  `photo.jpg.xmp`, as Lightroom, Capture One, Bridge and darktable write them), if it has one.
+  `photo.jpg.xmp`, as Lightroom, Capture One, Bridge and darktable write them), if it has one, and
+  a rescan picks up a sidecar another program changed since.
 - **Thumbnail grid** — the matching photos as thumbnails (cached, RAW files via their embedded
   preview), each with **✏️ Edit** to open it in the editor. Your current adjustments are kept, so a
   look carries over to the next photo of a shoot; **↺** resets them.
@@ -410,7 +411,7 @@ Always visible above/below the preview, on every tab:
     lines/guides are active.
 - **Histogram** — a live per-channel (Red/Green/Blue) chart of the current edited image.
 - **⚠️ Show clipping** — highlights blocked shadows (blue) and blown highlights (red) directly on
-  the canvas.
+  the canvas. **Clipping margin** also flags tones within that many levels of pure black or white.
 - **⬇ Export tab → Export settings** — resize by long edge, output sharpening (screen / matte / glossy), which
   metadata to keep (all, copyright & camera only, or none, plus Remove GPS — on by default) and,
   when the optional **GPU pack** is installed (see [AI Upscale and the GPU pack](#ai-upscale-and-the-gpu-pack)),
@@ -419,9 +420,9 @@ Always visible above/below the preview, on every tab:
   TIFF): **16-bit** writes a genuine 16-bit file — the edit is rendered at full resolution in floating
   point from the full-precision original (16-bit PNG/TIFF scans and camera RAW keep their extra
   detail), so skies and gradients stay free of banding when you keep editing or print. It looks the
-  same as the preview (at most about 1 % brighter after very heavy edits). A 16-bit TIFF keeps the
-  colour profile and the camera make/model, date, artist and copyright, but not exposure details or
-  GPS; a 16-bit PNG keeps all of it. **Save preset** keeps
+  same as the preview (at most about 1 % brighter after very heavy edits). Both 16-bit PNG and TIFF
+  keep the colour profile and the camera metadata (exposure details and GPS included, following the
+  metadata choice above). The watermark has its own **Font** choice. **Save preset** keeps
   these settings under a name; pick one and **Apply** to restore them. The file is only produced when
   you click Save (or press **Ctrl+E**), and it carries the original photo's camera metadata and colour
   profile.

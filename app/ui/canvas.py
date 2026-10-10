@@ -280,10 +280,16 @@ def scopes_panel(edited_image: Image.Image) -> None:
         )
     if show_waveform:
         st.image(compute_waveform(scope_image, mode=waveform_mode), caption=f"Waveform ({waveform_mode})", use_container_width=True)
-    if st.checkbox(t("⚠️ Show clipping"), key="clip-warning-toggle", help=t("Highlights blocked shadows (blue) and blown highlights (red).")):
+    show_clipping = st.checkbox(t("⚠️ Show clipping"), key="clip-warning-toggle", help=t("Highlights blocked shadows (blue) and blown highlights (red)."))
+    # Always rendered (a skipped widget loses its value), disabled while the warning is off.
+    margin = st.slider(
+        t("Clipping margin"), 0, 20, 0, key="clip-warning-margin", disabled=not show_clipping,
+        help=t("Also flag tones within this many levels of pure black or white (0 = only fully clipped pixels)."),
+    )
+    if show_clipping:
         st.image(
-            clipping_warning_overlay(scope_image),
-            caption="Blue = shadows clipped to black, Red = highlights clipped to white",
+            clipping_warning_overlay(scope_image, shadow_threshold=margin, highlight_threshold=255 - margin),
+            caption=t("Blue = shadows clipped to black, Red = highlights clipped to white"),
             use_container_width=True,
         )
 

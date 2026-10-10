@@ -8,38 +8,12 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from app.fonts import load_font
 from app.major_features import Layer, LayerStack
 
-# A short, well-known list of TrueType fonts likely to already be installed, checked in order --
-# deliberately not a bundled font file (this app avoids adding binary assets/new dependencies
-# elsewhere too, e.g. no bundled lens/ICC profile database) and not a font picker; Text layers get
-# whatever real TrueType font this machine happens to have, falling back to Pillow's own built-in
-# bitmap font (PIL.ImageFont.load_default()) when none of these exist -- legible but not scalable
-# the way a real font is, and the one realistic gap this leaves (see docs/PROJECT_STATUS.md's
-# "Known Issues"). Covers Windows, common Linux distros, and macOS.
-_FONT_CANDIDATES = (
-    "C:/Windows/Fonts/arial.ttf",
-    "C:/Windows/Fonts/Arial.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-    "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
-    "/System/Library/Fonts/Helvetica.ttc",
-)
-
-
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    size = max(1, int(size))
-    for candidate in _FONT_CANDIDATES:
-        if Path(candidate).exists():
-            try:
-                return ImageFont.truetype(candidate, size)
-            except OSError:
-                continue
-    try:
-        return ImageFont.load_default(size=size)  # Pillow >= 10.1 -- a scalable fallback
-    except TypeError:
-        return ImageFont.load_default()  # older Pillow: a small, fixed-size bitmap font
+    """The automatic default font at `size` px (app.fonts.load_font with no name)."""
+    return load_font("", size)
 
 
 def render_text_layer(
@@ -50,18 +24,20 @@ def render_text_layer(
     align: str = "left",
     x_pct: float = 50.0,
     y_pct: float = 50.0,
+    font: str = "",
 ) -> Image.Image:
     """Render a text layer's transparent RGBA image at the source photo's actual pixel size --
     kept parametric (text/font_size/color/align/position) in the Layers tab's own session_state
     rather than only ever existing as a baked bitmap, the same "definitions stay editable, only
     rasterize on demand" approach app.advanced_masks.MaskLayer's parametric selections already use.
     `x_pct`/`y_pct` place the text block's own center (not its top-left corner) at that fraction of
-    the canvas -- simpler to reason about when centering a title than tracking the block's size."""
+    the canvas -- simpler to reason about when centering a title than tracking the block's size.
+    `font` is a name from app.fonts.available_fonts() ("" or one this machine lacks = the default)."""
     image = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
     if not text:
         return image
     draw = ImageDraw.Draw(image)
-    font = _load_font(font_size)
+    font = load_font(font, font_size)
     x = canvas_size[0] * max(0.0, min(100.0, x_pct)) / 100.0
     y = canvas_size[1] * max(0.0, min(100.0, y_pct)) / 100.0
     draw.multiline_text((x, y), text, font=font, fill=tuple(color), align=align, anchor="mm")

@@ -100,3 +100,18 @@ def test_the_app_renders_every_tab_in_spanish(monkeypatch):
     assert not at.exception
     assert at.slider(key="t-contrast").label == "Contrast"
 
+
+
+def test_the_on_canvas_editors_follow_the_interface_language():
+    from PIL import Image
+
+    from app.ui_editors import _crop_editor_html, _paint_editor_html, _pen_editor_html
+
+    background = Image.new("RGB", (40, 30))
+    i18n.set_language("es")
+    paint = _paint_editor_html(background, "m")[0]
+    assert "Pincel" in paint and "Añadir a las selecciones" in paint
+    assert '"Recorte:"' in _crop_editor_html(background, "crop-editor", (0.1, 0.1, 0.9, 0.9), (40, 30))[0]
+    assert "Haz clic en la foto para añadir un punto" in _pen_editor_html(background, "pen", [], False)[0]
+    i18n.set_language("en")
+    assert "🖌 Brush" in _paint_editor_html(background, "m")[0]

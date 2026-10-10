@@ -494,6 +494,26 @@ def test_adding_a_text_layer_renders_text_onto_the_final_image():
     assert canvas_hash(at) != baseline
 
 
+
+def test_a_text_layer_and_the_watermark_offer_a_font_choice():
+    from app import fonts
+
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Text")
+    at.run(timeout=30)
+    at.button(key="l-add-text-btn").click()
+    at.run(timeout=30)
+    layer_id = at.session_state["image_layers"][0]["id"]
+    font_box = at.selectbox(key=f"l-font-{layer_id}")
+    assert font_box.value == ""  # the automatic default
+    assert at.selectbox(key="wm-font-sel").value == ""
+    names = list(fonts.available_fonts())
+    if names:
+        font_box.set_value(names[0])
+        at.run(timeout=30)
+        assert not at.exception
+        assert at.session_state["image_layers"][0]["font"] == names[0]
+
 def test_editing_a_text_layers_content_color_and_position_changes_the_final_image():
     at = run_with_uploaded_image(color=(10, 10, 10))
     at.radio(key="l-new-kind").set_value("Text")
@@ -679,6 +699,21 @@ def test_adding_a_pen_path_layer_via_the_hidden_commit_field_renders_onto_the_fi
     assert layers[0]["points"] == _triangle_path_points()
     assert at.session_state["l-path-draft-points"] == []  # draft cleared after adding
     assert canvas_hash(at) != baseline
+
+
+def test_adding_a_closed_pen_path_resets_closed_path_for_the_next_draft():
+    at = run_with_uploaded_image(color=(10, 10, 10))
+    at.radio(key="l-new-kind").set_value("Pen")
+    at.run(timeout=30)
+    at.text_area(key="l-path-draft-data").set_value(json.dumps(_triangle_path_points()))
+    at.checkbox(key="l-path-draft-closed").set_value(True)
+    at.run(timeout=30)
+    at.button(key="l-add-path-btn").click()
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["image_layers"][0]["closed"] is True
+    assert at.checkbox(key="l-path-draft-closed").value is False
 
 
 def test_closing_a_pen_path_and_enabling_fill_changes_the_final_image():
@@ -1797,6 +1832,19 @@ def test_clipping_warning_checkbox_renders_the_overlay():
 
     assert not at.exception
     assert any(img.captions and "clipped" in img.captions[0] for img in at.image)
+
+
+def test_clipping_margin_is_disabled_until_the_warning_is_on():
+    at = run_with_uploaded_image()
+    assert at.slider(key="clip-warning-margin").disabled
+    at.checkbox(key="clip-warning-toggle").set_value(True)
+    at.run(timeout=30)
+    at.slider(key="clip-warning-margin").set_value(10)
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert not at.slider(key="clip-warning-margin").disabled
+    assert at.slider(key="clip-warning-margin").value == 10
 
 
 def test_magic_wand_selection_commits_via_the_hidden_click_field():

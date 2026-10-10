@@ -120,6 +120,7 @@ def validate_export_settings(settings) -> dict:
                 "position": str(watermark.get("position", "Bottom Right")),
                 "opacity": int(watermark.get("opacity", 50)),
                 "font_size": int(watermark.get("font_size", 32)),
+                "font": str(watermark.get("font") or ""),
             }
     return clean
 
@@ -219,7 +220,8 @@ def encode_export(image: Image.Image, settings: dict | None = None, *, exif: byt
     if watermark:
         from app.professional_tools import apply_watermark
 
-        result = apply_watermark(result, watermark["text"], watermark["position"], watermark["opacity"], watermark["font_size"])
+        result = apply_watermark(result, watermark["text"], watermark["position"], watermark["opacity"], watermark["font_size"],
+                                 font=watermark.get("font", ""))
 
     format_name = settings["format"]
     save_kwargs: dict = {"format": format_name}
@@ -257,12 +259,9 @@ def _resize_float(array: np.ndarray, long_edge: int) -> np.ndarray:
 
 def _unsharp_float(array: np.ndarray, radius: float, percent: int, threshold: int) -> np.ndarray:
     """PIL's UnsharpMask (radius, percent, threshold in 8-bit levels) on float pixels."""
-    import cv2
+    from app.high_bit import unsharp_float
 
-    blurred = cv2.GaussianBlur(array, (0, 0), radius)
-    detail = array - blurred
-    detail[np.abs(detail) * 255.0 < threshold] = 0.0
-    return np.clip(array + detail * (percent / 100.0), 0.0, 1.0)
+    return unsharp_float(array, radius, percent, threshold)
 
 
 def _png_chunk(kind: bytes, data: bytes) -> bytes:
@@ -296,9 +295,15 @@ _TIFF_TEXT_TAGS = (0x010F, 0x0110, 0x0131, 0x0132, 0x013B, 0x8298)
 
 
 def _tiff16(array16: np.ndarray, exif: bytes | None, icc: bytes | None) -> bytes:
+    """A 16-bit RGB TIFF (tifffile; Pillow can't write one) with the ICC profile, the IFD0 text tags
+    and the EXIF and GPS sub-IFDs of the prepared EXIF. tifffile only writes top-level tags, so the
+    sub-IFD pointers are written as placeholders and the sub-IFDs -- serialized by Pillow's own
+    TIFF tag writer -- are appended and linked afterwards (_link_sub_ifds). tifffile refuses the
+    pointer tags themselves, so the placeholders use the next tag number (unassigned in IFD0, and
+    nothing sorts between the two), renumbered when linking."""
     import tifffile
 
-    extratags, software = [], None
+    extratags, software, sub_ifds = [], None, {}
     if exif:
         parsed = Image.Exif()
         parsed.load(exif)
@@ -310,12 +315,50 @@ def _tiff16(array16: np.ndarray, exif: bytes | None, icc: bytes | None) -> bytes
                 software = value  # tifffile owns the Software tag; it takes it as a parameter
             else:
                 extratags.append((tag, "s", 0, value, True))
+        for pointer in _SUB_IFD_POINTERS:
+            entries = dict(parsed.get_ifd(pointer))
+            if entries:
+                sub_ifds[pointer] = entries
+                extratags.append((pointer + 1, "I", 1, 0, True))  # placeholder, linked below
     buffer = io.BytesIO()
     tifffile.imwrite(
         buffer, array16, photometric="rgb", compression="zlib", iccprofile=icc or None, extratags=extratags,
         metadata=None, software=software,
     )
-    return buffer.getvalue()
+    content = buffer.getvalue()
+    return _link_sub_ifds(content, sub_ifds) if sub_ifds else content
+
+
+# The EXIF (0x8769) and GPS (0x8825) sub-IFD pointer tags of IFD0.
+_SUB_IFD_POINTERS = (0x8769, 0x8825)
+
+
+def _link_sub_ifds(content: bytes, sub_ifds: dict[int, dict]) -> bytes:
+    """Append each sub-IFD to a classic little-endian TIFF, then turn IFD0's placeholder entry (tag
+    pointer + 1) into the real pointer tag holding its offset."""
+    import struct
+
+    from PIL import TiffImagePlugin
+
+    data = bytearray(content)
+    if data[:4] != b"II*\x00":
+        return content  # not the classic little-endian layout tifffile writes by default
+    ifd0 = struct.unpack_from("<I", data, 4)[0]
+    count = struct.unpack_from("<H", data, ifd0)[0]
+    entry_offsets = {struct.unpack_from("<H", data, ifd0 + 2 + 12 * i)[0]: ifd0 + 2 + 12 * i for i in range(count)}
+    for pointer, entries in sub_ifds.items():
+        entry = entry_offsets.get(pointer + 1)
+        if entry is None:
+            continue
+        if len(data) % 2:
+            data += b"\x00"  # IFDs start on a word boundary
+        directory = TiffImagePlugin.ImageFileDirectory_v2(group=pointer)
+        for tag, value in entries.items():
+            directory[tag] = value
+        offset = len(data)
+        data += directory.tobytes(offset)
+        struct.pack_into("<HHII", data, entry, pointer, 4, 1, offset)  # tag, LONG, count 1, offset
+    return bytes(data)
 
 
 def _encode_16bit(image: Image.Image, settings: dict, exif: bytes | None, icc: bytes | None) -> tuple[bytes, str, str]:
@@ -339,7 +382,8 @@ def _encode_16bit(image: Image.Image, settings: dict, exif: bytes | None, icc: b
         from app.professional_tools import apply_watermark
 
         base = Image.fromarray(quantize8(array), mode="RGB")
-        marked = apply_watermark(base, watermark["text"], watermark["position"], watermark["opacity"], watermark["font_size"]).convert("RGB")
+        marked = apply_watermark(base, watermark["text"], watermark["position"], watermark["opacity"], watermark["font_size"],
+                                 font=watermark.get("font", "")).convert("RGB")
         array = np.clip(array + (np.asarray(marked, dtype=np.float32) - np.asarray(base, dtype=np.float32)) / 255.0, 0.0, 1.0)
     from app.high_bit import to_uint16
 

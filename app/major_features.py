@@ -204,7 +204,13 @@ class PhotoCatalog:
     def __init__(self, database: str | Path):
         self.database = str(database)
         with self._connect() as connection:
-            connection.execute("CREATE TABLE IF NOT EXISTS photos (path TEXT PRIMARY KEY, rating INTEGER DEFAULT 0, tags TEXT DEFAULT '')")
+            connection.execute("CREATE TABLE IF NOT EXISTS photos (path TEXT PRIMARY KEY, rating INTEGER DEFAULT 0, tags TEXT DEFAULT '', xmp_mtime REAL DEFAULT 0)")
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(photos)")}
+            if "xmp_mtime" not in columns:
+                # A catalog from before sidecar tracking: its photos' sidecars are "unknown" (-1), so
+                # the next scan only records their current time instead of re-importing them over
+                # ratings given in the app since. New rows are inserted with 0 explicitly.
+                connection.execute("ALTER TABLE photos ADD COLUMN xmp_mtime REAL DEFAULT -1")
 
     @contextmanager
     def _connect(self):
@@ -229,15 +235,26 @@ class PhotoCatalog:
         rating = max(0, min(5, int(rating)))
         tag_text = ",".join(sorted({tag.strip() for tag in (tags or []) if tag.strip()}))
         with self._connect() as connection:
-            connection.execute("INSERT INTO photos(path, rating, tags) VALUES (?, ?, ?) ON CONFLICT(path) DO UPDATE SET rating=excluded.rating, tags=excluded.tags", (str(path), rating, tag_text))
+            connection.execute("INSERT INTO photos(path, rating, tags, xmp_mtime) VALUES (?, ?, ?, 0) ON CONFLICT(path) DO UPDATE SET rating=excluded.rating, tags=excluded.tags", (str(path), rating, tag_text))
 
     def ensure(self, path: str | Path) -> bool:
         """Add `path` unrated if it isn't catalogued yet -- a rescan must not reset the ratings and
         tags already given (index_folder() used upsert(), which overwrote them with 0 / none).
         True when it was added just now."""
         with self._connect() as connection:
-            cursor = connection.execute("INSERT OR IGNORE INTO photos(path, rating, tags) VALUES (?, 0, '')", (str(path),))
+            cursor = connection.execute("INSERT OR IGNORE INTO photos(path, rating, tags, xmp_mtime) VALUES (?, 0, '', 0)", (str(path),))
             return cursor.rowcount > 0
+
+    def xmp_mtime(self, path: str | Path) -> float | None:
+        """Modification time of the photo's XMP sidecar when it was last read or written (0: never,
+        -1: unknown, a catalog from before this was tracked); None when the photo isn't catalogued."""
+        with self._connect() as connection:
+            row = connection.execute("SELECT xmp_mtime FROM photos WHERE path = ?", (str(path),)).fetchone()
+        return None if row is None else float(row[0])
+
+    def set_xmp_mtime(self, path: str | Path, mtime: float) -> None:
+        with self._connect() as connection:
+            connection.execute("UPDATE photos SET xmp_mtime = ? WHERE path = ?", (float(mtime), str(path)))
 
     def get(self, path: str | Path) -> dict[str, object]:
         with self._connect() as connection:
