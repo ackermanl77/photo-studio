@@ -118,12 +118,22 @@ def apply_hsl_mixer(image: Image.Image, adjustments: dict[str, dict[str, float]]
     would in a real color mixer panel; the final saturation/lightness are still clamped to a valid
     range regardless.
     """
-    active = {name: values for name, values in adjustments.items() if any(values.get(k, 0) for k in ("hue", "sat", "lum"))}
-    if not active:
+    if not _active_hsl_bands(adjustments):
         return image
+    return from_float_rgb(hsl_mixer_float(to_float_rgb(image), adjustments))
 
-    rgb = to_float_rgb(image)
-    hsl = rgb_to_hsl(rgb)
+
+def _active_hsl_bands(adjustments: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+    return {name: values for name, values in adjustments.items() if any(values.get(k, 0) for k in ("hue", "sat", "lum"))}
+
+
+def hsl_mixer_float(rgb: np.ndarray, adjustments: dict[str, dict[str, float]]) -> np.ndarray:
+    """apply_hsl_mixer() on float RGB (H, W, 3) in [0, 1], returning float -- the 16-bit export
+    path (PhotoProcessor's high-precision mode); apply_hsl_mixer() rounds this to 8 bits."""
+    active = _active_hsl_bands(adjustments)
+    if not active:
+        return rgb
+    hsl = rgb_to_hsl(np.asarray(rgb, dtype=np.float32))
     hue, sat, light = hsl[..., 0], hsl[..., 1], hsl[..., 2]
 
     hue_shift = np.zeros_like(hue)
@@ -141,7 +151,7 @@ def apply_hsl_mixer(image: Image.Image, adjustments: dict[str, dict[str, float]]
         [(hue + hue_shift) % 360.0, np.clip(sat * (1.0 + sat_delta), 0.0, 1.0), np.clip(light * (1.0 + lum_delta * 0.5), 0.0, 1.0)],
         axis=-1,
     )
-    return from_float_rgb(np.clip(hsl_to_rgb(new_hsl), 0.0, 1.0))
+    return np.clip(hsl_to_rgb(new_hsl), 0.0, 1.0)
 
 
 _BW_LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
@@ -189,8 +199,15 @@ def apply_vibrance(image: Image.Image, amount: float = 0.0) -> Image.Image:
     amount = max(-100.0, min(100.0, float(amount)))
     if not amount:
         return image
-    rgb = to_float_rgb(image)
-    hsl = rgb_to_hsl(rgb)
+    return from_float_rgb(vibrance_float(to_float_rgb(image), amount))
+
+
+def vibrance_float(rgb: np.ndarray, amount: float = 0.0) -> np.ndarray:
+    """apply_vibrance() on float RGB in [0, 1], returning float (the 16-bit export path)."""
+    amount = max(-100.0, min(100.0, float(amount)))
+    if not amount:
+        return rgb
+    hsl = rgb_to_hsl(np.asarray(rgb, dtype=np.float32))
     hue, sat, light = hsl[..., 0], hsl[..., 1], hsl[..., 2]
 
     pastel_weight = 1.0 - sat
@@ -199,7 +216,7 @@ def apply_vibrance(image: Image.Image, amount: float = 0.0) -> Image.Image:
     new_sat = np.clip(sat * (1.0 + pastel_weight * skin_protection * (amount / 100.0)), 0.0, 1.0)
 
     new_hsl = np.stack([hue, new_sat, light], axis=-1)
-    return from_float_rgb(np.clip(hsl_to_rgb(new_hsl), 0.0, 1.0))
+    return np.clip(hsl_to_rgb(new_hsl), 0.0, 1.0)
 
 
 def estimate_white_balance(image: Image.Image, x_fraction: float, y_fraction: float) -> tuple[float, float]:
@@ -264,6 +281,31 @@ def apply_color_grading(
     if not (shadows_intensity or midtones_intensity or highlights_intensity):
         return image
     arr = np.asarray(image.convert("RGB"), dtype=np.float32)
+    graded = _color_grading_levels(arr, shadows_hue, shadows_intensity, midtones_hue, midtones_intensity,
+                                   highlights_hue, highlights_intensity, balance)
+    return Image.fromarray(np.clip(graded, 0, 255).astype(np.uint8), mode="RGB")
+
+
+def color_grading_float(
+    rgb: np.ndarray,
+    shadows_hue: float = 0.0, shadows_intensity: float = 0.0,
+    midtones_hue: float = 0.0, midtones_intensity: float = 0.0,
+    highlights_hue: float = 0.0, highlights_intensity: float = 0.0,
+    balance: float = 0.0,
+) -> np.ndarray:
+    """apply_color_grading() on float RGB in [0, 1], returning float (the 16-bit export path)."""
+    if not (shadows_intensity or midtones_intensity or highlights_intensity):
+        return rgb
+    graded = _color_grading_levels(np.asarray(rgb, dtype=np.float32) * 255.0, shadows_hue, shadows_intensity, midtones_hue,
+                                   midtones_intensity, highlights_hue, highlights_intensity, balance)
+    return np.clip(graded / 255.0, 0.0, 1.0)
+
+
+def _color_grading_levels(
+    arr: np.ndarray, shadows_hue: float, shadows_intensity: float, midtones_hue: float, midtones_intensity: float,
+    highlights_hue: float, highlights_intensity: float, balance: float,
+) -> np.ndarray:
+    """The grading itself, on float pixels in 0..255 levels (unclipped)."""
     luminance = arr.mean(axis=2) / 255.0
 
     pivot = min(0.9, max(0.1, 0.5 + (float(balance) / 100.0) * 0.35))
@@ -280,8 +322,7 @@ def apply_color_grading(
         if intensity:
             tint = _tint_color(hue)
             shift += (tint - arr) * weight[..., None] * (float(intensity) / 100.0) * 0.5
-    result = np.clip(arr + shift, 0, 255).astype(np.uint8)
-    return Image.fromarray(result, mode="RGB")
+    return arr + shift
 
 
 # --- ICC color management -----------------------------------------------------------------

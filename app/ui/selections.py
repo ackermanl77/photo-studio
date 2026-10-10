@@ -19,7 +19,10 @@ import uuid
 import streamlit as st
 from PIL import Image
 
-from app.advanced_masks import COMBINE_MODES, MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, magic_wand_mask, radial_mask, soften_mask
+from app.advanced_masks import (
+    COMBINE_MODES, WAND_SAMPLE_SIZES, MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, magic_wand_mask,
+    radial_mask, soften_mask,
+)
 from app.painted_masks import resolve_painted_mask
 from app.professional_tools import preview_image
 from app.ui.state import consume_new_commit, request_rerun, show_component
@@ -51,7 +54,8 @@ def build_mask_image(source: Image.Image, kind: str, params: dict, painted: dict
     if kind == "Painted":
         return decode_painted_mask(resolve_painted_mask(params, painted))
     if kind == "Magic Wand":
-        return magic_wand_mask(source, params["click_x"], params["click_y"], params["tolerance"], params.get("contiguous", True))
+        return magic_wand_mask(source, params["click_x"], params["click_y"], params["tolerance"], params.get("contiguous", True),
+                               params.get("sample_size", 1))
     return gradient_mask(source.size, "horizontal" if "Horizontal" in kind else "vertical")
 
 
@@ -77,6 +81,11 @@ def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image,
         if new_kind == "Magic Wand":
             new_tolerance = st.slider(t("Tolerance"), 1, 150, 40, key=f"{key_prefix}-wand-tol")
             new_contiguous = st.checkbox(t("Contiguous (connected region only)"), value=True, key=f"{key_prefix}-wand-contig")
+            new_sample = st.selectbox(
+                t("Sample size"), WAND_SAMPLE_SIZES, index=0, key=f"{key_prefix}-wand-sample",
+                format_func=lambda n: t("Point") if n == 1 else f"{n} × {n}",
+                help=t("Average the colour over a small square around the click -- steadier than a single pixel on noisy or textured areas."),
+            )
             st.caption(t("Click a point on the photo below to select similar colors around it."))
             show_component(lambda: _wand_picker_html(preview_image(source, (480, 480)), key_prefix))
             with st.container(key=f"{key_prefix}-wand-hidden"):
@@ -88,7 +97,8 @@ def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image,
                 except (json.JSONDecodeError, TypeError, KeyError, ValueError):
                     pass
                 else:
-                    params = {"click_x": click_x, "click_y": click_y, "tolerance": new_tolerance, "contiguous": new_contiguous}
+                    params = {"click_x": click_x, "click_y": click_y, "tolerance": new_tolerance, "contiguous": new_contiguous,
+                              "sample_size": int(new_sample)}
                     layers.append(_new_selection(f"Magic Wand {len(layers) + 1}", "Magic Wand", params))
                     request_rerun()
         elif new_kind == "Painted":

@@ -7,6 +7,22 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-09 -- Spanish interface, fonts, 16-bit precision, smaller fixes
+
+- **Interface language:** an English/Español selector next to the uploader (`app/i18n.py`, catalog
+  `app/i18n_es.py`); the on-canvas editors' buttons, hints and accessibility labels follow it too.
+- **Fonts (`app/fonts.py`):** a Font choice for every Text layer and for the watermark -- the fonts
+  installed on this computer plus .ttf/.otf/.ttc files added under Layers > 🔤 Fonts (stored in
+  `user_data_dir()/fonts`); stored by name, with "(not installed)" and the default font where a
+  project's font is missing.
+- **B4, 16-bit precision:** HSL, Vibrance, Color Grading, Texture, Sharpen and film grain now compute
+  in float in a 16-bit export (their 8-bit output is unchanged), and a 16-bit TIFF keeps the EXIF and
+  GPS sub-IFDs.
+- **Smaller fixes:** rotated Ellipse shape layers; "Closed Path" resets after Add Path Layer; Magic
+  Wand Sample size; a Clipping margin for the clipping warning; Library rescans import XMP sidecars
+  changed by another program (the catalog records each sidecar's modification time); the curve
+  editor keeps extra points off another point's X.
+
 ## 2026-10-07 -- F13 feature gaps, code signing (still version 0.2.0, not tagged yet)
 
 - **Tone and colour (F13):** Whites/Blacks sliders, per-channel R/G/B tone curves, and a Black & White mixer.

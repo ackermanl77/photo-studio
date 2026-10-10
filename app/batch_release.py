@@ -156,6 +156,7 @@ def export_multiple(
     exif: bytes | None = None,
     remove_gps: bool = False,
     gpu_export: bool = False,
+    watermark_font: str = "",
 ) -> bytes:
     """One photo, several export variants (Web/Social/Print/Archive -- see EXPORT_PROFILES) in a
     single ZIP -- the "Export As" multi-size workflow every major editor offers, distinct from
@@ -176,6 +177,7 @@ def export_multiple(
             watermark_position=watermark_position,
             watermark_opacity=watermark_opacity,
             watermark_font_size=watermark_font_size,
+            watermark_font=watermark_font,
             exif=exif,
             remove_gps=remove_gps,
             gpu_export=gpu_export,

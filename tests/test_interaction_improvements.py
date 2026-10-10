@@ -400,3 +400,35 @@ def test_a_drag_pan_commit_moves_the_zoomed_view_precisely(stub_backend):
     assert not at.exception
     assert at.slider(key="cv-panx").value == pytest.approx(0.4567) and at.slider(key="cv-pany").value == pytest.approx(0.1234)
     assert any("drag to pan" in caption.value for caption in at.caption)
+
+
+@needs_node
+def test_curve_extra_points_never_share_an_x_with_another_point(tmp_path):
+    fixed = [(0, 0), (64, 64), (128, 128), (192, 192), (255, 255)]
+    html = _curve_editor_html(fixed, [(0, 64), (0, 128), (64, 192), (128, 255), (192, 255)], extra_points=[(100, 120)])
+    # The fake layout is 400 px wide for a 256-unit viewBox; curve x -> client x.
+    to_client = "const cx = (x) => (34 + (x / 255) * 210) * 400 / 256;"
+    scenario = to_client + """
+      const svgEl = document.getElementById('curve-svg');
+      document.getElementById('curve-bg').dispatch('click', {clientX: cx(128), clientY: 100});
+      const extra = document.getElementById('extra-points').children[0];  // the first extra point
+      extra.className = 'pt extra'; extra.dataset.idx = extra.getAttribute('data-idx');  // a browser maps these attributes itself
+      svgEl.dispatch('pointerdown', {target: extra});
+      svgEl.dispatch('pointermove', {clientX: cx(64), clientY: 100});
+      svgEl.dispatch('pointerup', {});
+    """
+    prelude = """
+      const svgEl0 = document.getElementById('curve-svg');
+      svgEl0.appendChild(document.getElementById('curve-bg'));
+      for (let i = 0; i < 5; i++) { const c = document.createElement('circle'); c.className = 'pt fixed'; c.dataset.idx = i; svgEl0.appendChild(c); }
+      svgEl0.appendChild(document.getElementById('extra-points'));
+    """
+    out = _run_editor(tmp_path, html, scenario, prelude)
+    added = out["commits"][0]["curve_extra_points"]
+    dragged = out["commits"][1]["curve_extra_points"]
+    fixed_x = {x for x, _ in fixed}
+    assert added[1][0] in (127, 129)  # a click right on the Midtones point's X lands beside it
+    assert dragged[0][0] in (63, 65)  # dragging onto the Shadows point's X stops beside it
+    for points in (added, dragged):
+        xs = [x for x, _ in points]
+        assert len(set(xs)) == len(xs) and not fixed_x & set(xs)

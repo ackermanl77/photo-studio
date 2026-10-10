@@ -10,7 +10,10 @@ from app.ai_upscale import upscale as ai_upscale
 from app.dehaze import apply_dehaze
 from app.effects import apply_film_grain
 from app.lens_corrections import apply_lens_corrections, correct_vignette
-from app.professional_color import apply_color_grading, apply_hsl_mixer, apply_vibrance, black_white_float, from_float_rgb, to_float_rgb
+from app.professional_color import (
+    apply_color_grading, apply_hsl_mixer, apply_vibrance, black_white_float, color_grading_float, from_float_rgb,
+    hsl_mixer_float, to_float_rgb, vibrance_float,
+)
 from app.raw_import import open_image
 
 
@@ -311,10 +314,14 @@ class PhotoProcessor:
         return self
 
     def apply_hsl_mixer(self, adjustments: dict[str, dict[str, float]]) -> "PhotoProcessor":
+        if self.hdr is not None:
+            return self._set_hdr(hsl_mixer_float(self.hdr, adjustments))
         self.image = apply_hsl_mixer(self.image, adjustments)
         return self
 
     def apply_vibrance(self, amount: float = 0.0) -> "PhotoProcessor":
+        if self.hdr is not None:
+            return self._set_hdr(vibrance_float(self.hdr, amount))
         self.image = apply_vibrance(self.image, amount)
         return self
 
@@ -325,6 +332,11 @@ class PhotoProcessor:
         highlights_hue: float = 0.0, highlights_intensity: float = 0.0,
         balance: float = 0.0,
     ) -> "PhotoProcessor":
+        if self.hdr is not None:
+            return self._set_hdr(color_grading_float(
+                self.hdr, shadows_hue, shadows_intensity, midtones_hue, midtones_intensity,
+                highlights_hue, highlights_intensity, balance,
+            ))
         self.image = apply_color_grading(
             self.image, shadows_hue, shadows_intensity, midtones_hue, midtones_intensity,
             highlights_hue, highlights_intensity, balance,
@@ -510,7 +522,12 @@ class PhotoProcessor:
     def apply_texture_clarity(self, texture: float = 0.0, clarity: float = 0.0) -> "PhotoProcessor":
         texture = max(-100.0, min(100.0, float(texture)))
         clarity = max(-100.0, min(100.0, float(clarity)))
-        if texture:
+        if texture and self.hdr is not None:
+            from app.high_bit import texture_float
+
+            radius = max(1, int(round(3 - abs(texture) / 60))) * self.pixel_scale
+            self._set_hdr(texture_float(self.hdr, radius, texture))
+        elif texture:
             radius = max(1, int(round(3 - abs(texture) / 60))) * self.pixel_scale
             blurred = self.image.filter(ImageFilter.GaussianBlur(radius=radius))
             original = np.array(self.image, dtype=np.float32)
@@ -581,6 +598,10 @@ class PhotoProcessor:
         if self.pixel_scale != 1.0:
             radius = max(0.1, radius * self.pixel_scale)
         percent = max(0, int(percent))
+        if self.hdr is not None:
+            from app.high_bit import unsharp_float
+
+            return self._set_hdr(unsharp_float(self.hdr, radius, percent, threshold=3))  # PIL's default threshold
         self.image = self.image.filter(ImageFilter.UnsharpMask(radius=radius, percent=percent))
         return self
 
@@ -598,6 +619,13 @@ class PhotoProcessor:
         return self
 
     def apply_film_grain(self, amount: float = 0.0) -> "PhotoProcessor":
+        if self.hdr is not None:
+            if not amount:
+                return self
+            from app.effects import film_grain_noise
+
+            noise = film_grain_noise(self.hdr.shape[1], self.hdr.shape[0], amount)
+            return self._set_hdr(self.hdr + (noise / 255.0)[..., None])
         self.image = apply_film_grain(self.image, amount)
         return self
 

@@ -74,3 +74,15 @@ def test_magic_wand_mask_tolerance_controls_how_similar_a_color_must_be():
 
     assert tight[0, 5] < 50
     assert loose[0, 5] > 200
+
+
+def test_magic_wand_sample_size_averages_around_the_click():
+    # A grey field with one bright speck exactly where the user clicks.
+    pixels = np.full((40, 40, 3), 100, dtype=np.uint8)
+    pixels[20, 20] = (220, 220, 220)
+    image = Image.fromarray(pixels, mode="RGB")
+    for contiguous in (True, False):
+        point = np.asarray(magic_wand_mask(image, 20.5 / 40, 20.5 / 40, tolerance=20, contiguous=contiguous))
+        averaged = np.asarray(magic_wand_mask(image, 20.5 / 40, 20.5 / 40, tolerance=20, contiguous=contiguous, sample_size=3))
+        assert (point > 127).sum() == 1  # Point: only the speck itself
+        assert (averaged > 127).sum() >= 40 * 40 - 1  # 3 x 3: the grey area around it

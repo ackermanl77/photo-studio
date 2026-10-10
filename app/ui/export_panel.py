@@ -22,7 +22,7 @@ from app.painted_masks import inline_painted_masks, session_painted_masks
 from app.pipeline import check_upscale_output, expected_output_size
 from app.professional_tools import EXPORT_PROFILES, WATERMARK_POSITIONS
 from app.reliability import image_digest
-from app.ui.layers import layers_payload
+from app.ui.layers import font_select, layers_payload
 from app.ui.processing import encode_rendered_export, render_full_resolution_export
 from app.ui.project_io import PROJECT_MAX_BYTES, estimated_project_bytes, project_archive
 from app.ui.selections import combined_mask_png, local_masks_payload
@@ -127,7 +127,7 @@ def watermark_section(ctx) -> None:
     """An optional text stamp applied only to exported files (Save and Export Multiple Sizes),
     never to the canvas preview."""
     wm_text = st.session_state.get("wm-text-in", "")
-    with st.expander(t("🏷️ Watermark" + (" ●" if wm_text.strip() else "")), key="sec-watermark"):
+    with st.expander(t("🏷️ Watermark") + (" ●" if wm_text.strip() else ""), key="sec-watermark"):
         st.caption(t("Optional text stamp applied only to exported files, not the canvas preview."))
         text = st.text_input(t("Watermark text (blank = none)"), key="wm-text-in")
         wm_pos_col, wm_op_col, wm_size_col = st.columns(3)
@@ -137,7 +137,8 @@ def watermark_section(ctx) -> None:
             opacity = st.slider(t("Opacity %"), 5, 100, 50, key="wm-opacity-sl")
         with wm_size_col:
             font_size = st.slider(t("Font size"), 12, 120, 32, key="wm-size-sl")
-    ctx.export["watermark"] = {"text": text, "position": position, "opacity": opacity, "font_size": font_size}
+        font = font_select(t("Font"), st.session_state.get("wm-font-sel", ""), key="wm-font-sel")
+    ctx.export["watermark"] = {"text": text, "position": position, "opacity": opacity, "font_size": font_size, "font": font}
 
 
 def _full_options(ctx) -> dict:
@@ -176,6 +177,7 @@ def export_multiple_section(ctx) -> None:
                 watermark_position=watermark["position"],
                 watermark_opacity=watermark["opacity"],
                 watermark_font_size=watermark["font_size"],
+                watermark_font=watermark.get("font", ""),
                 exif=ctx.source_exif,
                 remove_gps=multi_remove_gps,
                 gpu_export=ctx.export.get("gpu_export", False),

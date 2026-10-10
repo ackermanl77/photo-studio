@@ -174,3 +174,21 @@ def test_render_path_layer_closed_path_fills_its_enclosed_area():
 
     assert tuple(pixels[50, 50]) == (0, 200, 0, 255)  # well inside the closed square path
     assert pixels[5, 5, 3] == 0  # well outside it
+
+
+def test_a_rotated_ellipse_turns_about_its_center():
+    params = {"shape_type": "Ellipse", "x_pct": 50, "y_pct": 50, "width_pct": 80, "height_pct": 20,
+              "fill_enabled": True, "fill_color": (255, 0, 0), "fill_opacity": 1.0}
+    flat = np.asarray(render_shape_layer((100, 100), params))
+    turned = np.asarray(render_shape_layer((100, 100), {**params, "rotation_deg": 90}))
+
+    assert flat[50, 15, 3] == 255 and flat[15, 50, 3] == 0  # wide: left end filled, top empty
+    assert turned[15, 50, 3] == 255 and turned[50, 15, 3] == 0  # tall after a quarter turn
+    assert abs(int(flat[..., 3].astype(bool).sum()) - int(turned[..., 3].astype(bool).sum())) < 60  # same area
+
+
+def test_an_unrotated_ellipse_is_unchanged_by_a_half_turn():
+    params = {"shape_type": "Ellipse", "x_pct": 40, "y_pct": 50, "width_pct": 50, "height_pct": 30,
+              "fill_enabled": True, "fill_color": (0, 0, 255), "fill_opacity": 1.0}
+    assert np.array_equal(np.asarray(render_shape_layer((90, 70), params)),
+                          np.asarray(render_shape_layer((90, 70), {**params, "rotation_deg": 180})))

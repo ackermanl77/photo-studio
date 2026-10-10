@@ -7,7 +7,7 @@ from PIL import Image, UnidentifiedImageError
 
 from app.major_features import PhotoCatalog
 from app.raw_import import SUPPORTED_EXTENSIONS, is_raw_path
-from app.xmp_sidecar import REJECTED_TAG, read_sidecar, write_sidecar
+from app.xmp_sidecar import REJECTED_TAG, find_sidecar, read_sidecar, write_sidecar
 
 # Every format the editor opens, camera RAW included (it used to skip RAW entirely).
 IMAGE_EXTENSIONS = SUPPORTED_EXTENSIONS
@@ -39,6 +39,24 @@ def image_info(path: str | Path) -> dict[str, object]:
         return {"path": str(source), "name": source.name, "error": str(error)}
 
 
+def _import_changed_sidecar(catalog: PhotoCatalog, path: Path) -> None:
+    sidecar_file = find_sidecar(path)
+    if sidecar_file is None:
+        return
+    try:
+        mtime = sidecar_file.stat().st_mtime
+    except OSError:
+        return
+    known = catalog.xmp_mtime(path)
+    if known is not None and known >= 0 and mtime > known:
+        sidecar = read_sidecar(path)
+        if sidecar is not None:
+            tags = sidecar["tags"] + ([REJECTED_TAG] if sidecar["rejected"] else [])
+            catalog.upsert(path, rating=sidecar["rating"], tags=tags)
+    if known != mtime:
+        catalog.set_xmp_mtime(path, mtime)
+
+
 def save_rating(catalog: PhotoCatalog, path: str | Path, rating: int, tags, write_xmp: bool = False) -> str | None:
     """Store a rating/tags change in the catalog and, with `write_xmp`, in the photo's XMP
     sidecar too (the "rejected" tag becomes xmp:Rating -1). Returns a message when the sidecar
@@ -51,6 +69,10 @@ def save_rating(catalog: PhotoCatalog, path: str | Path, rating: int, tags, writ
         write_sidecar(path, rating, [t for t in tags if t != REJECTED_TAG], rejected=REJECTED_TAG in tags)
     except (OSError, ValueError) as error:
         return f"Couldn't write the XMP sidecar: {error}"
+    sidecar_file = find_sidecar(path)
+    if sidecar_file is not None:
+        # Our own write isn't a change from another program: the next scan mustn't re-import it.
+        catalog.set_xmp_mtime(path, sidecar_file.stat().st_mtime)
     return None
 
 
@@ -103,9 +125,10 @@ def index_folder(folder: str | Path, database: str | Path, recursive: bool = Tru
     same shape as app.batch_release.process_files()'s own `progress` callback -- so the frontend's
     "Scan Folder" button can drive an st.progress() bar the same way Run Batch already does.
 
-    With `import_xmp`, a photo catalogued for the first time takes its rating, reject flag and
-    keywords from its XMP sidecar (app.xmp_sidecar), if it has one; photos already in the catalog
-    keep what was set here."""
+    With `import_xmp`, a photo takes its rating, reject flag and keywords from its XMP sidecar
+    (app.xmp_sidecar) when it is catalogued for the first time, and again whenever the sidecar has
+    changed since it was last read or written here (another program -- Lightroom, Bridge,
+    darktable -- rated it). Otherwise the catalog keeps what was set in this app."""
     catalog = PhotoCatalog(database)
     paths = scan_folder(folder, recursive)
     total = len(paths)
@@ -113,11 +136,9 @@ def index_folder(folder: str | Path, database: str | Path, recursive: bool = Tru
     for index, path in enumerate(paths, 1):
         info = image_info(path)
         if "error" not in info:
-            if catalog.ensure(path) and import_xmp:
-                sidecar = read_sidecar(path)
-                if sidecar is not None:
-                    tags = sidecar["tags"] + ([REJECTED_TAG] if sidecar["rejected"] else [])
-                    catalog.upsert(path, rating=sidecar["rating"], tags=tags)
+            catalog.ensure(path)
+            if import_xmp:
+                _import_changed_sidecar(catalog, path)
             records.append(info)
         if progress:
             progress(index, total, info)
