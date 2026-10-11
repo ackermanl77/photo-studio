@@ -1,0 +1,32 @@
+<div id="paint-root" tabindex="0" role="application" style="background:var(--ps-panel);border-radius:8px;padding:8px;outline:none;"
+     aria-label="{{label_root}}">
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+    <button type="button" class="tool-btn active" data-tool="brush">{{label_brush}}</button>
+    <button type="button" class="tool-btn" data-tool="radial">{{label_radial}}</button>
+    <button type="button" class="tool-btn" data-tool="gradient">{{label_gradient}}</button>
+    <button type="button" id="erase-btn" class="tool-btn">{{label_erase}}</button>
+    <button type="button" id="clear-btn" class="tool-btn">{{label_clear}}</button>
+    <label style="display:flex;align-items:center;gap:4px;color:var(--ps-text);font:12px system-ui;margin-left:4px;">
+      {{label_size}} <input id="brush-size" type="range" min="4" max="80" value="18" style="width:80px;" aria-label="{{label_size_input}}">
+      <span id="brush-size-label" style="min-width:22px;">18</span>
+    </label>
+  </div>
+  <div style="position:relative;width:100%;max-width:{{display_w}}px;line-height:0;touch-action:none;">
+    <img src="data:image/png;base64,{{bg_b64}}" style="display:block;width:100%;height:auto;border-radius:4px;">
+    <canvas id="mask-canvas" width="{{display_w}}" height="{{display_h}}"
+            style="position:absolute;inset:0;width:100%;height:100%;opacity:0.6;cursor:crosshair;"></canvas>
+    <canvas id="preview-canvas" width="{{display_w}}" height="{{display_h}}"
+            style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;"></canvas>
+  </div>
+  <button type="button" id="commit-btn" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;
+          border:none;background:var(--ps-accent);color:var(--ps-on-accent);font:600 13px system-ui;cursor:pointer;">
+    {{label_commit}}
+  </button>
+  <div style="color:var(--ps-text-muted);font:11px system-ui;margin-top:6px;">{{label_keys}}</div>
+</div>
+<style>
+  .tool-btn { background:rgba(255,255,255,0.08); color:var(--ps-text); border:1px solid rgba(255,255,255,0.15);
+              border-radius:5px; padding:5px 9px; font:12px system-ui; cursor:pointer; }
+  .tool-btn.active { background:var(--ps-accent); color:var(--ps-on-accent); border-color:var(--ps-accent); }
+  #erase-btn.active { background:var(--ps-danger); color:var(--ps-on-accent); border-color:var(--ps-danger); }
+</style>

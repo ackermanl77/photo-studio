@@ -1,11 +1,20 @@
-"""The on-canvas editors' HTML/CSS/JS -- the before/after slider, tone curve, paint/brush, click
-picker (Magic Wand, white balance, zoom navigator), free-form crop and Pen tool -- as plain
+"""The on-canvas editors -- the before/after slider, tone curve, paint/brush, click picker (Magic
+Wand, white balance, zoom navigator), free-form crop, Pen tool and zoomed pan viewer -- as plain
 functions returning (markup, height) for st.components.v1.html().
 
-Split out of app/frontend_unified_app.py (F14 in the improvement report), which is a Streamlit
-script and can't be imported without rendering; these builders have no Streamlit dependency at all.
-Every editor commits back to Python through a hidden st.text_area plus a synthetic Ctrl+Enter --
-see CLAUDE.md for why that is the one reliable cross-iframe channel in this Streamlit version.
+Each editor is a static component in app/ui/static/editors/ (F14): `<name>.html` holds its markup and
+CSS with `{{field}}` slots, `<name>.js` its script, and `commit.js` the commit helper they share. A
+builder here only computes the values: HTML fields (already escaped -- labels go through `_tx()`,
+i.e. app.i18n's `t()` plus HTML escaping) and one JSON `CONFIG` object the script reads (initial
+state, sizes, the hidden field's selector, translated strings it builds at run time). `_render()`
+puts them together as one self-contained page, because components.html() can't load files next to
+it; the markup itself never contains Python-generated JavaScript any more.
+
+Every editor commits back to Python through a hidden st.text_area plus a synthetic Ctrl+Enter
+(`commitToStreamlit()` in commit.js) -- see CLAUDE.md for why that is the one reliable cross-iframe
+channel in this Streamlit version. Streamlit's bidirectional component API (a component folder with
+its own frontend build) was considered for F14 and not adopted: it would need a JS build step and a
+second commit path, while this channel is verified live and covered under Node.
 
 Keyboard (F11): every editor is focusable (role="application" plus an aria label). Arrow keys nudge
 the selected crop corner or box, Pen anchor (Alt: its curve handle), curve point, or the last
@@ -20,6 +29,9 @@ import base64
 import html
 import io
 import json
+import re
+from functools import lru_cache
+from pathlib import Path
 
 from PIL import Image
 
@@ -29,15 +41,51 @@ from app.ui.theme import editor_style
 # One commit per burst of arrow-key presses rather than one Streamlit rerun per key press.
 KEY_COMMIT_DELAY_MS = 350
 
+EDITORS_DIR = Path(__file__).resolve().parent / "ui" / "static" / "editors"
+_FIELD = re.compile(r"\{\{(\w+)\}\}")
 
 
 def _tx(text: str) -> str:
     """`text` in the interface language (app.i18n), escaped for HTML text and attributes."""
     return html.escape(t(text))
 
+
+@lru_cache(maxsize=None)
+def _asset(name: str) -> str:
+    return (EDITORS_DIR / name).read_text(encoding="utf-8")
+
+
+def _render(name: str, fields: dict[str, object], config: dict | None = None) -> str:
+    """`<name>.html` with its `{{field}}` slots filled from `fields` (inserted as given: callers pass
+    escaped text), then one script: `const CONFIG = ...`, commit.js and `<name>.js`. Every slot must
+    be filled and every field used, so a renamed slot fails loudly instead of rendering `{{x}}`."""
+    markup = _asset(f"{name}.html")
+    used = set(_FIELD.findall(markup))
+    missing, unused = used - set(fields), set(fields) - used
+    if missing or unused:
+        raise KeyError(f"{name}.html: missing {sorted(missing)}, unused {sorted(unused)}")
+    markup = _FIELD.sub(lambda match: str(fields[match.group(1)]), markup)
+    payload = json.dumps({"keyCommitDelay": KEY_COMMIT_DELAY_MS, **(config or {})}, ensure_ascii=False)
+    payload = payload.replace("</", "<\\/")  # never closes the <script> early
+    script = f"const CONFIG = {payload};\n{_asset('commit.js')}\n{_asset(f'{name}.js')}"
+    return editor_style() + markup + f"<script>\n{script}</script>\n"
+
+
+def _png_b64(image: Image.Image) -> str:
+    buffer = io.BytesIO()
+    image.convert("RGB").save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _display_size(background: Image.Image) -> tuple[int, int]:
+    width, height = background.size
+    display_w = min(480, width)
+    return display_w, int(display_w * height / width) if width else 320
+
+
 def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, int]:
     """A draggable before/after comparison: a single range input drives a CSS clip-path on the
-    "before" image layered over the "after" image. Pure inline HTML/CSS/JS via
+    "before" image layered over the "after" image. Static before_after.html/.js via
     st.components.v1.html -- no component library dependency, consistent with keeping this app's
     UI free of extra dependencies after removing streamlit-drawable-canvas.
 
@@ -46,38 +94,12 @@ def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, in
     """
     width, height = after.size
     display_height = max(220, min(560, int(700 * height / width))) if width else 320
-
-    def _b64_png(image: Image.Image) -> str:
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        return base64.b64encode(buffer.getvalue()).decode("ascii")
-
-    before_b64 = _b64_png(before)
-    after_b64 = _b64_png(after)
-    html = f"""
-    <div style="position:relative;width:100%;background:var(--ps-canvas);border-radius:8px;overflow:hidden;line-height:0;">
-      <img src="data:image/png;base64,{after_b64}" style="display:block;width:100%;height:auto;">
-      <img id="ba-before" src="data:image/png;base64,{before_b64}"
-           style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;clip-path:inset(0 50% 0 0);">
-      <div id="ba-handle" style="position:absolute;top:0;bottom:0;left:50%;width:2px;margin-left:-1px;
-           background:#fff;box-shadow:0 0 6px rgba(0,0,0,.7);pointer-events:none;"></div>
-      <div style="position:absolute;top:8px;left:12px;color:#fff;font:600 11px system-ui;text-shadow:0 1px 3px rgba(0,0,0,.8);letter-spacing:.05em;">{_tx("BEFORE")}</div>
-      <div style="position:absolute;top:8px;right:12px;color:#fff;font:600 11px system-ui;text-shadow:0 1px 3px rgba(0,0,0,.8);letter-spacing:.05em;">{_tx("AFTER")}</div>
-      <input id="ba-range" type="range" min="0" max="100" value="50" aria-label="{_tx("Before/after comparison position")}"
-             style="position:absolute;left:8px;right:8px;bottom:10px;width:calc(100% - 16px);">
-    </div>
-    <script>
-      const range = document.getElementById('ba-range');
-      const before = document.getElementById('ba-before');
-      const handle = document.getElementById('ba-handle');
-      range.addEventListener('input', () => {{
-        const v = range.value;
-        before.style.clipPath = `inset(0 ${{100 - v}}% 0 0)`;
-        handle.style.left = v + '%';
-      }});
-    </script>
-    """
-    return editor_style() + html, display_height
+    fields = {
+        "after_b64": _png_b64(after), "before_b64": _png_b64(before),
+        "label_before": _tx("BEFORE"), "label_after": _tx("AFTER"),
+        "label_range": _tx("Before/after comparison position"),
+    }
+    return _render("before_after", fields), display_height
 
 
 _MASTER_CURVE_KEYS = ("curve_black", "curve_shadows", "curve_mid", "curve_highlights", "curve_white")
@@ -132,199 +154,28 @@ def _curve_editor_html(points: list[tuple[int, int]], bounds: list[tuple[int, in
     poly = " ".join(f"{px:.1f},{py:.1f}" for px, py in (_to_px(x, y) for x, y in all_points_sorted))
     fixed_circles = "\n".join(
         f'<circle class="pt fixed" data-idx="{i}" cx="{px:.1f}" cy="{py:.1f}" r="7" tabindex="0" role="slider" '
-        f'aria-label="{html.escape(t('Curve point {0} of 5 -- Up/Down arrows adjust it').format(i + 1))}"></circle>'
+        f'aria-label="{html.escape(t("Curve point {0} of 5 -- Up/Down arrows adjust it").format(i + 1))}"></circle>'
         for i, (px, py) in enumerate(_to_px(x, y) for x, y in points)
     )
     diag_x0, diag_y0 = _to_px(0, 0)
     diag_x1, diag_y1 = _to_px(255, 255)
-    points_json = json.dumps(points)
-    bounds_json = json.dumps(bounds)
-    extra_points_json = json.dumps(extra_points)
-    return editor_style() + f"""
-    <div style="background:var(--ps-panel);border-radius:8px;padding:6px 8px;">
-    <svg id="curve-svg" width="100%" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" role="application"
-         aria-label="{_tx("Tone curve editor. Tab to a point, then use the Up and Down arrows.")}"
-         preserveAspectRatio="xMinYMin meet" style="touch-action:none;display:block;">
-      <rect id="curve-bg" x="{margin_left}" y="{margin_top}" width="{plot_size}" height="{plot_size}"
-            fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.15)" style="cursor:{'copy' if allow_extra else 'default'};"/>
-      <line x1="{diag_x0:.1f}" y1="{diag_y0:.1f}" x2="{diag_x1:.1f}" y2="{diag_y1:.1f}"
-            stroke="rgba(255,255,255,0.2)" stroke-dasharray="3,3"/>
-      <polyline id="curve-line" points="{poly}" fill="none" style="stroke:{color}" stroke-width="2"/>
-      {fixed_circles}
-      <g id="extra-points"></g>
-    </svg>
-    </div>
-    <div style="color:var(--ps-text-muted);font:11px system-ui;margin-top:4px;padding:0 2px;">
-      {_tx("Click an empty spot on the curve to add a point, drag it, double-click to remove it.") if allow_extra else _tx("Drag a point up or down.")} {_tx("Keyboard: Tab to a point, Up/Down (Shift = x10).")}
-    </div>
-    <style>
-      #curve-svg .pt.fixed {{ fill:{color}; stroke:var(--ps-border); stroke-width:2; cursor:ns-resize; }}
-      #curve-svg .pt.fixed:focus {{ outline:none; stroke:#fff; stroke-width:3; }}
-      #curve-svg .pt.fixed:hover {{ fill:var(--ps-accent-soft); }}
-      #curve-svg .pt.extra {{ fill:var(--ps-info); stroke:var(--ps-border); stroke-width:2; cursor:move; }}
-      #curve-svg .pt.extra:hover {{ fill:var(--ps-info-soft); }}
-    </style>
-    <script>
-      (function() {{
-        const marginLeft = {margin_left}, marginTop = {margin_top}, plotSize = {plot_size}, svgW = {svg_w};
-        const bounds = {bounds_json};
-        const points = {points_json};
-        let extraPoints = {extra_points_json};
-        const keys = {json.dumps(list(keys))}, allowExtra = {'true' if allow_extra else 'false'};
-        const svg = document.getElementById('curve-svg');
-        const bg = document.getElementById('curve-bg');
-        const line = document.getElementById('curve-line');
-        const extraGroup = document.getElementById('extra-points');
-        function toPx(x, y) {{ return [marginLeft + (x / 255) * plotSize, marginTop + plotSize - (y / 255) * plotSize]; }}
-        function fromPy(py) {{ return Math.max(0, Math.min(255, ((marginTop + plotSize - py) / plotSize) * 255)); }}
-        function fromPx(px) {{ return Math.max(0, Math.min(255, ((px - marginLeft) / plotSize) * 255)); }}
-        // Two points can't share an X (apply_curves needs strictly increasing X, and the server
-        // would drop one): an extra point placed or dragged onto a used X moves to the nearest
-        // free one, so what you see is what gets applied.
-        function freeX(x, ownIdx) {{
-          const used = new Set(points.map(p => p[0]).concat(extraPoints.filter((_, i) => i !== ownIdx).map(p => p[0])));
-          for (let d = 0; d <= 255; d++) {{
-            if (x + d <= 255 && !used.has(x + d)) return x + d;
-            if (x - d >= 0 && !used.has(x - d)) return x - d;
-          }}
-          return x;
-        }}
-        function redraw() {{
-          const all = points.concat(extraPoints).slice().sort((a, b) => a[0] - b[0]);
-          line.setAttribute('points', all.map(p => toPx(p[0], p[1]).join(',')).join(' '));
-          svg.querySelectorAll('.pt.fixed').forEach((c, i) => {{
-            const [px, py] = toPx(points[i][0], points[i][1]);
-            c.setAttribute('cx', px); c.setAttribute('cy', py);
-          }});
-          extraGroup.innerHTML = '';
-          extraPoints.forEach((p, i) => {{
-            const [px, py] = toPx(p[0], p[1]);
-            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            circle.setAttribute('class', 'pt extra');
-            circle.setAttribute('data-idx', i);
-            circle.setAttribute('cx', px); circle.setAttribute('cy', py); circle.setAttribute('r', 7);
-            extraGroup.appendChild(circle);
-          }});
-        }}
-        function commit() {{
-          try {{
-            const data = {{ curve_enabled: true }};
-            keys.forEach((key, i) => {{ data[key] = points[i][1]; }});
-            if (allowExtra) data.curve_extra_points = extraPoints;
-            const payload = JSON.stringify(data);
-            const container = window.parent.document.querySelector('.st-key-curve-hidden');
-            if (!container) return;
-            const textarea = container.querySelector('textarea');
-            if (!textarea) return;
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            textarea.focus();
-            setter.call(textarea, payload);
-            textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            textarea.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.blur();
-          }} catch (e) {{}}
-        }}
-
-        // Fixed points: Y-only drag within their own [min, max] -- unchanged from before extra
-        // points existed. Their count never changes, so listeners attach once, directly.
-        let dragIdx = null;
-        svg.querySelectorAll('.pt.fixed').forEach((circle, i) => {{
-          circle.addEventListener('pointerdown', (e) => {{
-            dragIdx = i;
-            circle.setPointerCapture(e.pointerId);
-            e.preventDefault();
-          }});
-        }});
-        svg.addEventListener('pointermove', (e) => {{
-          if (dragIdx === null) return;
-          const rect = svg.getBoundingClientRect();
-          const scale = svgW / rect.width;
-          const py = (e.clientY - rect.top) * scale;
-          let value = Math.round(fromPy(py));
-          const [lo, hi] = bounds[dragIdx];
-          value = Math.max(lo, Math.min(hi, value));
-          points[dragIdx][1] = value;
-          redraw();
-        }});
-        function endDrag() {{
-          if (dragIdx === null) return;
-          dragIdx = null;
-          commit();
-        }}
-        svg.addEventListener('pointerup', endDrag);
-        svg.addEventListener('pointerleave', endDrag);
-
-        // Keyboard (F11): a focused fixed point moves with Up/Down (Shift = 10 levels) within its
-        // own [min, max]; one commit per burst of presses.
-        let keyTimer = null;
-        svg.querySelectorAll('.pt.fixed').forEach((circle, i) => {{
-          circle.addEventListener('keydown', (e) => {{
-            const step = (e.key === 'ArrowUp' ? 1 : e.key === 'ArrowDown' ? -1 : 0) * (e.shiftKey ? 10 : 1);
-            if (!step) return;
-            e.preventDefault();
-            const [lo, hi] = bounds[i];
-            points[i][1] = Math.max(lo, Math.min(hi, points[i][1] + step));
-            circle.setAttribute('aria-valuenow', points[i][1]);
-            redraw();
-            clearTimeout(keyTimer);
-            keyTimer = setTimeout(commit, {KEY_COMMIT_DELAY_MS});
-          }});
-        }});
-
-        // Extra points: added/removed dynamically, so handled via event delegation on `svg`
-        // (checking e.target) instead of per-circle listeners that would need re-attaching every
-        // time redraw() rebuilds the #extra-points group's children.
-        let dragExtraIdx = null;
-        svg.addEventListener('pointerdown', (e) => {{
-          const el = e.target.closest('.pt.extra');
-          if (!el) return;
-          dragExtraIdx = Number(el.dataset.idx);
-          svg.setPointerCapture(e.pointerId);
-          e.preventDefault();
-          e.stopPropagation();
-        }});
-        svg.addEventListener('pointermove', (e) => {{
-          if (dragExtraIdx === null) return;
-          const rect = svg.getBoundingClientRect();
-          const scale = svgW / rect.width;
-          const px = (e.clientX - rect.left) * scale;
-          const py = (e.clientY - rect.top) * scale;
-          extraPoints[dragExtraIdx] = [freeX(Math.round(fromPx(px)), dragExtraIdx), Math.round(fromPy(py))];
-          redraw();
-        }});
-        function endExtraDrag() {{
-          if (dragExtraIdx === null) return;
-          dragExtraIdx = null;
-          commit();
-        }}
-        svg.addEventListener('pointerup', endExtraDrag);
-        svg.addEventListener('pointerleave', endExtraDrag);
-        svg.addEventListener('dblclick', (e) => {{
-          const el = e.target.closest('.pt.extra');
-          if (!el) return;
-          extraPoints.splice(Number(el.dataset.idx), 1);
-          redraw();
-          commit();
-        }});
-
-        // Click empty background (not a drag-release from a point, which targets a circle
-        // element instead of the rect) adds a new extra point at the clicked position.
-        bg.addEventListener('click', (e) => {{
-          if (!allowExtra) return;
-          const rect = svg.getBoundingClientRect();
-          const scale = svgW / rect.width;
-          const px = (e.clientX - rect.left) * scale;
-          const py = (e.clientY - rect.top) * scale;
-          extraPoints.push([freeX(Math.round(fromPx(px)), -1), Math.round(fromPy(py))]);
-          redraw();
-          commit();
-        }});
-
-        redraw();
-      }})();
-    </script>
-    """
+    hint = (_tx("Click an empty spot on the curve to add a point, drag it, double-click to remove it.") if allow_extra
+            else _tx("Drag a point up or down."))
+    fields = {
+        "color": html.escape(color), "svg_w": svg_w, "svg_h": svg_h,
+        "label_editor": _tx("Tone curve editor. Tab to a point, then use the Up and Down arrows."),
+        "margin_left": margin_left, "margin_top": margin_top, "plot_size": plot_size,
+        "bg_cursor": "copy" if allow_extra else "default",
+        "diag_x0": f"{diag_x0:.1f}", "diag_y0": f"{diag_y0:.1f}", "diag_x1": f"{diag_x1:.1f}", "diag_y1": f"{diag_y1:.1f}",
+        "poly": poly, "fixed_circles": fixed_circles,
+        "hint": f"{hint} {_tx('Keyboard: Tab to a point, Up/Down (Shift = x10).')}",
+    }
+    config = {
+        "marginLeft": margin_left, "marginTop": margin_top, "plotSize": plot_size, "svgW": svg_w,
+        "bounds": [list(b) for b in bounds], "points": [list(p) for p in points],
+        "extraPoints": [list(p) for p in extra_points], "keys": list(keys), "allowExtra": allow_extra,
+    }
+    return _render("curve", fields, config)
 
 
 def _paint_editor_html(background: Image.Image, key_prefix: str, preload_mask_b64: str | None = None, commit_label: str = "➕ Add to selections") -> tuple[str, int]:
@@ -348,229 +199,18 @@ def _paint_editor_html(background: Image.Image, key_prefix: str, preload_mask_b6
     the re-edit path read "💾 Update Painting" instead of "➕ Add to selections" without a second,
     near-duplicate template.
     """
-    width, height = background.size
-    display_w = min(480, width)
-    display_h = int(display_w * height / width) if width else 320
-
-    buffer = io.BytesIO()
-    background.convert("RGB").save(buffer, format="PNG")
-    bg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
-    hidden_selector = f".st-key-{key_prefix}-paint-hidden"
-    preload_js = (
-        f"""const preload = new Image();
-          preload.onload = () => ctx.drawImage(preload, 0, 0, W, H);
-          preload.src = 'data:image/png;base64,{preload_mask_b64}';"""
-        if preload_mask_b64
-        else ""
-    )
-
-    return editor_style() + f"""
-    <div id="paint-root" tabindex="0" role="application" style="background:var(--ps-panel);border-radius:8px;padding:8px;outline:none;"
-         aria-label="{_tx("Selection painter. [ and ] change the brush size; arrow keys move the last radial or gradient (Alt: its end point, Shift: 10x).")}">
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
-        <button type="button" class="tool-btn active" data-tool="brush">{_tx("🖌 Brush")}</button>
-        <button type="button" class="tool-btn" data-tool="radial">{_tx("⭕ Radial")}</button>
-        <button type="button" class="tool-btn" data-tool="gradient">{_tx("📐 Gradient")}</button>
-        <button type="button" id="erase-btn" class="tool-btn">{_tx("🧹 Erase")}</button>
-        <button type="button" id="clear-btn" class="tool-btn">{_tx("✖ Clear")}</button>
-        <label style="display:flex;align-items:center;gap:4px;color:var(--ps-text);font:12px system-ui;margin-left:4px;">
-          {_tx("Size")} <input id="brush-size" type="range" min="4" max="80" value="18" style="width:80px;" aria-label="{_tx("Brush size ([ and ] keys)")}">
-          <span id="brush-size-label" style="min-width:22px;">18</span>
-        </label>
-      </div>
-      <div style="position:relative;width:100%;max-width:{display_w}px;line-height:0;touch-action:none;">
-        <img src="data:image/png;base64,{bg_b64}" style="display:block;width:100%;height:auto;border-radius:4px;">
-        <canvas id="mask-canvas" width="{display_w}" height="{display_h}"
-                style="position:absolute;inset:0;width:100%;height:100%;opacity:0.6;cursor:crosshair;"></canvas>
-        <canvas id="preview-canvas" width="{display_w}" height="{display_h}"
-                style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;"></canvas>
-      </div>
-      <button type="button" id="commit-btn" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;
-              border:none;background:var(--ps-accent);color:var(--ps-on-accent);font:600 13px system-ui;cursor:pointer;">
-        {_tx(commit_label)}
-      </button>
-      <div style="color:var(--ps-text-muted);font:11px system-ui;margin-top:6px;">{_tx("Keys: [ / ] brush size. After a radial or gradient: arrows move it, Alt+arrows move its end point, Shift = x10.")}</div>
-    </div>
-    <style>
-      .tool-btn {{ background:rgba(255,255,255,0.08); color:var(--ps-text); border:1px solid rgba(255,255,255,0.15);
-                   border-radius:5px; padding:5px 9px; font:12px system-ui; cursor:pointer; }}
-      .tool-btn.active {{ background:var(--ps-accent); color:var(--ps-on-accent); border-color:var(--ps-accent); }}
-      #erase-btn.active {{ background:var(--ps-danger); color:var(--ps-on-accent); border-color:var(--ps-danger); }}
-    </style>
-    <script>
-      (function() {{
-        const maskCanvas = document.getElementById('mask-canvas');
-        const previewCanvas = document.getElementById('preview-canvas');
-        const ctx = maskCanvas.getContext('2d');
-        const pctx = previewCanvas.getContext('2d');
-        const W = maskCanvas.width, H = maskCanvas.height;
-        let tool = 'brush', erasing = false, brushSize = 18;
-        let drawing = false, lastX = 0, lastY = 0, startX = 0, startY = 0;
-        {preload_js}
-
-        document.querySelectorAll('.tool-btn[data-tool]').forEach((btn) => {{
-          btn.addEventListener('click', () => {{
-            tool = btn.dataset.tool;
-            document.querySelectorAll('.tool-btn[data-tool]').forEach((b) => b.classList.toggle('active', b === btn));
-          }});
-        }});
-        document.getElementById('erase-btn').addEventListener('click', (e) => {{
-          erasing = !erasing;
-          e.currentTarget.classList.toggle('active', erasing);
-        }});
-        document.getElementById('clear-btn').addEventListener('click', () => {{ ctx.clearRect(0, 0, W, H); lastShape = null; pctx.clearRect(0, 0, W, H); }});
-        const sizeInput = document.getElementById('brush-size');
-        const sizeLabel = document.getElementById('brush-size-label');
-        function setBrushSize(value) {{
-          brushSize = Math.max(Number(sizeInput.min), Math.min(Number(sizeInput.max), value));
-          sizeInput.value = brushSize;
-          sizeLabel.textContent = brushSize;
-        }}
-        sizeInput.addEventListener('input', (e) => setBrushSize(Number(e.target.value)));
-
-        // The last radial/gradient stays adjustable from the keyboard until the next stroke (F11):
-        // the mask as it was before that shape is kept, so a nudge repaints the shape moved.
-        let lastShape = null, beforeShape = null;
-        function outlineShape() {{
-          pctx.clearRect(0, 0, W, H);
-          if (!lastShape) return;
-          pctx.strokeStyle = 'rgba(251,191,36,0.95)'; pctx.lineWidth = 1.5; pctx.setLineDash([4, 3]);
-          pctx.beginPath();
-          if (lastShape.tool === 'radial') {{
-            pctx.arc(lastShape.x0, lastShape.y0, Math.hypot(lastShape.x1 - lastShape.x0, lastShape.y1 - lastShape.y0), 0, Math.PI * 2);
-          }} else {{
-            pctx.moveTo(lastShape.x0, lastShape.y0); pctx.lineTo(lastShape.x1, lastShape.y1);
-          }}
-          pctx.stroke();
-        }}
-        function repaintShape() {{
-          ctx.putImageData(lastShape.before, 0, 0);
-          const wasErasing = erasing;
-          erasing = lastShape.erasing;
-          if (lastShape.tool === 'radial') paintRadial(lastShape.x0, lastShape.y0, Math.hypot(lastShape.x1 - lastShape.x0, lastShape.y1 - lastShape.y0));
-          else paintGradient(lastShape.x0, lastShape.y0, lastShape.x1, lastShape.y1);
-          erasing = wasErasing;
-          outlineShape();
-        }}
-        const ARROWS = {{ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]}};
-        document.addEventListener('keydown', (e) => {{
-          if (e.target && e.target.tagName === 'INPUT') return;
-          if (e.key === '[' || e.key === ']') {{
-            e.preventDefault();
-            setBrushSize(brushSize + (e.key === ']' ? 1 : -1) * (e.shiftKey ? 10 : 2));
-            return;
-          }}
-          const move = ARROWS[e.key];
-          if (!move || !lastShape) return;
-          e.preventDefault();
-          const step = e.shiftKey ? 10 : 1;
-          if (!e.altKey) {{ lastShape.x0 += move[0] * step; lastShape.y0 += move[1] * step; }}
-          lastShape.x1 += move[0] * step; lastShape.y1 += move[1] * step;
-          repaintShape();
-        }});
-
-        function toCanvasXY(e) {{
-          const rect = maskCanvas.getBoundingClientRect();
-          return [(e.clientX - rect.left) * (W / rect.width), (e.clientY - rect.top) * (H / rect.height)];
-        }}
-
-        function paintDab(x, y) {{
-          ctx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
-          ctx.strokeStyle = 'white'; ctx.fillStyle = 'white';
-          ctx.lineWidth = brushSize * 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(x, y); ctx.stroke();
-          ctx.beginPath(); ctx.arc(x, y, brushSize, 0, Math.PI * 2); ctx.fill();
-        }}
-
-        function paintRadial(cx, cy, radius) {{
-          ctx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
-          const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, radius));
-          grad.addColorStop(0, 'rgba(255,255,255,1)');
-          grad.addColorStop(0.7, 'rgba(255,255,255,1)');
-          grad.addColorStop(1, 'rgba(255,255,255,0)');
-          ctx.fillStyle = grad;
-          ctx.beginPath(); ctx.arc(cx, cy, Math.max(1, radius), 0, Math.PI * 2); ctx.fill();
-        }}
-
-        function paintGradient(x0, y0, x1, y1) {{
-          ctx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
-          const grad = ctx.createLinearGradient(x0, y0, x1, y1);
-          grad.addColorStop(0, 'rgba(255,255,255,1)');
-          grad.addColorStop(1, 'rgba(255,255,255,0)');
-          ctx.fillStyle = grad;
-          ctx.fillRect(0, 0, W, H);
-        }}
-
-        maskCanvas.addEventListener('pointerdown', (e) => {{
-          drawing = true;
-          maskCanvas.setPointerCapture(e.pointerId);
-          document.getElementById('paint-root').focus({{preventScroll: true}});
-          [startX, startY] = toCanvasXY(e);
-          lastX = startX; lastY = startY;
-          lastShape = null;
-          beforeShape = tool === 'brush' ? null : ctx.getImageData(0, 0, W, H);
-          if (tool === 'brush') paintDab(startX, startY);
-          e.preventDefault();
-        }});
-        maskCanvas.addEventListener('pointermove', (e) => {{
-          if (!drawing) return;
-          const [x, y] = toCanvasXY(e);
-          if (tool === 'brush') {{
-            paintDab(x, y);
-            lastX = x; lastY = y;
-          }} else {{
-            pctx.clearRect(0, 0, W, H);
-            pctx.strokeStyle = 'rgba(255,255,255,0.9)'; pctx.lineWidth = 1.5; pctx.setLineDash([4, 3]);
-            if (tool === 'radial') {{
-              const radius = Math.hypot(x - startX, y - startY);
-              pctx.beginPath(); pctx.arc(startX, startY, radius, 0, Math.PI * 2); pctx.stroke();
-            }} else {{
-              pctx.beginPath(); pctx.moveTo(startX, startY); pctx.lineTo(x, y); pctx.stroke();
-            }}
-          }}
-        }});
-        function endStroke(e) {{
-          if (!drawing) return;
-          drawing = false;
-          pctx.clearRect(0, 0, W, H);
-          if (tool === 'radial') {{
-            const [x, y] = toCanvasXY(e);
-            paintRadial(startX, startY, Math.hypot(x - startX, y - startY));
-            lastShape = {{tool: 'radial', x0: startX, y0: startY, x1: x, y1: y, erasing: erasing, before: beforeShape}};
-          }} else if (tool === 'gradient') {{
-            const [x, y] = toCanvasXY(e);
-            paintGradient(startX, startY, x, y);
-            lastShape = {{tool: 'gradient', x0: startX, y0: startY, x1: x, y1: y, erasing: erasing, before: beforeShape}};
-          }}
-          outlineShape();
-        }}
-        maskCanvas.addEventListener('pointerup', endStroke);
-        maskCanvas.addEventListener('pointerleave', endStroke);
-
-        document.getElementById('commit-btn').addEventListener('click', () => {{
-          const base64 = maskCanvas.toDataURL('image/png').split(',')[1];
-          try {{
-            const container = window.parent.document.querySelector('{hidden_selector}');
-            if (!container) return;
-            const textarea = container.querySelector('textarea');
-            if (!textarea) return;
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            textarea.focus();
-            setter.call(textarea, base64);
-            textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            // Confirmed live: unlike a slider/checkbox (which commit on a plain 'change'),
-            // st.text_area only commits -- and reruns the script -- on Ctrl+Enter or on losing
-            // focus, and a synthetic .blur() alone wasn't reliably enough to trigger that in
-            // this Streamlit version. Ctrl+Enter is Streamlit's own documented text_area
-            // shortcut, so dispatch that directly rather than depend on blur semantics.
-            textarea.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.blur();
-          }} catch (e) {{}}
-        }});
-      }})();
-    </script>
-    """, display_h + 130
+    display_w, display_h = _display_size(background)
+    fields = {
+        "label_root": _tx("Selection painter. [ and ] change the brush size; arrow keys move the last radial or gradient (Alt: its end point, Shift: 10x)."),
+        "label_brush": _tx("🖌 Brush"), "label_radial": _tx("⭕ Radial"), "label_gradient": _tx("📐 Gradient"),
+        "label_erase": _tx("🧹 Erase"), "label_clear": _tx("✖ Clear"), "label_size": _tx("Size"),
+        "label_size_input": _tx("Brush size ([ and ] keys)"),
+        "display_w": display_w, "display_h": display_h, "bg_b64": _png_b64(background),
+        "label_commit": _tx(commit_label),
+        "label_keys": _tx("Keys: [ / ] brush size. After a radial or gradient: arrows move it, Alt+arrows move its end point, Shift = x10."),
+    }
+    config = {"hiddenSelector": f".st-key-{key_prefix}-paint-hidden", "preloadMaskB64": preload_mask_b64 or ""}
+    return _render("paint", fields, config), display_h + 130
 
 
 def _wand_picker_html(background: Image.Image, key_prefix: str, hint: str = "Click anywhere on the photo to sample that color.") -> tuple[str, int]:
@@ -581,55 +221,9 @@ def _wand_picker_html(background: Image.Image, key_prefix: str, hint: str = "Cli
     drawing state to track, so this is its own small component rather than another branch bolted
     onto `_paint_editor_html`.
     """
-    width, height = background.size
-    display_w = min(480, width)
-    display_h = int(display_w * height / width) if width else 320
-
-    buffer = io.BytesIO()
-    background.convert("RGB").save(buffer, format="PNG")
-    bg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
-    hidden_selector = f".st-key-{key_prefix}-wand-hidden"
-
-    return editor_style() + f"""
-    <div style="background:var(--ps-panel);border-radius:8px;padding:8px;">
-      <div style="position:relative;width:100%;max-width:{display_w}px;line-height:0;">
-        <img id="wand-img" src="data:image/png;base64,{bg_b64}" role="button" tabindex="0" aria-label="{_tx(hint)}"
-             style="display:block;width:100%;height:auto;border-radius:4px;cursor:crosshair;">
-        <div id="wand-marker" style="position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;
-             border:2px solid var(--ps-accent);border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.6);
-             display:none;pointer-events:none;"></div>
-      </div>
-      <div style="color:var(--ps-text-muted);font:12px system-ui;margin-top:6px;">{_tx(hint)}</div>
-    </div>
-    <script>
-      (function() {{
-        const img = document.getElementById('wand-img');
-        const marker = document.getElementById('wand-marker');
-        img.addEventListener('click', function(e) {{
-          const rect = img.getBoundingClientRect();
-          const fx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-          const fy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-          marker.style.left = (fx * rect.width) + 'px';
-          marker.style.top = (fy * rect.height) + 'px';
-          marker.style.display = 'block';
-          try {{
-            const payload = JSON.stringify({{x: fx, y: fy}});
-            const container = window.parent.document.querySelector('{hidden_selector}');
-            if (!container) return;
-            const textarea = container.querySelector('textarea');
-            if (!textarea) return;
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            textarea.focus();
-            setter.call(textarea, payload);
-            textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            textarea.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.blur();
-          }} catch (err) {{}}
-        }});
-      }})();
-    </script>
-    """, display_h + 60
+    display_w, display_h = _display_size(background)
+    fields = {"display_w": display_w, "bg_b64": _png_b64(background), "hint": _tx(hint)}
+    return _render("picker", fields, {"hiddenSelector": f".st-key-{key_prefix}-wand-hidden"}), display_h + 60
 
 
 def _crop_editor_html(
@@ -659,173 +253,23 @@ def _crop_editor_html(
     comparatively little extra value over "frame this edge exactly on a guide," which the corners
     already cover, so it's left as a known, deliberate gap (see "Known Issues").
     """
-    width, height = background.size
-    display_w = min(480, width)
-    display_h = int(display_w * height / width) if width else 320
+    display_w, display_h = _display_size(background)
     full_w, full_h = full_size
     x0, y0, x1, y1 = box
-
-    buffer = io.BytesIO()
-    background.convert("RGB").save(buffer, format="PNG")
-    bg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
-    hidden_selector = f".st-key-{key_prefix}-hidden"
-
-    return editor_style() + f"""
-    <div style="background:var(--ps-panel);border-radius:8px;padding:8px;">
-      <div id="crop-wrap" role="application" aria-label="{_tx("Crop box. Tab to the box or a corner, then use the arrow keys (Shift = 10 pixels).")}"
-           style="position:relative;width:100%;max-width:{display_w}px;line-height:0;touch-action:none;">
-        <img src="data:image/png;base64,{bg_b64}" alt="" style="display:block;width:100%;height:auto;border-radius:4px;">
-        <div id="crop-rect" tabindex="0" aria-label="{_tx("Crop box -- arrow keys move it")}" style="position:absolute;border:2px solid var(--ps-accent);background:rgba(251,191,36,0.15);cursor:move;box-sizing:border-box;"></div>
-        <div id="crop-tl" class="crop-handle" tabindex="0" aria-label="{_tx("Top-left crop corner -- arrow keys move it")}" style="cursor:nwse-resize;"></div>
-        <div id="crop-br" class="crop-handle" tabindex="0" aria-label="{_tx("Bottom-right crop corner -- arrow keys move it")}" style="cursor:nwse-resize;"></div>
-      </div>
-      <div id="crop-dims" style="color:var(--ps-text-muted);font:12px system-ui;margin-top:6px;"></div>
-    </div>
-    <style>
-      .crop-handle {{ position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px;
-                      background:var(--ps-accent); border:2px solid var(--ps-border); border-radius:50%; }}
-      #crop-wrap [tabindex]:focus {{ outline:2px solid #fff; outline-offset:2px; }}
-    </style>
-    <script>
-      (function() {{
-        const wrap = document.getElementById('crop-wrap');
-        const rectEl = document.getElementById('crop-rect');
-        const tl = document.getElementById('crop-tl');
-        const br = document.getElementById('crop-br');
-        const dimsLabel = document.getElementById('crop-dims');
-        const box = {{x0: {x0}, y0: {y0}, x1: {x1}, y1: {y1}}};
-        const snapX = {json.dumps(list(snap_x or []))};
-        const snapY = {json.dumps(list(snap_y or []))};
-        const SNAP_THRESHOLD = 0.012;
-        let dragMode = null, moveStart = null;
-
-        function snapValue(value, candidates) {{
-          for (const candidate of candidates) {{
-            if (Math.abs(value - candidate) < SNAP_THRESHOLD) return candidate;
-          }}
-          return value;
-        }}
-
-        function redraw() {{
-          rectEl.style.left = (box.x0 * 100) + '%';
-          rectEl.style.top = (box.y0 * 100) + '%';
-          rectEl.style.width = ((box.x1 - box.x0) * 100) + '%';
-          rectEl.style.height = ((box.y1 - box.y0) * 100) + '%';
-          tl.style.left = (box.x0 * 100) + '%';
-          tl.style.top = (box.y0 * 100) + '%';
-          br.style.left = (box.x1 * 100) + '%';
-          br.style.top = (box.y1 * 100) + '%';
-          const pxW = Math.round((box.x1 - box.x0) * {full_w});
-          const pxH = Math.round((box.y1 - box.y0) * {full_h});
-          dimsLabel.textContent = {json.dumps(t("Crop:"))} + ' ' + pxW + '×' + pxH + 'px -- ' + {json.dumps(t("drag a corner to resize, drag inside to move."))};
-        }}
-        redraw();
-
-        function fractionalPos(e) {{
-          const rect = wrap.getBoundingClientRect();
-          const fx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-          const fy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-          return [fx, fy];
-        }}
-
-        function startDrag(mode) {{
-          return function(e) {{
-            dragMode = mode;
-            e.currentTarget.focus({{preventScroll: true}});  // so the arrow keys then nudge what was dragged
-            wrap.setPointerCapture(e.pointerId);
-            if (mode === 'move') {{
-              const [fx, fy] = fractionalPos(e);
-              moveStart = {{fx: fx, fy: fy, x0: box.x0, y0: box.y0, x1: box.x1, y1: box.y1}};
-            }}
-            e.preventDefault();
-            e.stopPropagation();
-          }};
-        }}
-        tl.addEventListener('pointerdown', startDrag('tl'));
-        br.addEventListener('pointerdown', startDrag('br'));
-        rectEl.addEventListener('pointerdown', startDrag('move'));
-
-        const MIN_SIZE = 0.02;
-        wrap.addEventListener('pointermove', function(e) {{
-          if (!dragMode) return;
-          let [fx, fy] = fractionalPos(e);
-          if (dragMode === 'tl' || dragMode === 'br') {{
-            // Snap only the corner handles -- not a body drag/move, see the docstring above.
-            fx = snapValue(fx, snapX);
-            fy = snapValue(fy, snapY);
-          }}
-          if (dragMode === 'tl') {{
-            box.x0 = Math.min(fx, box.x1 - MIN_SIZE);
-            box.y0 = Math.min(fy, box.y1 - MIN_SIZE);
-          }} else if (dragMode === 'br') {{
-            box.x1 = Math.max(fx, box.x0 + MIN_SIZE);
-            box.y1 = Math.max(fy, box.y0 + MIN_SIZE);
-          }} else if (dragMode === 'move') {{
-            const w = moveStart.x1 - moveStart.x0, h = moveStart.y1 - moveStart.y0;
-            let nx0 = Math.max(0, Math.min(1 - w, moveStart.x0 + (fx - moveStart.fx)));
-            let ny0 = Math.max(0, Math.min(1 - h, moveStart.y0 + (fy - moveStart.fy)));
-            box.x0 = nx0; box.y0 = ny0; box.x1 = nx0 + w; box.y1 = ny0 + h;
-          }}
-          redraw();
-        }});
-
-        function commit() {{
-          try {{
-            const payload = JSON.stringify(box);
-            const container = window.parent.document.querySelector('{hidden_selector}');
-            if (!container) return;
-            const textarea = container.querySelector('textarea');
-            if (!textarea) return;
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            textarea.focus();
-            setter.call(textarea, payload);
-            textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            textarea.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.blur();
-          }} catch (err) {{}}
-        }}
-        function endDrag() {{
-          if (!dragMode) return;
-          dragMode = null;
-          commit();
-        }}
-        wrap.addEventListener('pointerup', endDrag);
-        wrap.addEventListener('pointerleave', endDrag);
-
-        // Keyboard (F11): the focused corner or the whole box moves by one source pixel per arrow
-        // press (Shift = 10), with the same limits as a drag; one commit per burst of presses.
-        const STEP_X = 1 / {max(1, full_w)}, STEP_Y = 1 / {max(1, full_h)};
-        const ARROWS = {{ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]}};
-        let keyTimer = null;
-        function nudge(target, dx, dy) {{
-          if (target === 'tl') {{
-            box.x0 = Math.max(0, Math.min(box.x1 - MIN_SIZE, box.x0 + dx));
-            box.y0 = Math.max(0, Math.min(box.y1 - MIN_SIZE, box.y0 + dy));
-          }} else if (target === 'br') {{
-            box.x1 = Math.min(1, Math.max(box.x0 + MIN_SIZE, box.x1 + dx));
-            box.y1 = Math.min(1, Math.max(box.y0 + MIN_SIZE, box.y1 + dy));
-          }} else {{
-            const w = box.x1 - box.x0, h = box.y1 - box.y0;
-            box.x0 = Math.max(0, Math.min(1 - w, box.x0 + dx));
-            box.y0 = Math.max(0, Math.min(1 - h, box.y0 + dy));
-            box.x1 = box.x0 + w; box.y1 = box.y0 + h;
-          }}
-        }}
-        wrap.addEventListener('keydown', (e) => {{
-          const move = ARROWS[e.key];
-          if (!move) return;
-          e.preventDefault();
-          const target = e.target === tl ? 'tl' : e.target === br ? 'br' : 'move';
-          const factor = e.shiftKey ? 10 : 1;
-          nudge(target, move[0] * STEP_X * factor, move[1] * STEP_Y * factor);
-          redraw();
-          clearTimeout(keyTimer);
-          keyTimer = setTimeout(commit, {KEY_COMMIT_DELAY_MS});
-        }});
-      }})();
-    </script>
-    """, display_h + 40
+    fields = {
+        "label_wrap": _tx("Crop box. Tab to the box or a corner, then use the arrow keys (Shift = 10 pixels)."),
+        "display_w": display_w, "bg_b64": _png_b64(background),
+        "label_rect": _tx("Crop box -- arrow keys move it"),
+        "label_tl": _tx("Top-left crop corner -- arrow keys move it"),
+        "label_br": _tx("Bottom-right crop corner -- arrow keys move it"),
+    }
+    config = {
+        "hiddenSelector": f".st-key-{key_prefix}-hidden",
+        "box": {"x0": x0, "y0": y0, "x1": x1, "y1": y1}, "fullW": full_w, "fullH": full_h,
+        "snapX": list(snap_x or []), "snapY": list(snap_y or []),
+        "text": {"crop": t("Crop:"), "hint": t("drag a corner to resize, drag inside to move.")},
+    }
+    return _render("crop", fields, config), display_h + 40
 
 
 def _pen_editor_html(background: Image.Image, key_prefix: str, points: list[dict], closed: bool) -> tuple[str, int]:
@@ -849,241 +293,17 @@ def _pen_editor_html(background: Image.Image, key_prefix: str, points: list[dict
     a click landing on one of them never bubbles into "add a new point at this spot" the way
     attaching the listener to a shared ancestor would.
     """
-    width, height = background.size
-    display_w = min(480, width)
-    display_h = int(display_w * height / width) if width else 320
-
-    buffer = io.BytesIO()
-    background.convert("RGB").save(buffer, format="PNG")
-    bg_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
-    hidden_selector = f".st-key-{key_prefix}-hidden"
-    points_json = json.dumps(points)
-    closed_json = json.dumps(bool(closed))
-
-    return editor_style() + f"""
-    <div style="background:var(--ps-panel);border-radius:8px;padding:8px;">
-      <div id="pen-wrap" tabindex="0" role="application"
-           aria-label="{_tx("Pen path. Tab to a point; arrow keys move it, Alt+arrows move its curve handle, Shift = 10x, Delete removes it.")}"
-           style="position:relative;width:100%;max-width:{display_w}px;line-height:0;touch-action:none;outline:none;">
-        <img id="pen-bg" src="data:image/png;base64,{bg_b64}" style="display:block;width:100%;height:auto;border-radius:4px;">
-        <svg id="pen-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <path id="pen-path" d="" fill="none" style="stroke:var(--ps-info)" stroke-width="0.6"></path>
-          <g id="pen-handle-lines" stroke="rgba(251,191,36,0.7)" stroke-width="0.3"></g>
-        </svg>
-        <div id="pen-anchors"></div>
-        <div id="pen-handles"></div>
-      </div>
-      <div style="color:var(--ps-text-muted);font:12px system-ui;margin-top:6px;">{_tx("Click the photo to add a point. Drag a point to move it, drag its amber handle to curve the path. Double-click a point to remove it. Keys: Tab to a point, arrows nudge it (Alt: its handle, Shift: x10), Delete removes it.")}</div>
-    </div>
-    <style>
-      #pen-wrap .pen-anchor {{ position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px;
-                      background:var(--ps-info); border:2px solid var(--ps-border); border-radius:50%; cursor:move; }}
-      #pen-wrap .pen-anchor.selected, #pen-wrap .pen-anchor:focus {{ outline:2px solid #fff; outline-offset:1px; }}
-      #pen-wrap .pen-handle {{ position:absolute; width:10px; height:10px; margin:-5px 0 0 -5px;
-                      background:var(--ps-accent); border:2px solid var(--ps-border); border-radius:50%; cursor:crosshair; }}
-    </style>
-    <script>
-      (function() {{
-        const wrap = document.getElementById('pen-wrap');
-        const bg = document.getElementById('pen-bg');
-        const pathEl = document.getElementById('pen-path');
-        const handleLines = document.getElementById('pen-handle-lines');
-        const anchorLayer = document.getElementById('pen-anchors');
-        const handleLayer = document.getElementById('pen-handles');
-        let points = {points_json};
-        const closed = {closed_json};
-        let dragMode = null;  // {{type: 'anchor'|'handle', idx: number}}
-        let selectedIdx = null;  // the anchor the arrow keys move (F11)
-
-        function fractionalPos(e) {{
-          const rect = wrap.getBoundingClientRect();
-          const fx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-          const fy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-          return [fx * 100, fy * 100];
-        }}
-
-        // Mirrors app.vector_shapes.path_outline_points()/_cubic_bezier_points() exactly -- the
-        // preview drawn while editing and the layer actually rendered by the backend must trace
-        // the same curve, or a point could look right here and land somewhere else once applied.
-        function cubicPoints(p0, c1, c2, p1, steps) {{
-          const pts = [];
-          for (let i = 0; i <= steps; i++) {{
-            const t = i / steps, mt = 1 - t;
-            const x = mt*mt*mt*p0[0] + 3*mt*mt*t*c1[0] + 3*mt*t*t*c2[0] + t*t*t*p1[0];
-            const y = mt*mt*mt*p0[1] + 3*mt*mt*t*c1[1] + 3*mt*t*t*c2[1] + t*t*t*p1[1];
-            pts.push([x, y]);
-          }}
-          return pts;
-        }}
-
-        function outline() {{
-          if (points.length < 2) return points.map(p => [p.x_pct, p.y_pct]);
-          const anchors = points.map(p => [p.x_pct, p.y_pct]);
-          const handles = points.map(p => [p.handle_dx_pct || 0, p.handle_dy_pct || 0]);
-          const n = anchors.length;
-          const segCount = closed ? n : n - 1;
-          let out = [anchors[0]];
-          for (let i = 0; i < segCount; i++) {{
-            const p0 = anchors[i], p1 = anchors[(i + 1) % n];
-            const h0 = handles[i], h1 = handles[(i + 1) % n];
-            const c1 = [p0[0] + h0[0], p0[1] + h0[1]];
-            const c2 = [p1[0] - h1[0], p1[1] - h1[1]];
-            out = out.concat(cubicPoints(p0, c1, c2, p1, 20).slice(1));
-          }}
-          return out;
-        }}
-
-        function redraw() {{
-          const out = outline();
-          const d = out.length ? ('M ' + out.map(p => p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join(' L ')) + (closed ? ' Z' : '') : '';
-          pathEl.setAttribute('d', d);
-          pathEl.setAttribute('fill', closed ? 'rgba(96,165,250,0.25)' : 'none');
-
-          // Rebuilding the dots drops keyboard focus, so remember whether an anchor had it.
-          const hadFocus = document.activeElement && document.activeElement.classList.contains('pen-anchor');
-          anchorLayer.innerHTML = '';
-          handleLayer.innerHTML = '';
-          handleLines.innerHTML = '';
-          points.forEach((p, i) => {{
-            const anchor = document.createElement('div');
-            anchor.className = 'pen-anchor' + (i === selectedIdx ? ' selected' : '');
-            anchor.style.left = p.x_pct + '%';
-            anchor.style.top = p.y_pct + '%';
-            anchor.dataset.idx = i;
-            anchor.tabIndex = 0;
-            anchor.setAttribute('aria-label', 'Path point ' + (i + 1) + ' of ' + points.length);
-            anchor.addEventListener('focus', () => {{ selectedIdx = i; }});
-            anchorLayer.appendChild(anchor);
-            if (hadFocus && i === selectedIdx) anchor.focus({{preventScroll: true}});
-
-            const hx = p.x_pct + (p.handle_dx_pct || 0);
-            const hy = p.y_pct + (p.handle_dy_pct || 0);
-            const handle = document.createElement('div');
-            handle.className = 'pen-handle';
-            handle.style.left = hx + '%';
-            handle.style.top = hy + '%';
-            handle.dataset.idx = i;
-            handleLayer.appendChild(handle);
-
-            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            line.setAttribute('x1', p.x_pct); line.setAttribute('y1', p.y_pct);
-            line.setAttribute('x2', hx); line.setAttribute('y2', hy);
-            handleLines.appendChild(line);
-          }});
-        }}
-        redraw();
-
-        function commit() {{
-          try {{
-            const payload = JSON.stringify(points);
-            const container = window.parent.document.querySelector('{hidden_selector}');
-            if (!container) return;
-            const textarea = container.querySelector('textarea');
-            if (!textarea) return;
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            textarea.focus();
-            setter.call(textarea, payload);
-            textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            textarea.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.blur();
-          }} catch (err) {{}}
-        }}
-
-        anchorLayer.addEventListener('pointerdown', (e) => {{
-          const el = e.target.closest('.pen-anchor');
-          if (!el) return;
-          dragMode = {{type: 'anchor', idx: Number(el.dataset.idx)}};
-          selectedIdx = dragMode.idx;
-          wrap.focus({{preventScroll: true}});  // keyboard nudging then applies to this point
-          wrap.setPointerCapture(e.pointerId);
-          e.preventDefault();
-          e.stopPropagation();
-        }});
-        handleLayer.addEventListener('pointerdown', (e) => {{
-          const el = e.target.closest('.pen-handle');
-          if (!el) return;
-          dragMode = {{type: 'handle', idx: Number(el.dataset.idx)}};
-          wrap.setPointerCapture(e.pointerId);
-          e.preventDefault();
-          e.stopPropagation();
-        }});
-        wrap.addEventListener('pointermove', (e) => {{
-          if (!dragMode) return;
-          const [fx, fy] = fractionalPos(e);
-          const p = points[dragMode.idx];
-          if (dragMode.type === 'anchor') {{
-            p.x_pct = fx; p.y_pct = fy;
-          }} else {{
-            p.handle_dx_pct = fx - p.x_pct;
-            p.handle_dy_pct = fy - p.y_pct;
-          }}
-          redraw();
-        }});
-        function endDrag() {{
-          if (!dragMode) return;
-          dragMode = null;
-          commit();
-        }}
-        wrap.addEventListener('pointerup', endDrag);
-        wrap.addEventListener('pointerleave', endDrag);
-
-        anchorLayer.addEventListener('dblclick', (e) => {{
-          const el = e.target.closest('.pen-anchor');
-          if (!el) return;
-          points.splice(Number(el.dataset.idx), 1);
-          redraw();
-          commit();
-        }});
-
-        // Attached to the background image itself, not `wrap` -- see the docstring above for why.
-        bg.addEventListener('click', (e) => {{
-          const [fx, fy] = fractionalPos(e);
-          points.push({{x_pct: fx, y_pct: fy, handle_dx_pct: 0, handle_dy_pct: 0}});
-          selectedIdx = points.length - 1;
-          wrap.focus({{preventScroll: true}});
-          redraw();
-          commit();
-        }});
-
-        // Keyboard (F11): arrows nudge the selected anchor by one display pixel (Shift = 10),
-        // Alt+arrows its curve handle, Delete/Backspace removes it; one commit per burst.
-        const ARROWS = {{ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]}};
-        let keyTimer = null;
-        function scheduleCommit() {{
-          clearTimeout(keyTimer);
-          keyTimer = setTimeout(commit, {KEY_COMMIT_DELAY_MS});
-        }}
-        wrap.addEventListener('keydown', (e) => {{
-          if (selectedIdx === null || !points[selectedIdx]) return;
-          const p = points[selectedIdx];
-          if (e.key === 'Delete' || e.key === 'Backspace') {{
-            e.preventDefault();
-            points.splice(selectedIdx, 1);
-            selectedIdx = points.length ? Math.min(selectedIdx, points.length - 1) : null;
-            redraw();
-            scheduleCommit();
-            return;
-          }}
-          const move = ARROWS[e.key];
-          if (!move) return;
-          e.preventDefault();
-          const rect = wrap.getBoundingClientRect();
-          const stepX = 100 / Math.max(1, rect.width) * (e.shiftKey ? 10 : 1);
-          const stepY = 100 / Math.max(1, rect.height) * (e.shiftKey ? 10 : 1);
-          if (e.altKey) {{
-            p.handle_dx_pct = (p.handle_dx_pct || 0) + move[0] * stepX;
-            p.handle_dy_pct = (p.handle_dy_pct || 0) + move[1] * stepY;
-          }} else {{
-            p.x_pct = Math.max(0, Math.min(100, p.x_pct + move[0] * stepX));
-            p.y_pct = Math.max(0, Math.min(100, p.y_pct + move[1] * stepY));
-          }}
-          redraw();
-          scheduleCommit();
-        }});
-      }})();
-    </script>
-    """, display_h + 60
+    display_w, display_h = _display_size(background)
+    fields = {
+        "label_wrap": _tx("Pen path. Tab to a point; arrow keys move it, Alt+arrows move its curve handle, Shift = 10x, Delete removes it."),
+        "display_w": display_w, "bg_b64": _png_b64(background),
+        "label_help": _tx("Click the photo to add a point. Drag a point to move it, drag its amber handle to curve the path. Double-click a point to remove it. Keys: Tab to a point, arrows nudge it (Alt: its handle, Shift: x10), Delete removes it."),
+    }
+    config = {
+        "hiddenSelector": f".st-key-{key_prefix}-hidden", "points": list(points), "closed": bool(closed),
+        "text": {"point": t("Path point {0} of {1}")},
+    }
+    return _render("pen", fields, config), display_h + 60
 
 
 def _pan_viewer_html(
@@ -1104,97 +324,15 @@ def _pan_viewer_html(
     """
     width, height = view.size
     display_h = min(max_display_height, height)
-    buffer = io.BytesIO()
-    view.convert("RGB").save(buffer, format="PNG")
-    view_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
-    hidden_selector = f".st-key-{key_prefix}-wand-hidden"
     image_w, image_h = (max(1, int(value)) for value in image_size)
-    zoom = max(1.0, float(zoom))
-    return editor_style() + f"""
-    <div id="pan-wrap" tabindex="0" role="application" aria-label="{_tx("Zoomed photo. Drag to pan, or use the arrow keys (Shift = faster).")}"
-         style="position:relative;overflow:hidden;background:var(--ps-canvas);border-radius:8px;height:{display_h}px;
-                display:flex;align-items:center;justify-content:center;cursor:grab;touch-action:none;outline:none;">
-      <img id="pan-img" src="data:image/png;base64,{view_b64}" alt="" draggable="false"
-           style="display:block;max-width:100%;max-height:{display_h}px;width:auto;height:auto;user-select:none;image-rendering:pixelated;">
-    </div>
-    <div style="color:var(--ps-text-muted);font:12px system-ui;margin-top:4px;">{_tx("Drag the photo to pan (arrow keys work too).")}</div>
-    <script>
-      (function() {{
-        const wrap = document.getElementById('pan-wrap');
-        const img = document.getElementById('pan-img');
-        const VIEW_W = {width}, VIEW_H = {height}, ZOOM = {zoom}, IMG_W = {image_w}, IMG_H = {image_h};
-        const center = {{x: {float(center[0])}, y: {float(center[1])}}};
-        let start = null;
-
-        function commit(x, y) {{
-          try {{
-            const payload = JSON.stringify({{x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y))}});
-            const container = window.parent.document.querySelector('{hidden_selector}');
-            if (!container) return;
-            const textarea = container.querySelector('textarea');
-            if (!textarea) return;
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            textarea.focus();
-            setter.call(textarea, payload);
-            textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            textarea.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }}));
-            textarea.blur();
-          }} catch (err) {{}}
-          // If the rerun leaves this exact view (already at an edge), don't stay visually offset.
-          setTimeout(() => {{ img.style.transform = ''; }}, 1500);
-        }}
-
-        // Screen pixels moved -> fractions of the full image (one view pixel = 1/ZOOM image pixels).
-        function shifted(dx, dy) {{
-          const rect = img.getBoundingClientRect();
-          const imageDx = dx * (VIEW_W / Math.max(1, rect.width)) / ZOOM;
-          const imageDy = dy * (VIEW_H / Math.max(1, rect.height)) / ZOOM;
-          return [center.x - imageDx / IMG_W, center.y - imageDy / IMG_H];
-        }}
-
-        wrap.addEventListener('pointerdown', (e) => {{
-          start = {{x: e.clientX, y: e.clientY}};
-          wrap.setPointerCapture(e.pointerId);
-          wrap.style.cursor = 'grabbing';
-          wrap.focus({{preventScroll: true}});
-          e.preventDefault();
-        }});
-        wrap.addEventListener('pointermove', (e) => {{
-          if (!start) return;
-          img.style.transform = 'translate(' + (e.clientX - start.x) + 'px,' + (e.clientY - start.y) + 'px)';
-        }});
-        function endDrag(e) {{
-          if (!start) return;
-          const dx = e.clientX - start.x, dy = e.clientY - start.y;
-          start = null;
-          wrap.style.cursor = 'grab';
-          if (Math.abs(dx) + Math.abs(dy) < 3) {{ img.style.transform = ''; return; }}
-          const [x, y] = shifted(dx, dy);
-          commit(x, y);
-        }}
-        wrap.addEventListener('pointerup', endDrag);
-        wrap.addEventListener('pointercancel', endDrag);
-
-        const ARROWS = {{ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]}};
-        let keyTimer = null, pending = [0, 0];
-        wrap.addEventListener('keydown', (e) => {{
-          const move = ARROWS[e.key];
-          if (!move) return;
-          e.preventDefault();
-          const rect = img.getBoundingClientRect();
-          const fraction = e.shiftKey ? 0.5 : 0.1;
-          // Arrow = look further that way, i.e. the photo moves the opposite way.
-          pending[0] -= move[0] * rect.width * fraction;
-          pending[1] -= move[1] * rect.height * fraction;
-          img.style.transform = 'translate(' + pending[0] + 'px,' + pending[1] + 'px)';
-          clearTimeout(keyTimer);
-          keyTimer = setTimeout(() => {{
-            const [x, y] = shifted(pending[0], pending[1]);
-            pending = [0, 0];
-            commit(x, y);
-          }}, {KEY_COMMIT_DELAY_MS});
-        }});
-      }})();
-    </script>
-    """, display_h + 30
+    fields = {
+        "label_wrap": _tx("Zoomed photo. Drag to pan, or use the arrow keys (Shift = faster)."),
+        "display_h": display_h, "view_b64": _png_b64(view),
+        "label_help": _tx("Drag the photo to pan (arrow keys work too)."),
+    }
+    config = {
+        "hiddenSelector": f".st-key-{key_prefix}-wand-hidden", "viewW": width, "viewH": height,
+        "zoom": max(1.0, float(zoom)), "imageW": image_w, "imageH": image_h,
+        "center": [float(center[0]), float(center[1])],
+    }
+    return _render("pan", fields, config), display_h + 30

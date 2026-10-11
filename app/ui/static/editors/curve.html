@@ -1,0 +1,23 @@
+<div style="background:var(--ps-panel);border-radius:8px;padding:6px 8px;--curve-color:{{color}};">
+<svg id="curve-svg" width="100%" height="{{svg_h}}" viewBox="0 0 {{svg_w}} {{svg_h}}" role="application"
+     aria-label="{{label_editor}}"
+     preserveAspectRatio="xMinYMin meet" style="touch-action:none;display:block;">
+  <rect id="curve-bg" x="{{margin_left}}" y="{{margin_top}}" width="{{plot_size}}" height="{{plot_size}}"
+        fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.15)" style="cursor:{{bg_cursor}};"/>
+  <line x1="{{diag_x0}}" y1="{{diag_y0}}" x2="{{diag_x1}}" y2="{{diag_y1}}"
+        stroke="rgba(255,255,255,0.2)" stroke-dasharray="3,3"/>
+  <polyline id="curve-line" points="{{poly}}" fill="none" style="stroke:var(--curve-color)" stroke-width="2"/>
+  {{fixed_circles}}
+  <g id="extra-points"></g>
+</svg>
+</div>
+<div style="color:var(--ps-text-muted);font:11px system-ui;margin-top:4px;padding:0 2px;">
+  {{hint}}
+</div>
+<style>
+  #curve-svg .pt.fixed { fill:var(--curve-color); stroke:var(--ps-border); stroke-width:2; cursor:ns-resize; }
+  #curve-svg .pt.fixed:focus { outline:none; stroke:#fff; stroke-width:3; }
+  #curve-svg .pt.fixed:hover { fill:var(--ps-accent-soft); }
+  #curve-svg .pt.extra { fill:var(--ps-info); stroke:var(--ps-border); stroke-width:2; cursor:move; }
+  #curve-svg .pt.extra:hover { fill:var(--ps-info-soft); }
+</style>

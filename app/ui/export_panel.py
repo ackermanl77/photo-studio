@@ -17,6 +17,7 @@ from PIL import Image
 
 from app import ai_upscale, backend_client
 from app.batch_release import export_multiple
+from app.color_profiles import COLOR_SPACES
 from app.export import DEFAULT_NAME_TEMPLATE, EXPORT_FORMATS, HIGH_BIT_FORMATS, METADATA_POLICIES, METADATA_POLICY_LABELS, OUTPUT_SHARPENING, ExportPresetStore, cached_export, render_export_name
 from app.painted_masks import inline_painted_masks, session_painted_masks
 from app.pipeline import check_upscale_output, expected_output_size
@@ -32,7 +33,7 @@ from app.i18n import t, t_format, t_option
 EXPORT_WIDGET_KEYS = {
     "format": "exp-fmt", "quality": "exp-qual", "long_edge": "exp-long-edge", "sharpen": "exp-sharpen",
     "metadata": "exp-metadata", "remove_gps": "exp-remove-gps", "name_template": "exp-name-template",
-    "bit_depth": "exp-bit-depth", "gpu_export": "exp-gpu-export",
+    "bit_depth": "exp-bit-depth", "gpu_export": "exp-gpu-export", "color_space": "exp-color-space",
 }
 
 
@@ -83,6 +84,11 @@ def export_settings_section(ctx) -> None:
             disabled=st.session_state.get("exp-fmt", "JPEG") not in HIGH_BIT_FORMATS,
             help=t("16-bit (PNG/TIFF only) keeps smooth skies and gradients free of banding for further editing or print. Renders at full resolution when you click Save."),
         )
+        settings["color_space"] = st.selectbox(
+            t("Color space"), list(COLOR_SPACES), key="exp-color-space", format_func=t_option,
+            help=t("sRGB suits the web and most screens. Display P3 is the wider space of current phones, Macs and "
+                   "many monitors: the colors look the same in a color-managed viewer, with more room for later edits."),
+        )
         settings["gpu_export"] = st.checkbox(
             t("Use GPU for export resize/sharpen"),
             value=False,
@@ -115,7 +121,7 @@ def export_settings_section(ctx) -> None:
                 "format": st.session_state.get("exp-fmt", "JPEG"), "quality": st.session_state.get("exp-qual", 92),
                 "long_edge": settings["long_edge"], "sharpen": settings["sharpen"], "metadata": settings["metadata"],
                 "remove_gps": settings["remove_gps"], "name_template": settings["name_template"], "bit_depth": settings["bit_depth"],
-                "gpu_export": settings["gpu_export"],
+                "gpu_export": settings["gpu_export"], "color_space": settings["color_space"],
             })
             st.toast(t("Export preset '{0}' saved").format(t(new_export_preset.strip())), icon="💾")
             request_rerun()
@@ -234,6 +240,7 @@ def save_footer(ctx) -> None:
             "watermark": watermark if watermark["text"].strip() else None,
             "bit_depth": settings["bit_depth"] if out_format in HIGH_BIT_FORMATS else 8,
             "gpu_export": settings["gpu_export"],
+            "color_space": settings["color_space"],
         }
         export_extension, export_mime = EXPORT_FORMATS[out_format]
         # A full-resolution backend render (which also encodes the file) is needed for a proxy

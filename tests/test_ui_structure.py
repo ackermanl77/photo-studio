@@ -106,7 +106,9 @@ def test_colours_are_defined_once_as_theme_variables():
     assert not re.findall(r"#[0-9a-fA-F]{3,6}\b|rgba?\(", stylesheet)  # only var(--ps-...)
     assert editor_style().startswith("<style>:root {--ps-")
     editors = open(ui_editors.__file__, encoding="utf-8").read()
-    assert not re.findall(r"#[0-9a-fA-F]{6}", editors) and "var(--ps-accent)" in editors
+    assert not re.findall(r"#[0-9a-fA-F]{6}\b", editors) and "var(--ps-accent)" in editors
+    static_editors = "".join(path.read_text(encoding="utf-8") for path in ui_editors.EDITORS_DIR.iterdir())
+    assert not re.findall(r"#[0-9a-fA-F]{6}\b", static_editors) and "var(--ps-accent)" in static_editors
     from PIL import Image
 
     markup, _height = ui_editors._wand_picker_html(Image.new("RGB", (8, 8)), "t")
@@ -261,3 +263,32 @@ def test_painted_masks_are_stored_once_per_session_and_inlined_in_projects(monke
     project = ProjectBundle.load(captured["data"]())
     assert project.recipe["mask_layers"][0]["params"]["mask_b64"] == mask  # files stay self-contained
     assert project.recipe["removal_mask_layers"][0]["params"]["mask_b64"] == mask
+
+
+# --- F14: the on-canvas editors are static component files --------------------------------------
+
+def test_every_editor_is_a_static_html_and_js_pair_with_no_python_built_script():
+    import re
+
+    import pytest
+    from PIL import Image
+
+    from app import ui_editors
+
+    names = {path.stem for path in ui_editors.EDITORS_DIR.glob("*.html")}
+    assert names == {"before_after", "curve", "paint", "picker", "crop", "pen", "pan"}
+    assert all((ui_editors.EDITORS_DIR / f"{name}.js").is_file() for name in names)
+    source = open(ui_editors.__file__, encoding="utf-8").read()
+    assert "addEventListener" not in source and "getElementById" not in source
+    background = Image.new("RGB", (8, 8))
+    markup, _height = ui_editors._crop_editor_html(background, "crop-editor", (0.1, 0.2, 0.9, 0.8), (800, 600))
+    config = re.search(r"const CONFIG = (\{.*?\});\n", markup).group(1)
+    assert '"hiddenSelector": ".st-key-crop-editor-hidden"' in config and '"fullW": 800' in config
+    assert markup.count("<script>") == 1 and "{{" not in markup
+    # A slot without a value (or a value without a slot) fails loudly instead of rendering "{{x}}".
+    with pytest.raises(KeyError, match="missing"):
+        ui_editors._render("picker", {"display_w": 1, "bg_b64": ""})
+    with pytest.raises(KeyError, match="unused"):
+        ui_editors._render("picker", {"display_w": 1, "bg_b64": "", "hint": "", "extra": 1})
+    # A "</script>" inside the config can't end the script early.
+    assert "<\\/script>" in ui_editors._render("picker", {"display_w": 1, "bg_b64": "", "hint": ""}, {"x": "</script>"})

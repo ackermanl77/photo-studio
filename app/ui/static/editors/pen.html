@@ -1,0 +1,21 @@
+<div style="background:var(--ps-panel);border-radius:8px;padding:8px;">
+  <div id="pen-wrap" tabindex="0" role="application"
+       aria-label="{{label_wrap}}"
+       style="position:relative;width:100%;max-width:{{display_w}}px;line-height:0;touch-action:none;outline:none;">
+    <img id="pen-bg" src="data:image/png;base64,{{bg_b64}}" style="display:block;width:100%;height:auto;border-radius:4px;">
+    <svg id="pen-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 100 100" preserveAspectRatio="none">
+      <path id="pen-path" d="" fill="none" style="stroke:var(--ps-info)" stroke-width="0.6"></path>
+      <g id="pen-handle-lines" stroke="rgba(251,191,36,0.7)" stroke-width="0.3"></g>
+    </svg>
+    <div id="pen-anchors"></div>
+    <div id="pen-handles"></div>
+  </div>
+  <div style="color:var(--ps-text-muted);font:12px system-ui;margin-top:6px;">{{label_help}}</div>
+</div>
+<style>
+  #pen-wrap .pen-anchor { position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px;
+                  background:var(--ps-info); border:2px solid var(--ps-border); border-radius:50%; cursor:move; }
+  #pen-wrap .pen-anchor.selected, #pen-wrap .pen-anchor:focus { outline:2px solid #fff; outline-offset:1px; }
+  #pen-wrap .pen-handle { position:absolute; width:10px; height:10px; margin:-5px 0 0 -5px;
+                  background:var(--ps-accent); border:2px solid var(--ps-border); border-radius:50%; cursor:crosshair; }
+</style>
