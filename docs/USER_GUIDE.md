@@ -422,7 +422,10 @@ Always visible above/below the preview, on every tab:
   detail), so skies and gradients stay free of banding when you keep editing or print. It looks the
   same as the preview (at most about 1 % brighter after very heavy edits). Both 16-bit PNG and TIFF
   keep the colour profile and the camera metadata (exposure details and GPS included, following the
-  metadata choice above). The watermark has its own **Font** choice. **Save preset** keeps
+  metadata choice above). **Color space**: **sRGB** (the default -- right for the web and most
+  screens) or **Display P3**, the wider space of current phones, Macs and many monitors: the photo
+  looks the same in a color-managed viewer, and the file carries a Display P3 profile, leaving more
+  room for later edits or print. The watermark has its own **Font** choice. **Save preset** keeps
   these settings under a name; pick one and **Apply** to restore them. The file is only produced when
   you click Save (or press **Ctrl+E**), and it carries the original photo's camera metadata and colour
   profile.

@@ -109,6 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--bit-depth", type=int, choices=(8, 16), default=8,
         help="16 = process in float32 and write a genuine 16-bit PNG/TIFF (16-bit and RAW sources keep their extra precision); JPEG/WEBP outputs stay 8-bit",
     )
+    parser.add_argument(
+        "--color-space", choices=("sRGB", "Display P3"), default="sRGB",
+        help="Output color space: sRGB (default) or Display P3 (pixels converted, a P3 profile embedded)",
+    )
     parser.add_argument("--crop", nargs=4, type=int, metavar=("LEFT", "TOP", "RIGHT", "BOTTOM"), help="Crop rectangle in pixels")
     parser.add_argument("--aspect", nargs=2, type=int, metavar=("WIDTH", "HEIGHT"), help="Center-crop to an aspect ratio")
     parser.add_argument(
@@ -190,7 +194,7 @@ def main() -> None:
         parser.error(str(error))
     export_settings = {
         "quality": max(1, min(100, args.quality)), "metadata": args.metadata,
-        "remove_gps": args.remove_gps, "gpu_export": args.gpu_export,
+        "remove_gps": args.remove_gps, "gpu_export": args.gpu_export, "color_space": args.color_space,
     }
     if options.get("bit_depth") == 16:
         export_settings["bit_depth"] = 16

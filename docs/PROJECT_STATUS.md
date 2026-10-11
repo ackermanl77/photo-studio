@@ -227,16 +227,24 @@ The fix history, newest first, is in [`docs/CHANGELOG.md`](CHANGELOG.md).
 - Film grain is unseeded, so two exports of the same settings don't carry an identical grain pattern
   (deliberate); it is generated on a fixed-size grid so it looks the same in the preview and the export.
 - Export settings live in the ⬇ Export tab, not an `st.dialog` (a dialog's widgets only exist while
-  it's open, which would drop their state between reruns), and offer sRGB output only -- Display P3
-  would need a bundled P3 ICC profile.
+  it's open, which would drop their state between reruns). Color space: sRGB or Display P3
+  (`app/color_profiles.py`): a P3 export converts the finished pixels (8- and 16-bit alike, after
+  resize/sharpening/watermark) with the sRGB -> P3 matrix in linear light and embeds an ICC v4 Display P3
+  profile generated in code (no bundled file); littlecms, using that profile, agrees with the conversion
+  within one 8-bit level. The working space stays sRGB, so a P3 file holds the same colors with more
+  headroom -- nothing outside sRGB is created by the edit itself. No Adobe RGB / ProPhoto output.
 - Fragment-only reruns (panning, scopes) can't be exercised by AppTest, which always reruns the whole
   script; they are covered by full-run tests plus a manual browser check. Streamlit's `persist_state=`
   was evaluated as a way to stop rendering hidden widgets (e.g. one HSL band at a time) and not
   adopted: under AppTest a persisted value was not restored when the widget reappeared and was lost
   after an unrelated rerun.
-- The on-canvas editors' text (buttons, hints, accessibility labels) follows the interface language through `app.i18n.t()`; they are still Python f-string HTML builders (`app/ui_editors.py`), not static
-  component folders, and still commit through the hidden text_area channel rather than Streamlit's
-  bidirectional component API (F14's remaining part).
+- The on-canvas editors are static components (F14, 2026-10-11): `app/ui/static/editors/<name>.html`
+  (markup and CSS with `{{field}}` slots) and `<name>.js`, plus the shared `commit.js`; `app/ui_editors.py`
+  only fills the slots (escaped, translated through `app.i18n.t()`) and passes one JSON `CONFIG`, and
+  `_render()` inlines them into one page because components.html() can't load sibling files. They
+  still commit through the hidden text_area channel: Streamlit's bidirectional component API was
+  evaluated and not adopted (it needs a JS build step and a second commit path, while this one is
+  verified live and under Node).
 - On-canvas editors take the keyboard (F11): arrow keys nudge the focused crop corner/box, Pen
   anchor (Alt: its handle; Delete removes it), curve point and the last radial/gradient; [ / ] size
   the brush; the zoomed canvas pans by drag or arrows (F3). Their JavaScript is exercised under Node

@@ -7,6 +7,18 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-11 -- Display P3 export, static editor components
+
+- **Display P3 export:** Export settings > Color space (also the CLI's `--color-space`, export presets
+  and the API's `export.color_space`). `app/color_profiles.py` converts the finished sRGB pixels to P3
+  (linear-light matrix, 8 and 16 bits) and embeds an ICC v4 Display P3 profile it generates; checked
+  against littlecms with that profile (within one level; pure red -> 234, 51, 35).
+- **F14, static editor components:** the seven on-canvas editors moved from Python f-strings into
+  `app/ui/static/editors/` (`.html` + `.js` each, `commit.js` shared); `app/ui_editors.py` fills
+  their slots and passes a JSON config. Same payloads, same Node tests. `tests/test_ui_structure.py`'s
+  "no hard-coded hex colors" check had a literal backspace byte where `\b` was meant, so it never
+  matched; fixed, and it now covers the static editor files too.
+
 ## 2026-10-09 -- Spanish interface, fonts, 16-bit precision, smaller fixes
 
 - **Interface language:** an English/Español selector next to the uploader (`app/i18n.py`, catalog

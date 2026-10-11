@@ -1,0 +1,15 @@
+<div style="background:var(--ps-panel);border-radius:8px;padding:8px;">
+  <div id="crop-wrap" role="application" aria-label="{{label_wrap}}"
+       style="position:relative;width:100%;max-width:{{display_w}}px;line-height:0;touch-action:none;">
+    <img src="data:image/png;base64,{{bg_b64}}" alt="" style="display:block;width:100%;height:auto;border-radius:4px;">
+    <div id="crop-rect" tabindex="0" aria-label="{{label_rect}}" style="position:absolute;border:2px solid var(--ps-accent);background:rgba(251,191,36,0.15);cursor:move;box-sizing:border-box;"></div>
+    <div id="crop-tl" class="crop-handle" tabindex="0" aria-label="{{label_tl}}" style="cursor:nwse-resize;"></div>
+    <div id="crop-br" class="crop-handle" tabindex="0" aria-label="{{label_br}}" style="cursor:nwse-resize;"></div>
+  </div>
+  <div id="crop-dims" style="color:var(--ps-text-muted);font:12px system-ui;margin-top:6px;"></div>
+</div>
+<style>
+  .crop-handle { position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px;
+                 background:var(--ps-accent); border:2px solid var(--ps-border); border-radius:50%; }
+  #crop-wrap [tabindex]:focus { outline:2px solid #fff; outline-offset:2px; }
+</style>

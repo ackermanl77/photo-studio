@@ -357,6 +357,8 @@ ES = {
     "16-bit (PNG/TIFF only) keeps smooth skies and gradients free of banding for further editing or print. Renders at full resolution when you click Save.":
         "16 bits (solo PNG/TIFF) mantiene cielos y degradados suaves sin bandas para seguir editando o imprimir. Se renderiza a resolución completa al hacer clic en Guardar.",
     "Use GPU for export resize/sharpen": "Usar la GPU para redimensionar/enfocar al exportar",
+    "Color space": "Espacio de color",
+    "sRGB suits the web and most screens. Display P3 is the wider space of current phones, Macs and many monitors: the colors look the same in a color-managed viewer, with more room for later edits.": "sRGB sirve para la web y la mayoría de las pantallas. Display P3 es el espacio más amplio de los teléfonos y Mac actuales y de muchos monitores: los colores se ven iguales en un visor con gestión de color, con más margen para editar después.",
     "Optional CUDA path for final resize and output sharpening. Needs the optional GPU pack or CUDA-enabled PyTorch; file encoding stays on the CPU. If CUDA is missing or fails, export falls back to the CPU.":
         "Ruta CUDA opcional para el redimensionado final y el enfoque de salida. Requiere el paquete GPU opcional o PyTorch con CUDA; la codificación del archivo sigue en la CPU. Si falta CUDA o falla, la exportación usa la CPU.",
     "AI Upscale (Real-ESRGAN)": "Ampliación con IA (Real-ESRGAN)",
@@ -727,6 +729,7 @@ ES = {
     "AFTER": "DESPUÉS",
     "Before/after comparison position": "Posición de la comparación antes/después",
     "Curve point {0} of 5 -- Up/Down arrows adjust it": "Punto {0} de 5 de la curva: las flechas arriba/abajo lo ajustan",
+    "Path point {0} of {1}": "Punto {0} de {1} del trazado",
     "Tone curve editor. Tab to a point, then use the Up and Down arrows.":
         "Editor de la curva de tonos. Ve a un punto con Tab y usa las flechas arriba y abajo.",
     "Click an empty spot on the curve to add a point, drag it, double-click to remove it.":

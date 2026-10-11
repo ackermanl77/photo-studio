@@ -1,0 +1,11 @@
+<div style="position:relative;width:100%;background:var(--ps-canvas);border-radius:8px;overflow:hidden;line-height:0;">
+  <img src="data:image/png;base64,{{after_b64}}" style="display:block;width:100%;height:auto;">
+  <img id="ba-before" src="data:image/png;base64,{{before_b64}}"
+       style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;clip-path:inset(0 50% 0 0);">
+  <div id="ba-handle" style="position:absolute;top:0;bottom:0;left:50%;width:2px;margin-left:-1px;
+       background:#fff;box-shadow:0 0 6px rgba(0,0,0,.7);pointer-events:none;"></div>
+  <div style="position:absolute;top:8px;left:12px;color:#fff;font:600 11px system-ui;text-shadow:0 1px 3px rgba(0,0,0,.8);letter-spacing:.05em;">{{label_before}}</div>
+  <div style="position:absolute;top:8px;right:12px;color:#fff;font:600 11px system-ui;text-shadow:0 1px 3px rgba(0,0,0,.8);letter-spacing:.05em;">{{label_after}}</div>
+  <input id="ba-range" type="range" min="0" max="100" value="50" aria-label="{{label_range}}"
+         style="position:absolute;left:8px;right:8px;bottom:10px;width:calc(100% - 16px);">
+</div>

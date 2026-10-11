@@ -20,6 +20,10 @@ float pixels app.pipeline attaches to its result in high-precision mode (app.hig
 image without them is widened from its 8 bits. A 16-bit PNG carries ICC and EXIF (iCCP/eXIf
 chunks); a 16-bit TIFF carries ICC and the IFD0 text tags (camera make/model, date, artist,
 copyright, software) but not the EXIF sub-IFD (exposure details, GPS) -- tifffile can't write it.
+
+Color space (settings["color_space"]): "sRGB" (the working space; the file keeps the image's own
+profile) or "Display P3", which converts the finished pixels into P3 and embeds a Display P3 profile
+(app.color_profiles) -- last, after resize, sharpening and the watermark, at 8 or 16 bits alike.
 """
 from __future__ import annotations
 
@@ -32,6 +36,8 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageFilter
+
+from app.color_profiles import COLOR_SPACES, convert_srgb_to_display_p3, convert_srgb_to_display_p3_uint8, output_icc
 
 _logger = logging.getLogger(__name__)
 
@@ -62,6 +68,7 @@ DEFAULT_EXPORT_SETTINGS = {
     "watermark": None,
     "bit_depth": 8,
     "gpu_export": False,
+    "color_space": "sRGB",
 }
 # Formats that can hold 16 bits per channel.
 HIGH_BIT_FORMATS = ("PNG", "TIFF")
@@ -108,6 +115,8 @@ def validate_export_settings(settings) -> dict:
         raise ValueError("export gpu_export must be true or false")
     if clean["bit_depth"] not in (8, 16) or isinstance(clean["bit_depth"], bool):
         raise ValueError("export bit_depth must be 8 or 16")
+    if clean["color_space"] not in COLOR_SPACES:
+        raise ValueError(f"export color_space must be one of {', '.join(COLOR_SPACES)}")
     if clean["bit_depth"] == 16 and clean["format"] not in HIGH_BIT_FORMATS:
         raise ValueError(f"16-bit export needs {' or '.join(HIGH_BIT_FORMATS)}, not {clean['format']}")
     watermark = clean["watermark"]
@@ -232,6 +241,9 @@ def encode_export(image: Image.Image, settings: dict | None = None, *, exif: byt
             save_kwargs["optimize"] = True
     elif result.mode not in ("RGB", "RGBA", "L"):
         result = result.convert("RGB")
+    if settings["color_space"] == "Display P3":
+        result = _to_display_p3(result)
+        icc = output_icc("Display P3", icc)
     exif_out = prepare_exif(exif, result.size, settings["metadata"], settings["remove_gps"])
     if exif_out:
         save_kwargs["exif"] = exif_out
@@ -241,6 +253,20 @@ def encode_export(image: Image.Image, settings: dict | None = None, *, exif: byt
     result.save(buffer, **save_kwargs)
     extension, mime = EXPORT_FORMATS[format_name]
     return buffer.getvalue(), extension, mime
+
+
+def _to_display_p3(image: Image.Image) -> Image.Image:
+    """`image` (sRGB) converted to Display P3 pixels, alpha kept; grayscale stays gray (neutral
+    colors are the same in both spaces)."""
+    if image.mode == "L":
+        return image
+    rgba = image.mode == "RGBA"
+    rgb = image.convert("RGB")
+    converted = Image.fromarray(convert_srgb_to_display_p3_uint8(np.asarray(rgb)), mode="RGB")
+    if rgba:
+        converted.putalpha(image.getchannel("A"))
+    converted.info = dict(image.info)
+    return converted
 
 
 # --- 16-bit output (B4) -------------------------------------------------------------------------------
@@ -387,6 +413,9 @@ def _encode_16bit(image: Image.Image, settings: dict, exif: bytes | None, icc: b
         array = np.clip(array + (np.asarray(marked, dtype=np.float32) - np.asarray(base, dtype=np.float32)) / 255.0, 0.0, 1.0)
     from app.high_bit import to_uint16
 
+    if settings["color_space"] == "Display P3":
+        array = convert_srgb_to_display_p3(array)
+        icc = output_icc("Display P3", icc)
     array16 = to_uint16(array)
     size = (array16.shape[1], array16.shape[0])
     exif_out = prepare_exif(exif, size, settings["metadata"], settings["remove_gps"])
@@ -448,7 +477,8 @@ class ExportPresetStore:
     under the user data folder -- F6's "saveable export presets". Written atomically; an unreadable
     file reads as empty rather than breaking the Export panel."""
 
-    FIELDS = ("format", "quality", "long_edge", "sharpen", "metadata", "remove_gps", "name_template", "bit_depth", "gpu_export")
+    FIELDS = ("format", "quality", "long_edge", "sharpen", "metadata", "remove_gps", "name_template", "bit_depth", "gpu_export",
+              "color_space")
 
     def __init__(self, path: str | Path | None = None):
         if path is None:

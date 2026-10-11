@@ -1,0 +1,10 @@
+<div style="background:var(--ps-panel);border-radius:8px;padding:8px;">
+  <div style="position:relative;width:100%;max-width:{{display_w}}px;line-height:0;">
+    <img id="wand-img" src="data:image/png;base64,{{bg_b64}}" role="button" tabindex="0" aria-label="{{hint}}"
+         style="display:block;width:100%;height:auto;border-radius:4px;cursor:crosshair;">
+    <div id="wand-marker" style="position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;
+         border:2px solid var(--ps-accent);border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.6);
+         display:none;pointer-events:none;"></div>
+  </div>
+  <div style="color:var(--ps-text-muted);font:12px system-ui;margin-top:6px;">{{hint}}</div>
+</div>
