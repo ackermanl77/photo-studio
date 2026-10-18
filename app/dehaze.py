@@ -55,7 +55,17 @@ def apply_dehaze(image: Image.Image, strength: float = 0.0, pixel_scale: float =
     strength = max(0.0, min(100.0, float(strength)))
     if strength <= 0:
         return image
-    normalized = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+    recovered = dehaze_float(np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0, strength, pixel_scale)
+    result = np.clip(recovered * 255.0, 0, 255).astype(np.uint8)
+    return Image.fromarray(result, mode="RGB")
+
+
+def dehaze_float(normalized: np.ndarray, strength: float = 0.0, pixel_scale: float = 1.0) -> np.ndarray:
+    """The same Dark Channel Prior dehaze on float RGB in [0, 1] (the 16-bit path, B4); unclipped."""
+    strength = max(0.0, min(100.0, float(strength)))
+    if strength <= 0:
+        return normalized
+    normalized = np.asarray(normalized, dtype=np.float32)
 
     # `pixel_scale` < 1 on a reduced-size preview (see app.pipeline): the patch shrinks with it so
     # it covers the same fraction of the scene as at full resolution. Odd, at least 3 px.
@@ -70,6 +80,4 @@ def apply_dehaze(image: Image.Image, strength: float = 0.0, pixel_scale: float =
     transmission = cv2.GaussianBlur(transmission, (0, 0), sigmaX=blur_sigma)
     transmission = np.clip(transmission, _MIN_TRANSMISSION, 1.0)
 
-    recovered = (normalized - atmospheric_light[None, None, :]) / transmission[..., None] + atmospheric_light[None, None, :]
-    result = np.clip(recovered * 255.0, 0, 255).astype(np.uint8)
-    return Image.fromarray(result, mode="RGB")
+    return (normalized - atmospheric_light[None, None, :]) / transmission[..., None] + atmospheric_light[None, None, :]

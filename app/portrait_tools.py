@@ -128,6 +128,22 @@ def face_region_mask(size: tuple[int, int], boxes) -> Image.Image:
     return Image.fromarray(mask, mode="L")
 
 
+def smooth_skin_float(rgb, image: Image.Image, strength: float = 0.25, blur_radius: float = 2.0, faces=None):
+    """smooth_skin() on float RGB in [0, 1] (the 16-bit path, B4): the skin/face mask comes from the
+    8-bit view `image`, the blur and the blend run in float."""
+    import cv2
+
+    strength = max(0.0, min(1.0, float(strength)))
+    rgb = np.asarray(rgb, dtype=np.float32)
+    radius = max(0.0, float(blur_radius))
+    blurred = cv2.GaussianBlur(rgb, (0, 0), radius) if radius > 0 else rgb
+    mask = np.asarray(skin_mask(image), dtype=np.float32) / 255.0
+    if faces:
+        mask *= np.asarray(face_region_mask(image.size, faces), dtype=np.float32) / 255.0
+    blend = mask[..., None] * strength
+    return np.clip(rgb * (1.0 - blend) + blurred * blend, 0.0, 1.0)
+
+
 def smooth_skin(image: Image.Image, strength: float = 0.25, blur_radius: float = 2.0, faces=None) -> Image.Image:
     """`blur_radius` is in `image`'s own pixels -- app.pipeline scales it down for a reduced-size
     interactive preview so the preview softens skin as much as the full-resolution export does.

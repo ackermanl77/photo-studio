@@ -28,7 +28,8 @@ from app.geometry import geometry_output_size
 from app.high_bit import attach, attached, decode_high_bit, to_image
 from app.image_processor import PhotoProcessor
 from app.layer_workspace import LayerWorkspace, WorkspaceLayer
-from app.portrait_tools import detect_faces, smooth_skin
+from app.icc_float import to_srgb_float
+from app.portrait_tools import detect_faces, smooth_skin, smooth_skin_float
 from app.presets import apply_preset
 from app.color_profiles import (
     convert_srgb_to_display_p3, convert_srgb_to_display_p3_uint8, display_p3_icc_bytes, is_display_p3_icc,
@@ -215,11 +216,18 @@ def run_pipeline(
         if options.get("working_space") == "Display P3":
             source_icc = _normalize_to_display_p3(processor, source_icc)
         elif source_icc:
-            try:
-                processor.image = normalize_to_srgb(processor.image, source_icc)
+            # 16-bit (B4): matrix/TRC profiles convert in float (app.icc_float); LUT profiles go
+            # through LittleCMS on 8 bits, their change carried onto the float data.
+            converted = to_srgb_float(processor.hdr, source_icc) if processor.hdr is not None else None
+            if converted is not None:
+                processor.set_high_precision(converted)
                 source_icc = srgb_icc_bytes()
-            except ICC_TRANSFORM_ERRORS:
-                pass
+            else:
+                try:
+                    processor.image = normalize_to_srgb(processor.image, source_icc)
+                    source_icc = srgb_icc_bytes()
+                except ICC_TRANSFORM_ERRORS:
+                    pass
 
         # Geometry -- rotate/flip, Lens corrections, straighten, constrain crop (app.geometry):
         # first, before anything else touches pixel positions, and before Crop so the user frames
@@ -325,9 +333,14 @@ def run_pipeline(
         # Faces are found on the image being edited (after geometry), so the boxes line up; with
         # none found (or detection unavailable) every skin-toned pixel is smoothed, as before.
         faces = detect_faces(processor.image) if options.get("portrait_faces_only", True) else None
-        processor.image = smooth_skin(
-            processor.image, options["portrait_smoothing"], blur_radius=_SKIN_BLUR_RADIUS * scale, faces=faces
-        )
+        if processor.hdr is not None:  # 16-bit (B4): blend in float, mask from the 8-bit view
+            processor.set_high_precision(smooth_skin_float(
+                processor.hdr, processor.image, options["portrait_smoothing"],
+                blur_radius=_SKIN_BLUR_RADIUS * scale, faces=faces))
+        else:
+            processor.image = smooth_skin(
+                processor.image, options["portrait_smoothing"], blur_radius=_SKIN_BLUR_RADIUS * scale, faces=faces
+            )
 
     checkpoint()
     # Crop -- an explicit crop_box (full-resolution pixels) takes priority over a named aspect.

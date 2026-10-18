@@ -7,6 +7,17 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-18 -- More of the 16-bit path in float (B4)
+
+- `app/icc_float.py`: matrix/TRC ICC profiles (rXYZ/gXYZ/bXYZ + curv/para TRCs, no A2B0) are
+  converted to sRGB in float in the 16-bit path (relative colorimetric, clipped), matching LittleCMS
+  within 0.2 levels on average on the Display P3 profile; LUT profiles keep the 8-bit conversion with
+  its change carried.
+- `dehaze_float()` and `smooth_skin_float()`, used when `PhotoProcessor` runs in high precision;
+  `PhotoProcessor.set_high_precision()`. The 8-bit path is byte-identical (goldens unchanged).
+- Tests: `tests/test_high_bit_float_steps.py` (a 16-bit Display P3 ramp keeps > 600 levels through
+  the ICC step instead of ~65).
+
 ## 2026-10-18 -- HDR merge and panorama (F18)
 
 - `app/merge.py` (OpenCV, no model): inputs decoded at full precision (`app.high_bit`; RAW at 16

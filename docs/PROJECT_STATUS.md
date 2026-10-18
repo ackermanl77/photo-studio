@@ -211,13 +211,16 @@ The fix history, newest first, is in [`docs/CHANGELOG.md`](CHANGELOG.md).
   Shadows, Temperature/Tint, Saturation, Curve, Clarity, HSL, Vibrance, Color Grading, Texture,
   Sharpen, mask blending (shared and per-selection), Crop, the Effects vignette and film grain compute
   in float (Texture and Sharpen blur with OpenCV, since Pillow has no float blur -- within a level of
-  the 8-bit preview). Dehaze, Denoise (OpenCV's Non-Local Means is 8-bit only), Repair, Layers,
-  Portrait and the ICC conversion still run in 8 bits on the quantized image and only their *change*
-  is added to the float data, which keeps the sub-8-bit detail but not their own precision; AI
-  Upscale restarts from its 8-bit result. The working space
-  stays sRGB-encoded (Exposure alone works in linear light, as before) so the 16-bit file matches the
-  8-bit preview -- a full linear-light working space would change the look of every step (B4 remains
-  Partial). The 8-bit steps truncate after each operation, so a heavy 8-bit edit is ~1 % darker than
+  the 8-bit preview). Since 2026-10-18 so do Dehaze (`dehaze_float`), Portrait skin smoothing
+  (`smooth_skin_float`, mask from the 8-bit view) and the ICC conversion of matrix/TRC profiles --
+  Adobe RGB, ProPhoto, Display P3 -- (`app/icc_float.py`: the profile's curves and colorants parsed
+  and applied in float, sRGB's taken from the profile the output is tagged with; within 0.2 levels
+  of LittleCMS on average). Denoise (OpenCV's Non-Local Means is 8-bit only), Repair (inpaint /
+  seamlessClone are 8-bit), Layers (their content is 8-bit anyway) and LUT-based ICC profiles still
+  run in 8 bits and only their *change* is added to the float data, which keeps the sub-8-bit detail
+  around them; AI Upscale restarts from its 8-bit result. The working space stays sRGB-encoded
+  (Exposure alone works in linear light, as before) by design: a linear-light working space for every
+  step would change the look of every slider and make the 16-bit file differ from the 8-bit preview. The 8-bit steps truncate after each operation, so a heavy 8-bit edit is ~1 % darker than
   its 16-bit export. A 16-bit TIFF keeps the ICC profile, the IFD0 text tags and the EXIF and GPS
   sub-IFDs (`app.export._tiff16`: tifffile won't write the pointer tags, so they're written as
   placeholders and linked to sub-IFDs appended with Pillow's TIFF tag writer); a 16-bit PNG keeps
