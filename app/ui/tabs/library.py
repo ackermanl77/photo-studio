@@ -124,6 +124,157 @@ def score_caption(entry: dict) -> str:
     return text
 
 
+# ---- Library organisation (F21): saved searches, collections, virtual copies, two-up compare ----
+def apply_pending_search(collection_names) -> None:
+    """A saved search chosen on the last run fills the filter widgets (before they are created)."""
+    pending = st.session_state.pop("_lib_pending_search", None)
+    if pending is None:
+        return
+    label = pending.get("label")
+    st.session_state["lib-q-in"] = str(pending.get("text", ""))
+    st.session_state["lib-r-in"] = max(0, min(5, int(pending.get("minimum_rating", 0) or 0)))
+    st.session_state["lib-label-filter"] = "Any" if label is None else ("None" if label == "" else label)
+    st.session_state["lib-sort"] = pending.get("sort") if pending.get("sort") in SORT_LABELS else "rating"
+    collection = pending.get("collection")
+    st.session_state["lib-collection-filter"] = collection if collection in collection_names else "Any"
+
+
+def saved_searches_row(catalog: PhotoCatalog, current: dict) -> None:
+    searches = catalog.saved_searches()
+    with st.expander(t("Saved searches"), expanded=False, key="sec-lib-searches"):
+        if searches:
+            pick_col, apply_col, delete_col = st.columns([3, 1, 1])
+            chosen = pick_col.selectbox(t("Saved search"), list(searches), key="lib-saved-search",
+                                        label_visibility="collapsed")
+            if apply_col.button(t("Apply"), key="lib-search-apply", use_container_width=True):
+                st.session_state["_lib_pending_search"] = searches[chosen]
+                request_rerun()
+            if delete_col.button(t("Delete"), key="lib-search-delete", use_container_width=True):
+                catalog.delete_search(chosen)
+                request_rerun()
+        else:
+            st.caption(t("No saved searches yet: set the search and filters above, then save them here."))
+        name_col, save_col = st.columns([3, 1])
+        name = name_col.text_input(t("Name for the current search"), key="lib-search-name",
+                                   label_visibility="collapsed", placeholder=t("Name for the current search"))
+        if save_col.button(t("Save search"), key="lib-search-save", use_container_width=True):
+            if name.strip():
+                catalog.save_search(name, current)
+                st.toast(t("Saved search '{0}'").format(name.strip()), icon="🔎")
+                request_rerun()
+            else:
+                st.toast(t("Type a name for the search first"), icon="⚠️")
+
+
+def open_virtual_copy(copy: dict) -> None:
+    """Open the copy's file in the editor with the copy's own recipe."""
+    path = Path(copy["path"])
+    if not path.is_file():
+        st.toast(t("The photo isn't there any more: {0}").format(path.name), icon="⚠️")
+        return
+    open_library_photo(path)
+    st.session_state["_pending_restore"] = copy["recipe"]
+    st.session_state["_library_open_copy"] = copy["id"]
+    request_rerun()
+
+
+def organise_section(catalog: PhotoCatalog, current_path: str) -> None:
+    """Collections and virtual copies of the photo under the cursor."""
+    name = Path(current_path).name
+    st.markdown(t("**Collections**"))
+    member_of = catalog.collections_of(current_path)
+    if member_of:
+        chip_cols = st.columns(min(4, len(member_of)))
+        for index, collection in enumerate(member_of):
+            if chip_cols[index % len(chip_cols)].button(f"✕ {collection}", key=f"lib-coll-rm-{index}",
+                                                       help=t("Remove this photo from the collection")):
+                catalog.remove_from_collection(collection, current_path)
+                request_rerun()
+    else:
+        st.caption(t("This photo isn't in a collection."))
+    known = list(catalog.collections())
+    add_col, new_col, button_col = st.columns([2, 2, 1])
+    existing_choice = add_col.selectbox(t("Add to collection"), ["", *[c for c in known if c not in member_of]],
+                                        key="lib-coll-pick", format_func=lambda c: c or t("Choose…"))
+    new_name = new_col.text_input(t("…or a new one"), key="lib-coll-new")
+    if button_col.button(t("➕ Add"), key="lib-coll-add", use_container_width=True):
+        target = new_name.strip() or existing_choice
+        if target:
+            catalog.add_to_collection(target, current_path)
+            st.toast(t("Added {0} to '{1}'").format(name, target), icon="🗂️")
+            request_rerun()
+        else:
+            st.toast(t("Choose a collection or type a new name"), icon="⚠️")
+
+    st.markdown(t("**Virtual copies**"))
+    st.caption(t("Another set of adjustments for the same file -- e.g. a colour and a black-and-white version -- "
+                 "without duplicating it."))
+    open_here = st.session_state.get("_library_open_path") == current_path
+    for copy in catalog.virtual_copies(current_path):
+        row = st.columns([3, 1, 1, 1])
+        current_mark = " ✔" if open_here and st.session_state.get("_library_open_copy") == copy["id"] else ""
+        row[0].write(f"🎞 {copy['name']}{current_mark}")
+        if row[1].button(t("✏️ Edit"), key=f"lib-vc-open-{copy['id']}", use_container_width=True):
+            open_virtual_copy(copy)
+        if row[2].button(t("💾 Update"), key=f"lib-vc-update-{copy['id']}", use_container_width=True,
+                         disabled=not open_here, help=t("Save the editor's current adjustments into this copy")):
+            catalog.update_virtual_copy(copy["id"], inline_painted_masks(build_recipe()))
+            st.toast(t("Updated '{0}'").format(copy["name"]), icon="💾")
+        if row[3].button(t("🗑️"), key=f"lib-vc-delete-{copy['id']}", use_container_width=True,
+                         help=t("Delete this virtual copy (the photo itself is kept)")):
+            catalog.delete_virtual_copy(copy["id"])
+            request_rerun()
+    name_col, save_col = st.columns([3, 2])
+    copy_name = name_col.text_input(t("Name for a new virtual copy"), key="lib-vc-name",
+                                    placeholder=t("e.g. Black & white"))
+    if save_col.button(t("🎞 Save edit as virtual copy"), key="lib-vc-save", use_container_width=True,
+                       disabled=not open_here,
+                       help=t("Open this photo in the editor first (✏️ Edit), then save its adjustments here")):
+        copy_id = catalog.add_virtual_copy(current_path, copy_name or t("Virtual copy"),
+                                           inline_painted_masks(build_recipe()))
+        st.session_state["_library_open_copy"] = copy_id
+        st.toast(t("Saved a virtual copy of {0}").format(name), icon="🎞")
+        request_rerun()
+
+
+def compare_section(catalog: PhotoCatalog, rec: list, cursor: int) -> None:
+    """Two-up compare: the photo under the cursor beside another, larger, with their scores."""
+    if len(rec) < 2 or not st.toggle(t("Two-up compare"), key="lib-compare"):
+        return
+    names = [entry["path"] for entry in rec]
+    default = names[(cursor + 1) % len(names)]
+    other = st.selectbox(t("Compare with"), [p for i, p in enumerate(names) if i != cursor], key="lib-compare-with",
+                         index=max(0, [p for i, p in enumerate(names) if i != cursor].index(default)),
+                         format_func=lambda p: Path(p).name)
+    columns = st.columns(2)
+    for side, (column, path) in enumerate(zip(columns, (names[cursor], other))):
+        entry = catalog.get(path)
+        with column:
+            try:
+                st.image(str(thumbnail(path, user_data_dir() / "thumbs-large", size=(900, 900))),
+                         caption=grid_caption(entry), use_container_width=True)
+            except (OSError, ValueError):
+                st.caption(t("{0} (no preview)").format(Path(path).name))
+            if entry["focus"] is not None:
+                st.caption(score_caption(entry))
+            rejected = "rejected" in entry["tags"]
+            star_col, reject_col = st.columns(2)
+            if star_col.button(t("⭐ +1"), key=f"lib-cmp-star-{side}", use_container_width=True,
+                               help=t("One more star")):
+                save_rating(catalog, path, min(5, int(entry["rating"]) + 1), entry["tags"],
+                            write_xmp=bool(st.session_state.get("lib-xmp-write")))
+                request_rerun()
+            if reject_col.button(t("🚫 Un-reject") if rejected else t("🚫 Reject"), key=f"lib-cmp-reject-{side}",
+                                 use_container_width=True):
+                tags = [x for x in entry["tags"] if x != "rejected"] if rejected else [*entry["tags"], "rejected"]
+                save_rating(catalog, path, int(entry["rating"]), tags,
+                            write_xmp=bool(st.session_state.get("lib-xmp-write")))
+                request_rerun()
+    if st.button(t("⇄ Make the right one current"), key="lib-compare-swap"):
+        st.session_state["lib-cursor"] = names.index(other)
+        request_rerun()
+
+
 def library_section(ctx) -> None:
     more_mode = st.radio(t("Tool"), ["Library Catalog", "Batch Processor", "System Health"], horizontal=True, label_visibility="collapsed", key="more-mode", format_func=t_option)
     if more_mode == "Library Catalog":
@@ -149,10 +300,14 @@ def library_section(ctx) -> None:
             {"path": entry["path"], "name": Path(entry["path"]).name}
             for entry in PhotoCatalog(lib_db).search() if Path(entry["path"]).is_file()
         ]
+        catalog_all = PhotoCatalog(lib_db)
+        collection_names = catalog_all.collections()
+        apply_pending_search(collection_names)
         q = st.text_input(t("Search"), key="lib-q-in")
-        filter_cols = st.columns([2, 2, 2])
+        filter_cols = st.columns([2, 2, 2, 2])
         with filter_cols[0]:
-            r_min = st.slider(t("Min Stars"), 0, 5, 0, key="lib-r-in")
+            st.session_state.setdefault("lib-r-in", 0)
+            r_min = st.slider(t("Min Stars"), 0, 5, key="lib-r-in")
         with filter_cols[1]:
             label_filter = st.selectbox(t("Colour label"), ["Any", "None", *COLOR_LABELS], key="lib-label-filter",
                                         format_func=lambda name: t(name) if name in ("Any", "None") else f"{LABEL_DOTS[name]} {t(name)}")
@@ -160,8 +315,15 @@ def library_section(ctx) -> None:
             sort = st.selectbox(t("Sort by"), list(SORT_LABELS), key="lib-sort", format_func=lambda key: t(SORT_LABELS[key]),
                                 help=t("Focus is measured when a folder is scanned: the sharpness of the photo's sharpest part. "
                                        "Blurriest first finds missed focus and camera shake."))
+        with filter_cols[3]:
+            collection_filter = st.selectbox(
+                t("Collection"), ["Any", *collection_names], key="lib-collection-filter",
+                format_func=lambda name: t("Any") if name == "Any" else f"{name} ({collection_names.get(name, 0)})")
         label_arg = None if label_filter == "Any" else ("" if label_filter == "None" else label_filter)
-        search_results = PhotoCatalog(lib_db).search(q, r_min, label=label_arg, sort=sort) if rec else []
+        collection_arg = None if collection_filter == "Any" else collection_filter
+        saved_searches_row(catalog_all, {"text": q, "minimum_rating": r_min, "label": label_arg, "sort": sort,
+                                         "collection": collection_arg})
+        search_results = catalog_all.search(q, r_min, label=label_arg, sort=sort, collection=collection_arg) if rec else []
         if rec and not search_results:
             st.caption(t("No photos match this search / star filter."))
         if search_results and tab_visible():
@@ -169,16 +331,28 @@ def library_section(ctx) -> None:
             # embedded preview) with an Edit button that opens the photo in the editor.
             st.caption(t("✏️ Edit opens the photo in the editor with the current adjustments kept (↺ resets them)."))
             grid_cols = st.columns(4)
-            for grid_index, entry in enumerate(search_results[:24]):
+            copies_by_path: dict[str, list] = {}
+            for copy in catalog_all.virtual_copies():
+                copies_by_path.setdefault(copy["path"], []).append(copy)
+            tiles = []
+            for entry in search_results[:24]:
+                tiles.append((entry, None))
+                tiles.extend((entry, copy) for copy in copies_by_path.get(entry["path"], []))
+            for grid_index, (entry, copy) in enumerate(tiles[:32]):
                 entry_path = Path(entry["path"])
                 with grid_cols[grid_index % 4]:
+                    caption = grid_caption(entry) if copy is None else f"🎞 {copy['name']} · {entry_path.name}"
                     try:
-                        st.image(str(thumbnail(entry_path, user_data_dir() / "thumbs")), caption=grid_caption(entry), use_container_width=True)
+                        st.image(str(thumbnail(entry_path, user_data_dir() / "thumbs")), caption=caption, use_container_width=True)
                     except (OSError, ValueError):
                         st.caption(t("{0} (no preview)").format(t(entry_path.name)))
-                    if st.button(t("✏️ Edit"), key=f"lib-edit-{image_digest(str(entry_path).encode('utf-8'))[:16]}", use_container_width=True):
-                        open_library_photo(entry_path)
-                        request_rerun()
+                    if copy is None:
+                        if st.button(t("✏️ Edit"), key=f"lib-edit-{image_digest(str(entry_path).encode('utf-8'))[:16]}", use_container_width=True):
+                            open_library_photo(entry_path)
+                            request_rerun()
+                    elif st.button(t("✏️ Edit copy"), key=f"lib-vc-edit-{copy['id']}", use_container_width=True,
+                                   help=t("Opens the photo with this virtual copy's adjustments")):
+                        open_virtual_copy(copy)
         elif search_results:
             st.dataframe(search_results, use_container_width=True)
 
@@ -263,6 +437,8 @@ def library_section(ctx) -> None:
                     st.toast(t("Tags saved"), icon="🏷️")
 
             components.html(static_text("library_shortcuts.html"), height=0)
+            organise_section(catalog, current_path)
+            compare_section(catalog, rec, cursor)
     elif more_mode == "Batch Processor":
         # Every supported format, RAW included (app.raw_import.SUPPORTED_EXTENSIONS) -- this
         # used to accept only JPG/PNG.

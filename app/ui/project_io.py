@@ -125,6 +125,8 @@ def open_library_photo(path: Path) -> None:
     st.session_state["restored_source_bytes"] = path.read_bytes()
     st.session_state["restored_source_name"] = path.name
     st.session_state["_main_upload_generation"] = st.session_state.get("_main_upload_generation", 0) + 1
+    # Which catalogued file is open (virtual copies are saved against it, F21).
+    st.session_state["_library_open_path"] = str(path)
 
 
 def open_launch_file() -> None:

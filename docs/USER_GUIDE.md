@@ -346,10 +346,14 @@ Three modes, selected via the radio buttons at the top of the tab.
 - **Thumbnail grid** — the matching photos as thumbnails (cached, RAW files via their embedded
   preview), each with **✏️ Edit** to open it in the editor. Your current adjustments are kept, so a
   look carries over to the next photo of a shoot; **↺** resets them.
-- **Search** + **Min Stars** + **Colour label** — filters the indexed photos by filename/tag text, a
-  minimum star rating and a colour label. **Sort by** Rating, **Sharpest first**, **Blurriest
+- **Search** + **Min Stars** + **Colour label** + **Collection** — filters the indexed photos by
+  filename/tag text, a minimum star rating, a colour label and a collection. **Sort by** Rating, **Sharpest first**, **Blurriest
   first** (missed focus and camera shake at the top) or Name; a likely blurry photo shows 〰️ in the
   grid. If nothing matches, the app says so instead of showing a silent empty table.
+- **Saved searches** — name the current search and filters and **Save search**; pick one later and
+  **Apply** to set them all again (**Delete** removes it).
+- Virtual copies show in the grid as extra tiles (🎞 and their name) after their photo, with
+  **✏️ Edit copy**.
 - **Rate & Flag** — after a scan, step through your photos one at a time:
   - **⬅ Prev** / **Next ➡** to move between them.
   - Five star buttons to rate (or **Clear rating**).
@@ -363,6 +367,17 @@ Three modes, selected via the radio buttons at the top of the tab.
     other photo applications see your cull. An existing sidecar keeps everything else it holds
     (develop settings included); a damaged one is left alone and a warning says so.
   - **✏️ Edit this photo** — opens the current photo in the editor.
+  - **Collections** — add the photo to an existing collection or a new one (**➕ Add**); its
+    collections show as buttons that remove it again. A photo can be in several collections.
+  - **Virtual copies** — another set of adjustments for the same file, e.g. a colour and a
+    black-and-white version, without duplicating it. Open the photo with **✏️ Edit this photo**,
+    adjust it, then **🎞 Save edit as virtual copy** with a name. Each copy has **✏️ Edit** (opens
+    the photo with the copy's adjustments), **💾 Update** (saves the editor's current adjustments
+    into it, while that photo is open) and **🗑️**. Copies live in the catalog; the file itself is
+    never changed.
+  - **Two-up compare** — shows the current photo beside another (**Compare with**, the next one by
+    default), larger, with their focus and clipping scores, a **⭐ +1** and a **🚫 Reject** button
+    under each, and **⇄ Make the right one current**, for choosing between near-duplicates.
   - **Keyboard shortcuts** (work whenever this panel is visible and you're not typing in a text
     field): **1–5** to rate, **0** to clear the rating, **X** to toggle reject, **6–9** for the
     Red/Yellow/Green/Blue label, **←/→** to move Prev/Next.
