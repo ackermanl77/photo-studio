@@ -1,6 +1,6 @@
 # Photo Studio — User Guide
 
-Photo Studio is a professional, CPU-first photo editor: RAW/JPEG/PNG/WEBP/TIFF import, a full
+Photo Studio is a professional, CPU-first photo editor: RAW/JPEG/PNG/WEBP/TIFF/HEIC/AVIF import, a full
 tone/color/detail pipeline, local masking, object removal, layers, batch processing, and a photo
 library — all running locally, no cloud. Core editing and file encoding need no GPU; an optional
 CUDA path can accelerate final export resizing and sharpening.
@@ -21,7 +21,8 @@ window, nothing else to install. Or run the installer, `PhotoStudio-Setup-<versi
 give you the exact same workspace.
 
 **Opening a photo:** drag a file onto the uploader at the top, or click it to browse. Supported
-formats: JPG, PNG, WEBP, TIFF (including 16-bit PNG/TIFF), and camera RAW (`.cr2`, `.cr3`, `.nef`,
+formats: JPG, PNG, WEBP, TIFF (including 16-bit PNG/TIFF), HEIC/HEIF (iPhone photos, with their orientation and
+Display P3 profile), AVIF, and camera RAW (`.cr2`, `.cr3`, `.nef`,
 `.arw`, `.dng`, `.raf`, `.rw2`, `.orf`, `.pef`, `.srw`) — RAW support is included in the desktop
 app; from source it needs the optional `rawpy` package (`requirements-raw.txt`), and the app tells
 you clearly if it's missing). Your original file
@@ -326,7 +327,7 @@ Three modes, selected via the radio buttons at the top of the tab.
 
 ### Library Catalog
 
-- **Folder** + **Scan Folder** — indexes every JPG/PNG/WEBP/TIFF and camera RAW file in a folder
+- **Folder** + **Scan Folder** — indexes every JPG/PNG/WEBP/TIFF/HEIC/AVIF and camera RAW file in a folder
   (recursively), showing a live progress bar as it works. Scanning doesn't touch the files
   themselves, and rescanning keeps the ratings and tags you've already given. The catalog is shown
   the next time you open the app, without scanning again. A photo scanned for the first time takes
@@ -432,8 +433,9 @@ Always visible above/below the preview, on every tab:
   you click Save (or press **Ctrl+E**), and it carries the original photo's camera metadata and colour
   profile.
 - **🏷️ Watermark** (⬇ Export tab) — optional text stamped only on exported files.
-- **Export Format / Quality / Save** (under the canvas) — choose JPEG, PNG, WEBP, or TIFF (Quality only applies to
-  JPEG/WEBP), then download the edited result.
+- **Export Format / Quality / Save** (under the canvas) — choose JPEG, PNG, WEBP, TIFF or AVIF (Quality applies to
+  JPEG/WEBP/AVIF; AVIF is about half the size of a JPEG at the same quality and keeps transparency), then download
+  the edited result.
 - **📦 Export Multiple Sizes** (⬇ Export tab) — check any combination of the named export profiles (Web, Social,
   Print, Archive; Web and Social carry no EXIF, and **Remove GPS location** strips the location from
   Print/Archive too) and click **Prepare ZIP**, then **⬇️ Download ZIP** — gets you the current photo
@@ -526,7 +528,7 @@ python -m app --input photo.jpg --output clean.jpg --remove-mask object-mask.png
   `--remove-mask mask.png` for object removal.
 - Saved looks: `--recipe preset.json` (a custom preset, or an exported presets file with
   `--recipe-name`); `--options options.json` takes a raw pipeline options object.
-- Output: `--quality 1-100` (JPEG/WEBP), `--metadata all|camera|none`, `--remove-gps`,
+- Output: `--quality 1-100` (JPEG/WEBP/AVIF), `--metadata all|camera|none`, `--remove-gps`,
   `--bit-depth 16` (PNG/TIFF), `--gpu-export` (CUDA resize/sharpen when the GPU pack's torch is
   available), `--ai-upscale 2|4` (needs the GPU pack).
 

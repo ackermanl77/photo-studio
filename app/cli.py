@@ -57,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     input_group.add_argument("--input", help="Input image path (JPG/PNG/TIFF/WEBP or camera RAW)")
     input_group.add_argument("--input-dir", help="Folder of input images; every other flag applies to each one")
     output_group = parser.add_mutually_exclusive_group(required=True)
-    output_group.add_argument("--output", help="Output image path (.jpg/.png/.webp/.tif)")
+    output_group.add_argument("--output", help="Output image path (.jpg/.png/.webp/.tif/.avif)")
     output_group.add_argument("--output-dir", help="Folder for processed images")
     # Numeric defaults are None ("not given") so a --recipe's value or --auto-enhance's isn't
     # overwritten by a flag the user never typed; the pipeline's own defaults apply otherwise.

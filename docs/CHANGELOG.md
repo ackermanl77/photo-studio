@@ -7,6 +7,15 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-17 -- HEIC and AVIF (F19)
+
+- HEIC/HEIF import through `pillow-heif` (new `requirements.txt` dependency, pinned in
+  `constraints-cpu.txt`, bundled by `PhotoStudio.spec`), AVIF import and AVIF export through Pillow's
+  own codec (quality, alpha, EXIF and ICC kept). Each is offered only when its codec loads
+  (`app/raw_import.py`, `app/export.py`); `--self-test` reports `heif`/`avif` and fails a build
+  without HEIC. An iPhone HEIC keeps its EXIF orientation and Display P3 profile, so a Display P3
+  export keeps its colours. Tests: `tests/test_heic_avif.py`.
+
 ## 2026-10-17 -- Display P3 exports keep colours outside sRGB (B14)
 
 - A Display P3 export used to convert the finished pixels from sRGB, after the pipeline had already

@@ -12,6 +12,28 @@ RAW_EXTENSIONS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".rw2", ".orf", ".dng"
 # CLI's --input-dir) -- they used to keep separate hand-written lists, so the main uploader refused
 # Fuji/Panasonic/Olympus/Pentax/Samsung RAW files the decoder supports and Batch took only JPG/PNG.
 STANDARD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
+
+
+def _register_extra_openers() -> set[str]:
+    """HEIC/HEIF (pillow-heif, a requirements.txt dependency) and AVIF (Pillow's own codec, when
+    built with it): registered with Pillow once, and offered only when they really decode -- an
+    environment without them never lists a format it can't open (F19)."""
+    from PIL import features
+
+    extra = set()
+    try:
+        from pillow_heif import register_heif_opener
+    except ImportError:
+        pass
+    else:
+        register_heif_opener()
+        extra |= {".heic", ".heif"}
+    if features.check("avif"):
+        extra.add(".avif")
+    return extra
+
+
+STANDARD_EXTENSIONS |= _register_extra_openers()
 SUPPORTED_EXTENSIONS = STANDARD_EXTENSIONS | RAW_EXTENSIONS
 
 

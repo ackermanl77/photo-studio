@@ -17,6 +17,17 @@ for package in ["streamlit", "pywebview"]:
     binaries += package_binaries
     hiddenimports += package_hiddenimports
 
+# pillow-heif (HEIC import) ships libheif and its codecs as native libraries inside the package.
+try:
+    import pillow_heif  # noqa: F401
+except ImportError:
+    pass
+else:
+    package_datas, package_binaries, package_hiddenimports = collect_all("pillow_heif")
+    datas += package_datas
+    binaries += package_binaries
+    hiddenimports += package_hiddenimports
+
 # lensfunpy (requirements-raw.txt) reads its lens database XML files from its package folder.
 try:
     import lensfunpy  # noqa: F401

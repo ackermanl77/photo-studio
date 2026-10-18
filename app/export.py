@@ -35,7 +35,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, features
 
 from app.color_profiles import (
     COLOR_SPACES, convert_srgb_to_display_p3, convert_srgb_to_display_p3_uint8, is_display_p3_icc, output_icc,
@@ -49,6 +49,12 @@ EXPORT_FORMATS = {
     "WEBP": (".webp", "image/webp"),
     "TIFF": (".tif", "image/tiff"),
 }
+# AVIF (F19): about half the size of a JPEG at the same quality, with alpha, EXIF and the ICC
+# profile; offered when this Pillow has the codec (it does in the pinned build).
+if features.check("avif"):
+    EXPORT_FORMATS["AVIF"] = (".avif", "image/avif")
+# Formats with a lossy Quality setting.
+LOSSY_FORMATS = ("JPEG", "WEBP", "AVIF")
 METADATA_POLICIES = ("all", "camera", "none")
 METADATA_POLICY_LABELS = {"all": "Keep all", "camera": "Copyright & camera only", "none": "Strip all"}
 # Output sharpening applied after the resize, in the exported file's own pixels -- the usual
@@ -241,6 +247,9 @@ def encode_export(image: Image.Image, settings: dict | None = None, *, exif: byt
         save_kwargs["quality"] = settings["quality"]
         if format_name == "JPEG":
             save_kwargs["optimize"] = True
+    elif format_name == "AVIF":
+        result = result.convert("RGBA" if "A" in result.getbands() else "RGB")
+        save_kwargs["quality"] = settings["quality"]
     elif result.mode not in ("RGB", "RGBA", "L"):
         result = result.convert("RGB")
     if settings["color_space"] == "Display P3":
@@ -526,7 +535,8 @@ def format_for_path(path: str | Path) -> str:
     for name, (extension, _mime) in EXPORT_FORMATS.items():
         if suffix == extension or (name == "JPEG" and suffix == ".jpeg") or (name == "TIFF" and suffix == ".tiff"):
             return name
-    raise ValueError(f"Unsupported output format: {suffix or '(no extension)'} -- use .jpg, .png, .webp or .tif")
+    raise ValueError(f"Unsupported output format: {suffix or '(no extension)'} -- use "
+                     + ", ".join(extension for extension, _mime in EXPORT_FORMATS.values()))
 
 
 def write_export(image: Image.Image, output_path: str | Path, settings: dict | None = None) -> Path:

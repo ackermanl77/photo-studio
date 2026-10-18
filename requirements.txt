@@ -3,6 +3,8 @@
 # DOM internals). Raise a bound deliberately, after running the tests -- the exact versions last
 # verified are in constraints-cpu.txt. Test-only tools live in requirements-dev.txt.
 Pillow>=10.1.0,<14
+# HEIC/HEIF import (the iPhone default; F19). Optional at run time: without it .heic isn't offered.
+pillow-heif>=1.0,<2
 numpy>=1.26.0,<3
 opencv-python-headless>=4.9.0,<6
 tifffile>=2023.7.10
