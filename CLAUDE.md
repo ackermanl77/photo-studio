@@ -104,6 +104,7 @@ Pillow / NumPy / OpenCV / tifffile / optional rawpy / optional torch (GPU pack: 
 - `app/fonts.py` — fonts for Text layers and the watermark: `available_fonts()` (installed fonts plus uploads in `user_data_dir()/fonts`, by display name), `install_font()`, `load_font(name, size)` with the automatic-default fallback. Streamlit-free.
 - `app/image_processor.py` — `PhotoProcessor`: the core per-image object (load incl. RAW via `app/raw_import.py`, and every `apply_*` adjustment as a thin delegating wrapper into the feature modules below).
 - `app/professional_color.py` — HSL color mixer, color grading (split toning), vibrance, white-balance estimation, ICC sRGB normalization + gamut-warning soft proofing, clipping-warning overlay.
+- `app/icc_float.py` — float ICC conversion of matrix/TRC profiles to sRGB for the 16-bit path (`parse_matrix_trc()`, `to_srgb_float()`; None for LUT profiles, which keep LittleCMS on 8 bits).
 - `app/lens_corrections.py` — distortion, vignette, chromatic aberration, perspective/keystone; `LENS_PROFILES` starting points by lens category (not a calibrated per-lens-model database).
 - `app/advanced_masks.py` — `MaskStack`/`MaskLayer` (Luminance/Color/Gradient/Radial/Painted/Magic Wand selections, combined by add/subtract/intersect).
 - `app/painted_masks.py` — painted masks stored once per content (P5): intern/resolve/inline.

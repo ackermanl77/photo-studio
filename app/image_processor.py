@@ -7,7 +7,7 @@ import cv2
 from PIL import Image, ImageEnhance, ImageFilter
 
 from app.ai_upscale import upscale as ai_upscale
-from app.dehaze import apply_dehaze
+from app.dehaze import apply_dehaze, dehaze_float
 from app.effects import apply_film_grain
 from app.lens_corrections import apply_lens_corrections, correct_vignette
 from app.professional_color import (
@@ -218,6 +218,10 @@ class PhotoProcessor:
         self._image_stale = True
         return self
 
+    def set_high_precision(self, array: np.ndarray) -> "PhotoProcessor":
+        """Replace the float working copy with `array` (float 0..1, same size) -- a step done in float."""
+        return self._set_hdr(array)
+
     def _set_hdr(self, array: np.ndarray) -> "PhotoProcessor":
         self.hdr = np.clip(array, 0.0, 1.0).astype(np.float32, copy=False)
         self._image_stale = True
@@ -364,6 +368,10 @@ class PhotoProcessor:
         return self
 
     def apply_dehaze(self, strength: float = 0.0) -> "PhotoProcessor":
+        if self.hdr is not None:
+            if strength > 0:
+                self._set_hdr(dehaze_float(self.hdr, strength, pixel_scale=self.pixel_scale))
+            return self
         self.image = apply_dehaze(self.image, strength, pixel_scale=self.pixel_scale)
         return self
 
