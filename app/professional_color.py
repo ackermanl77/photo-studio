@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import colorsys
 import io
+from functools import lru_cache
 
 import cv2
 import numpy as np
@@ -344,8 +345,11 @@ def _color_grading_levels(
 ICC_TRANSFORM_ERRORS = (OSError, ValueError, ImageCms.PyCMSError)
 
 
+@lru_cache(maxsize=1)
 def srgb_icc_bytes() -> bytes:
     """A standard sRGB ICC profile's raw bytes, synthesized by littlecms (no file on disk needed).
+    Built once per process: littlecms stamps the creation time into the header, so two calls a
+    second apart used to return different bytes (a byte comparison of "the same" profile failed).
     For re-tagging an image that's just been normalize_to_srgb()'d -- re-attaching the *original*
     (pre-conversion) profile bytes to already-converted pixel values would make a downstream viewer
     interpret them a second time, effectively double-converting the color."""
