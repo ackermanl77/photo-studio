@@ -228,11 +228,19 @@ The fix history, newest first, is in [`docs/CHANGELOG.md`](CHANGELOG.md).
   (deliberate); it is generated on a fixed-size grid so it looks the same in the preview and the export.
 - Export settings live in the ⬇ Export tab, not an `st.dialog` (a dialog's widgets only exist while
   it's open, which would drop their state between reruns). Color space: sRGB or Display P3
-  (`app/color_profiles.py`): a P3 export converts the finished pixels (8- and 16-bit alike, after
-  resize/sharpening/watermark) with the sRGB -> P3 matrix in linear light and embeds an ICC v4 Display P3
-  profile generated in code (no bundled file); littlecms, using that profile, agrees with the conversion
-  within one 8-bit level. The working space stays sRGB, so a P3 file holds the same colors with more
-  headroom -- nothing outside sRGB is created by the edit itself. No Adobe RGB / ProPhoto output.
+  (`app/color_profiles.py`), with an ICC v4 Display P3 profile generated in code (no bundled file);
+  littlecms, using that profile, agrees with the app's own sRGB -> P3 matrix within one 8-bit level.
+  Since 2026-10-17 (B14) a P3 export renders in a **Display P3 working space** (`working_space`
+  option, set by the backend from `export.color_space`, by the CLI's `--color-space` and by the folder
+  batch): camera RAW is decoded by LibRaw straight to P3 (`rawpy.ColorSpace.P3D65`), an embedded
+  profile is converted to P3 instead of to sRGB (so Adobe RGB/ProPhoto/P3 sources keep what fits in
+  P3), an untagged source is taken as sRGB and converted numerically (in float at 16 bits), and
+  `encode_export()` doesn't convert again pixels already tagged with our P3 profile. Before that, the
+  pipeline clipped every source to sRGB first, so a P3 file could not hold a colour outside sRGB.
+  Display P3 shares sRGB's transfer curve, so the steps see values on the same scale; hue-based tools
+  (HSL bands, the skin mask) see P3 hues, a little different from sRGB's for strongly saturated
+  colours. The interactive preview stays sRGB, and a P3 export always takes the full-resolution
+  backend render (it needs the original file). No Adobe RGB / ProPhoto output.
 - Fragment-only reruns (panning, scopes) can't be exercised by AppTest, which always reruns the whole
   script; they are covered by full-run tests plus a manual browser check. Streamlit's `persist_state=`
   was evaluated as a way to stop rendering hidden widgets (e.g. one HSL band at a time) and not

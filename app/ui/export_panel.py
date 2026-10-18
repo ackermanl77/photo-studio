@@ -244,7 +244,8 @@ def save_footer(ctx) -> None:
         }
         export_extension, export_mime = EXPORT_FORMATS[out_format]
         # A full-resolution backend render (which also encodes the file) is needed for a proxy
-        # preview, a 16-bit file, or AI Upscale; otherwise the rendered result is encoded here.
+        # preview, a 16-bit file, AI Upscale, or Display P3 (rendered in a P3 working space from the
+        # original file, B14); otherwise the rendered result is encoded here.
         full_options = _full_options(ctx)
         upscale = settings.get("upscale", 0)
         upscale_error = None
@@ -260,7 +261,8 @@ def save_footer(ctx) -> None:
             sort_keys=True, default=str,
         ).encode("utf-8"))
         # A finished refine-on-pause render already *is* the full-resolution result.
-        if (ctx.use_proxy and ctx.refined_image is None) or upscale or export_settings["bit_depth"] == 16 or export_settings["gpu_export"]:
+        if ((ctx.use_proxy and ctx.refined_image is None) or upscale or export_settings["bit_depth"] == 16
+                or export_settings["gpu_export"] or export_settings["color_space"] == "Display P3"):
             export_producer = functools.partial(
                 render_full_resolution_export, ctx.upload_bytes, ctx.upload_name, full_options, export_settings, ctx.mask_source,
                 ctx.mask_signature if ctx.shared_mask_layers else None, ctx.removal_signature if ctx.removal_active else None, ctx.layers_signature,

@@ -105,12 +105,13 @@ def _decode_standard_high_bit(content: bytes) -> np.ndarray | None:
     return np.ascontiguousarray(np.clip(_orient(values, orientation), 0.0, 1.0), dtype=np.float32)
 
 
-def decode_high_bit(content: bytes, filename: str) -> np.ndarray | None:
-    """The float32 (0..1) pixels of a file holding more than 8 bits per channel, else None."""
+def decode_high_bit(content: bytes, filename: str, color_space: str = "sRGB") -> np.ndarray | None:
+    """The float32 (0..1) pixels of a file holding more than 8 bits per channel, else None.
+    `color_space` is the RAW decode's output space (app.raw_import.decode_raw_array)."""
     from app.raw_import import decode_raw_array, is_raw_path
 
     if is_raw_path(filename):
-        return decode_raw_array(BytesIO(content), bits=16).astype(np.float32) / 65535.0
+        return decode_raw_array(BytesIO(content), bits=16, color_space=color_space).astype(np.float32) / 65535.0
     return _decode_standard_high_bit(content)
 
 

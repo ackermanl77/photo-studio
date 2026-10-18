@@ -37,7 +37,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
 
-from app.color_profiles import COLOR_SPACES, convert_srgb_to_display_p3, convert_srgb_to_display_p3_uint8, output_icc
+from app.color_profiles import (
+    COLOR_SPACES, convert_srgb_to_display_p3, convert_srgb_to_display_p3_uint8, is_display_p3_icc, output_icc,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -242,7 +244,10 @@ def encode_export(image: Image.Image, settings: dict | None = None, *, exif: byt
     elif result.mode not in ("RGB", "RGBA", "L"):
         result = result.convert("RGB")
     if settings["color_space"] == "Display P3":
-        result = _to_display_p3(result)
+        # Rendered in the Display P3 working space already (B14, tagged with our P3 profile): keep
+        # the pixels -- they may hold colours outside sRGB. Otherwise convert the sRGB result.
+        if not is_display_p3_icc(icc):
+            result = _to_display_p3(result)
         icc = output_icc("Display P3", icc)
     exif_out = prepare_exif(exif, result.size, settings["metadata"], settings["remove_gps"])
     if exif_out:
@@ -414,7 +419,8 @@ def _encode_16bit(image: Image.Image, settings: dict, exif: bytes | None, icc: b
     from app.high_bit import to_uint16
 
     if settings["color_space"] == "Display P3":
-        array = convert_srgb_to_display_p3(array)
+        if not is_display_p3_icc(icc):
+            array = convert_srgb_to_display_p3(array)
         icc = output_icc("Display P3", icc)
     array16 = to_uint16(array)
     size = (array16.shape[1], array16.shape[0])

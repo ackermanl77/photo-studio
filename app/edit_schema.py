@@ -106,6 +106,9 @@ _OTHER_OPTION_SPECS: dict[str, OptionSpec] = {
     "strip_metadata": OptionSpec("bool", stage="request"),
     # 16 = run the pipeline in float32 high-precision mode for a genuine 16-bit PNG/TIFF export (B4).
     "bit_depth": OptionSpec("choice", choices=(8, 16), stage="request"),
+    # The color space the pipeline works in (B14). "Display P3" for a Display P3 export, so colours
+    # outside sRGB survive the decode/ICC step; app.backend sets it from the export settings.
+    "working_space": OptionSpec("choice", choices=("sRGB", "Display P3"), stage="request"),
     "export": OptionSpec("export", nullable=True, stage="request"),
 }
 

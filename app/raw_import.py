@@ -61,7 +61,7 @@ def _high_bit_gray_to_rgb(image: Image.Image) -> Image.Image:
     return result
 
 
-def decode_raw_array(source, bits: int = 8) -> np.ndarray:
+def decode_raw_array(source, bits: int = 8, color_space: str = "sRGB") -> np.ndarray:
     """`source` is a path string or a file-like object -- rawpy.imread() accepts either. Bytes go
     through BytesIO rather than a NamedTemporaryFile: on Windows a NamedTemporaryFile can't be
     reopened by name while it's still open, so LibRaw failed to read it (LibRawIOError) for every
@@ -69,7 +69,9 @@ def decode_raw_array(source, bits: int = 8) -> np.ndarray:
     the exception type the frontend's file-open handler and app/backend.py's /process route both
     already turn into a clean message, instead of a traceback / HTML 500.
     `bits` is 8 (the normal decode) or 16 (app.high_bit's 16-bit export path, B4): the same
-    demosaic, white balance and highlight handling, just without the 8-bit quantization."""
+    demosaic, white balance and highlight handling, just without the 8-bit quantization.
+    `color_space` "Display P3" has LibRaw convert the camera colours to P3 instead of sRGB (B14: the
+    working space of a Display P3 export), so they aren't clipped to sRGB at decode time."""
     try:
         import rawpy
     except ImportError as error:
@@ -83,6 +85,8 @@ def decode_raw_array(source, bits: int = 8) -> np.ndarray:
             # or flat white at decode time (the Highlights slider can't recover clipped data).
             blend = getattr(getattr(rawpy, "HighlightMode", None), "Blend", None)
             extra = {"highlight_mode": blend} if blend is not None else {}
+            if color_space == "Display P3":
+                extra["output_color"] = rawpy.ColorSpace.P3D65
             return raw.postprocess(use_camera_wb=True, output_bps=16 if bits == 16 else 8, **extra)
     except rawpy.LibRawError as error:
         raise RuntimeError(f"Could not decode this camera RAW file: {error}") from error

@@ -198,6 +198,8 @@ def main() -> None:
     }
     if options.get("bit_depth") == 16:
         export_settings["bit_depth"] = 16
+    if args.color_space == "Display P3":
+        options["working_space"] = "Display P3"  # B14: keep colours outside sRGB
 
     if args.input_dir:
         if not args.output_dir:
@@ -210,7 +212,8 @@ def main() -> None:
     if not args.output:
         raise SystemExit("--output is required when using --input")
 
-    image = decode_source(Path(args.input).read_bytes(), Path(args.input).name, high_bit=options.get("bit_depth") == 16)
+    image = decode_source(Path(args.input).read_bytes(), Path(args.input).name, high_bit=options.get("bit_depth") == 16,
+                          working_space=options.get("working_space", "sRGB"))
     removal_mask = Image.open(args.remove_mask) if args.remove_mask else None
     local_mask = Image.open(args.mask) if args.mask else None
     result = run_pipeline(image, options, removal_mask=removal_mask, local_mask=local_mask)

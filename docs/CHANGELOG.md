@@ -7,6 +7,16 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-17 -- Display P3 exports keep colours outside sRGB (B14)
+
+- A Display P3 export used to convert the finished pixels from sRGB, after the pipeline had already
+  clipped every source to sRGB (embedded profiles converted to sRGB, RAW decoded to sRGB): the file
+  was tagged P3 but held nothing sRGB couldn't. It now renders in a Display P3 working space: RAW
+  decoded to P3, embedded profiles converted to P3, untagged sources converted from sRGB, and no
+  second conversion at encode. Applies to the Export tab, the CLI (`--color-space "Display P3"`) and
+  the folder batch; tests in `tests/test_color_profiles.py` (P3 green survives at 8 and 16 bits and
+  through an edit, RAW decoded to P3 reaches the file unchanged, untagged sources export as before).
+
 ## 2026-10-11 -- Display P3 export, static editor components
 
 - **Display P3 export:** Export settings > Color space (also the CLI's `--color-space`, export presets

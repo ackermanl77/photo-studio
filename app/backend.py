@@ -201,7 +201,11 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     options = parse_options(options)
     if (options.get("export") or {}).get("bit_depth") == 16:
         options["bit_depth"] = 16
+    # A Display P3 export renders in a Display P3 working space (B14), from the original file.
+    if (options.get("export") or {}).get("color_space") == "Display P3":
+        options["working_space"] = "Display P3"
     high_bit = options.get("bit_depth") == 16
+    working_space = options.get("working_space", "sRGB")
     if stage_image is not None:
         image = stage_image
     else:
@@ -211,7 +215,7 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
             image = PhotoProcessor.from_bytes(source_bytes, filename).image
             check_pixel_count(*image.size)
         else:
-            image = decode_source(source_bytes, filename, high_bit=high_bit)
+            image = decode_source(source_bytes, filename, high_bit=high_bit, working_space=working_space)
     layers = layers_from_json(layers_file.read()) if layers_file else None
     return run_pipeline(
         image, options, removal_mask=_open_mask(removal_mask), local_mask=_open_mask(local_mask), layers=layers,
