@@ -42,7 +42,7 @@ The screen is split in two:
   | Tab | What's in it |
   |---|---|
   | **☼ Basic** | ✨ Auto Enhance, 🎞️ Preset Look, Tone (exposure, contrast, highlights, shadows, whites, blacks), Color (white balance, saturation, vibrance, 🎯 Pick White Balance) and Presence (texture, clarity, dehaze) |
-  | **🎨 Curves & Color** | RGB Tone Curve, Color Mixer (HSL), Black & White, Color Grading, Soft Proof |
+  | **🎨 Curves & Color** | RGB Tone Curve, Color Mixer (HSL), Black & White, Color Grading, LUT, Soft Proof |
   | **🔬 Detail** | Denoise, Color Noise, Sharpen |
   | **⛶ Geometry** | Rotate & Straighten, Lens Corrections, Crop / Aspect Ratio |
   | **◉ Local** | three sub-tabs: ◉ Masks, 🩹 Repair, ◌ Portrait |
@@ -153,6 +153,12 @@ tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color
   darkens the gray that colour turns into (darken Blue for a dramatic sky, brighten Orange for
   lighter skin). Color Grading still applies afterwards, so it can tone the result (sepia, split
   toning). CLI: `--black-white Blue=-60,Orange=20`.
+- **🎞️ LUT** — apply a 3D LUT (`.cube`, the format Resolve, Premiere, Photoshop and LUT packs use): a
+  film emulation or a creative look. **Import a LUT (.cube)** copies the file into the app's data
+  folder, where it stays listed in the **LUT** choice for every photo; **LUT strength** blends it
+  with the photo (100 = as designed). It is applied after every other colour and curve adjustment.
+  Recipes, presets and projects remember the LUT by name: on another computer, import the same file
+  first (it shows as "(missing)" until then). 1D LUTs work too.
 - **Color Grading (Split Toning)** — tint Shadows/Midtones/Highlights toward independent hues, plus
   a Balance slider shifting where shadows end and highlights begin.
 - **RGB Tone Curve** — drag any of the 5 fixed points (Blacks/Shadows/Midtones/Highlights/Whites)
@@ -520,7 +526,8 @@ python -m app --input photo.jpg --output clean.jpg --remove-mask object-mask.png
 - Tone/colour: `--exposure-ev` (stops), `--contrast`/`--saturation`/`--brightness` (multipliers,
   1.0 = unchanged), `--highlights`/`--shadows`, `--temperature`/`--tint`, `--vibrance`,
   `--texture`/`--clarity`, `--dehaze`, `--curve "in:out,..."`, `--denoise 0-9` (+ `--denoise-color`),
-  `--sharpen`, `--auto-enhance`, `--preset <built-in look>`.
+  `--sharpen`, `--auto-enhance`, `--preset <built-in look>`, `--lut <file.cube or library name>`
+  (a file is imported into the LUT library) with `--lut-amount 0-100`.
 - Geometry: `--rotate 90|180|270`, `--straighten <degrees>`, `--constrain-crop`,
   `--crop LEFT TOP RIGHT BOTTOM` (pixels), `--aspect W H` (centred crop).
 - Local edits (single photo): `--mask mask.png` with `--mask-exposure`/`--mask-contrast`/

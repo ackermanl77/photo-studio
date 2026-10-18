@@ -97,6 +97,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sharpen", action="store_true", default=None, help="Apply sharpening")
     parser.add_argument("--auto-enhance", action="store_true", help="Apply the GUI's Auto Enhance values (exposure/contrast/saturation/denoise/sharpen)")
     parser.add_argument("--preset", choices=sorted(PRESETS), help="Apply a named editing preset")
+    parser.add_argument("--lut", help="A .cube LUT file (imported into the LUT library) or the name of one already in it")
+    parser.add_argument("--lut-amount", type=float, help="LUT strength from 0 to 100 (default 100)")
     parser.add_argument("--quality", type=int, default=92, help="JPEG/WEBP delivery quality from 1 to 100")
     parser.add_argument("--metadata", choices=METADATA_POLICIES, default="all", help="EXIF to keep: all, camera (copyright & camera only), or none")
     parser.add_argument("--remove-gps", action="store_true", help="Drop GPS location from the kept EXIF")
@@ -174,6 +176,13 @@ def options_from_args(args: argparse.Namespace) -> dict:
         options["crop_box"] = list(args.crop)
     if args.aspect:
         options["aspect"] = f"{args.aspect[0]}:{args.aspect[1]}"
+    if getattr(args, "lut", None):
+        from app.lut import import_lut
+
+        lut_path = Path(args.lut)
+        options["lut"] = import_lut(lut_path.read_bytes(), lut_path.name) if lut_path.suffix.lower() == ".cube" and lut_path.is_file() else args.lut
+    if getattr(args, "lut_amount", None) is not None:
+        options["lut_amount"] = args.lut_amount
     if args.ai_upscale:
         options["ai_upscale"] = True
         options["ai_upscale_factor"] = args.ai_upscale

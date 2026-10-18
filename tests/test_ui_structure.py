@@ -16,7 +16,7 @@ from tests.test_frontend_unified_app import _stub_backend  # noqa: F401  (autous
 # Saved state, presets, projects and the AppTest suite address widgets by these keys: they must
 # never change (the HSL keys, hsl-<band>-<h|s|l>, are checked by pattern below).
 PINNED_WIDGET_KEYS = {
-    "cg_balance": "cg-balance", "cg_highlights_hue": "cg-hi-hue",
+    "cg_balance": "cg-balance", "lut": "lut-name", "lut_amount": "lut-amount", "cg_highlights_hue": "cg-hi-hue",
     "cg_highlights_intensity": "cg-hi-int", "cg_midtones_hue": "cg-mid-hue",
     "cg_midtones_intensity": "cg-mid-int", "cg_shadows_hue": "cg-sh-hue",
     "cg_shadows_intensity": "cg-sh-int", "clarity": "d-clar", "constrain_crop": "geo-constrain",

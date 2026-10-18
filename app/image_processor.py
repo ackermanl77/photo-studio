@@ -325,6 +325,26 @@ class PhotoProcessor:
         self.image = apply_vibrance(self.image, amount)
         return self
 
+    def apply_lut(self, name: str | None, amount: float = 100.0) -> "PhotoProcessor":
+        """The library LUT `name` (app.lut, F17) at `amount` percent; a no-op without a name or at 0."""
+        if not name or amount <= 0:
+            return self
+        from app.lut import apply_lut, load_lut
+
+        lut = load_lut(name)
+        strength = min(1.0, amount / 100.0)
+        if self.hdr is not None:
+            return self._set_hdr(apply_lut(self.hdr, lut, strength))
+        image = self.image
+        alpha = image.getchannel("A") if image.mode == "RGBA" else None
+        rgb = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+        result = Image.fromarray(np.clip(np.rint(apply_lut(rgb, lut, strength) * 255.0), 0, 255).astype(np.uint8), mode="RGB")
+        if alpha is not None:
+            result.putalpha(alpha)
+        result.info = dict(image.info)
+        self.image = result
+        return self
+
     def apply_color_grading(
         self,
         shadows_hue: float = 0.0, shadows_intensity: float = 0.0,

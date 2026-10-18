@@ -189,6 +189,7 @@ with st.container(key="workspace-split"):
             color.hsl_section(ctx)
             color.black_white_section(ctx)
             color.grading_section(ctx)
+            color.lut_section(ctx)
             color.soft_proof_section(ctx)
 
         enter("🔬 Detail")

@@ -7,6 +7,17 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-17 -- LUTs (F17)
+
+- Curves & Color > 🎞️ LUT: a `.cube` 3D or 1D LUT from the LUT library (`app/lut.py`,
+  `user_data_dir()/luts`), with a strength, last in the colour chain (after the curves, 8- and
+  16-bit alike, trilinear). "Import a LUT" copies a file into the library; the CLI's `--lut` takes a
+  file or a library name, `--lut-amount` the strength. The registry control has a new kind, `"lut"`:
+  a library name validated as a safe file name (never a path) by the schema and the recipe sanitizer;
+  a name this computer lacks is listed as "(missing)" and fails the render with "LUT not found".
+  Tests: `tests/test_lut.py` (exact on affine maps, axis order, 1D/domain, bad files, the library,
+  the pipeline at 8/16 bits, the CLI, the Color tab's import flow).
+
 ## 2026-10-17 -- HEIC and AVIF (F19)
 
 - HEIC/HEIF import through `pillow-heif` (new `requirements.txt` dependency, pinned in
