@@ -19,6 +19,7 @@ import threading
 from collections.abc import Callable
 from io import BytesIO
 
+import numpy as np
 from PIL import Image
 
 from app.config import MAX_HEAVY_JOBS, MAX_UPSCALE_OUTPUT_PIXELS
@@ -29,6 +30,10 @@ from app.image_processor import PhotoProcessor
 from app.layer_workspace import LayerWorkspace, WorkspaceLayer
 from app.portrait_tools import detect_faces, smooth_skin
 from app.presets import apply_preset
+from app.color_profiles import (
+    convert_srgb_to_display_p3, convert_srgb_to_display_p3_uint8, display_p3_icc_bytes, is_display_p3_icc,
+    normalize_to_display_p3,
+)
 from app.professional_color import ICC_TRANSFORM_ERRORS, normalize_to_srgb, srgb_icc_bytes
 from app.raw_import import is_raw_path
 from app.reliability import check_pixel_count, validate_image_bytes
@@ -53,7 +58,7 @@ class PipelineCancelled(Exception):
     ValueError on purpose: it isn't a bad request (app.backend answers 409)."""
 
 
-def decode_source(content: bytes, filename: str, *, high_bit: bool = False) -> Image.Image:
+def decode_source(content: bytes, filename: str, *, high_bit: bool = False, working_space: str = "sRGB") -> Image.Image:
     """Validate and decode an uploaded/source file (RAW included) into an RGB image whose .info
     still carries the file's EXIF (Orientation already applied and removed) and ICC profile.
     PIL (via validate_image_bytes) can't decode camera RAW -- PhotoProcessor.from_bytes() routes it
@@ -62,24 +67,38 @@ def decode_source(content: bytes, filename: str, *, high_bit: bool = False) -> I
 
     `high_bit=True` (a 16-bit export, B4): a source that really holds more than 8 bits (16-bit
     PNG/TIFF, camera RAW) is decoded at full precision too; the returned 8-bit image is its
-    quantization and carries the float pixels (app.high_bit.attached()) for run_pipeline()."""
-    if not is_raw_path(filename):
+    quantization and carries the float pixels (app.high_bit.attached()) for run_pipeline().
+
+    `working_space="Display P3"` (B14): camera RAW is decoded straight to Display P3 and tagged
+    with its profile, so no camera colour is clipped to sRGB here; other files are decoded as
+    usual and converted by run_pipeline()'s ICC step."""
+    raw = is_raw_path(filename)
+    p3_raw = raw and working_space == "Display P3"
+    if not raw:
         validate_image_bytes(content, filename)
     if high_bit:
-        array = decode_high_bit(content, filename)
+        array = decode_high_bit(content, filename, color_space="Display P3" if p3_raw else "sRGB")
         if array is not None:
             check_pixel_count(array.shape[1], array.shape[0])
             info_source = None
             if not is_raw_path(filename):
                 info_source = Image.open(BytesIO(content))  # EXIF (Orientation reset below) + ICC
             image = to_image(array, info_source)
+            if p3_raw:
+                image.info["icc_profile"] = display_p3_icc_bytes()
             if info_source is not None and info_source.getexif().get(0x0112, 1) != 1:
                 exif = info_source.getexif()
                 exif[0x0112] = 1
                 image.info["exif"] = exif.tobytes()
             return image
-    image = PhotoProcessor.from_bytes(content, filename).image
-    if is_raw_path(filename):
+    if p3_raw:
+        from app.raw_import import decode_raw_array
+
+        image = Image.fromarray(decode_raw_array(BytesIO(content), color_space="Display P3"), mode="RGB")
+        image.info["icc_profile"] = display_p3_icc_bytes()
+    else:
+        image = PhotoProcessor.from_bytes(content, filename).image
+    if raw:
         check_pixel_count(*image.size)
     return image
 
@@ -193,7 +212,9 @@ def run_pipeline(
         # and oversaturated color. The output is re-tagged as sRGB rather than re-attaching the
         # original (now stale) profile. Malformed profile bytes fall back to "keep whatever was
         # embedded, unconverted" rather than failing the whole edit.
-        if source_icc:
+        if options.get("working_space") == "Display P3":
+            source_icc = _normalize_to_display_p3(processor, source_icc)
+        elif source_icc:
             try:
                 processor.image = normalize_to_srgb(processor.image, source_icc)
                 source_icc = srgb_icc_bytes()
@@ -341,6 +362,32 @@ def run_pipeline(
         processor.apply_ai_upscale(factor)
 
     return _with_metadata(processor.image, source_exif, source_icc, strip, processor.hdr)
+
+
+def _normalize_to_display_p3(processor: PhotoProcessor, source_icc: bytes | None) -> bytes | None:
+    """The Display P3 working space's ICC step (B14): an embedded profile is converted to P3
+    (wide-gamut sources keep their colours), an untagged source is taken as sRGB and converted
+    numerically (in float when the pipeline runs in high precision), and a source already in P3
+    (a RAW decoded to it) is left alone. Returns the profile the result carries. Malformed profile
+    bytes keep the pixels unconverted, like the sRGB path."""
+    if is_display_p3_icc(source_icc):
+        return source_icc
+    if source_icc:
+        try:
+            processor.image = normalize_to_display_p3(processor.image, source_icc)
+        except ICC_TRANSFORM_ERRORS:
+            return source_icc
+        return display_p3_icc_bytes()
+    if processor.hdr is not None:
+        processor._set_hdr(convert_srgb_to_display_p3(processor.hdr))
+    elif processor.image.mode in ("RGB", "RGBA"):
+        image = processor.image
+        converted = Image.fromarray(convert_srgb_to_display_p3_uint8(np.asarray(image.convert("RGB"))), mode="RGB")
+        if image.mode == "RGBA":
+            converted.putalpha(image.getchannel("A"))
+        converted.info = dict(image.info)
+        processor.image = converted
+    return display_p3_icc_bytes()
 
 
 def _with_metadata(image: Image.Image, exif: bytes | None, icc: bytes | None, strip: bool, high_bit=None) -> Image.Image:

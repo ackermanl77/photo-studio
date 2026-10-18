@@ -1,10 +1,10 @@
 """Output color spaces for export: sRGB (the working space) and Display P3.
 
-The pipeline works in sRGB (app.pipeline normalizes an embedded profile into it). Exporting in
-Display P3 -- the wide-gamut space of current phones, Macs and many monitors -- converts the
-finished pixels from sRGB into P3 and embeds a Display P3 ICC profile, so a color-managed viewer
-shows exactly the same colors (an sRGB image sits inside P3's gamut, nothing is clipped); the gain
-is headroom: a P3 file can be pushed further in another editor without leaving the gamut.
+The pipeline normally works in sRGB (app.pipeline normalizes an embedded profile into it). A
+Display P3 export -- the wide-gamut space of current phones, Macs and many monitors -- renders in a
+Display P3 working space instead (see the bottom of this module, B14), so colours outside sRGB that
+the source holds survive; the result is tagged with a Display P3 ICC profile. A result that is still
+sRGB (an in-process render) is converted from sRGB into P3 at export.
 
 No profile file is bundled: display_p3_icc_bytes() builds a standard ICC v4 matrix/TRC display
 profile (the P3 primaries, a D65 white adapted to the D50 connection space with Bradford, and the
@@ -155,3 +155,37 @@ def display_p3_icc_bytes() -> bytes:
 def output_icc(color_space: str, current_icc: bytes | None) -> bytes | None:
     """The profile an exported file carries: Display P3's for a P3 export, else the image's own."""
     return display_p3_icc_bytes() if color_space == "Display P3" else current_icc
+
+
+# --- Display P3 as the working space (B14) ---------------------------------------------------------
+# An sRGB working space clips every colour outside sRGB on the way in (normalize_to_srgb(), and RAW
+# decoded straight to sRGB), so converting the finished pixels to P3 at export could never put a
+# colour outside sRGB into the file. A Display P3 export therefore renders in a Display P3 working
+# space instead: RAW decoded to P3 by LibRaw, an embedded profile converted to P3 rather than to sRGB,
+# an untagged (sRGB) source converted to P3 numerically. Display P3 shares sRGB's transfer curve, so
+# every later step sees encoded values on the same scale; hue-based tools (HSL bands, the skin mask)
+# see P3 hues, which differ a little from sRGB ones for strongly saturated colours.
+
+WORKING_SPACES = COLOR_SPACES
+
+
+def is_display_p3_icc(icc: bytes | None) -> bool:
+    """True when `icc` is this module's own Display P3 profile -- how app.export recognises pixels
+    the pipeline already rendered in P3 (and must not convert from sRGB a second time)."""
+    return bool(icc) and icc == display_p3_icc_bytes()
+
+
+def normalize_to_display_p3(image, icc_bytes: bytes):
+    """`image` (8-bit RGB PIL) converted from the profile `icc_bytes` describes into Display P3,
+    relative colorimetric like normalize_to_srgb() -- but a wide-gamut source (Adobe RGB, ProPhoto,
+    a camera profile) keeps everything inside P3 instead of being clipped to sRGB."""
+    import io
+
+    from PIL import ImageCms
+
+    source = ImageCms.ImageCmsProfile(io.BytesIO(icc_bytes))
+    target = ImageCms.ImageCmsProfile(io.BytesIO(display_p3_icc_bytes()))
+    return ImageCms.profileToProfile(
+        image.convert("RGB"), source, target,
+        renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC, outputMode="RGB",
+    )

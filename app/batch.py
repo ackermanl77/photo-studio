@@ -26,6 +26,8 @@ def process_folder(
     run_options = dict(options or {})
     if preset:
         run_options["preset"] = preset
+    if (export_settings or {}).get("color_space") == "Display P3":
+        run_options["working_space"] = "Display P3"  # B14, like the backend's export path
     outputs: list[Path] = []
 
     for input_path in sorted(source.iterdir()):
@@ -33,7 +35,8 @@ def process_folder(
         if not input_path.is_file() or suffix not in SUPPORTED_EXTENSIONS:
             continue
         output_path = destination / (input_path.name if suffix in STANDARD_EXTENSIONS else f"{input_path.stem}.jpg")
-        image = decode_source(input_path.read_bytes(), input_path.name, high_bit=run_options.get("bit_depth") == 16)
+        image = decode_source(input_path.read_bytes(), input_path.name, high_bit=run_options.get("bit_depth") == 16,
+                              working_space=run_options.get("working_space", "sRGB"))
         write_export(run_pipeline(image, run_options), output_path, export_settings)
         outputs.append(output_path)
 
