@@ -198,6 +198,17 @@ class LayerStack:
         return Image.fromarray(np.clip(result * 255.0, 0, 255).astype(np.uint8), mode="RGBA")
 
 
+# Lightroom's / Bridge's own xmp:Label values, in their order (keys 6-9 in the Library, F21).
+COLOR_LABELS = ("Red", "Yellow", "Green", "Blue", "Purple")
+# Library sort orders (F20): unscored photos (focus -1) go last when sorting by focus.
+SEARCH_SORTS = {
+    "rating": "rating DESC, path",
+    "sharpest": "focus < 0, focus DESC, path",
+    "blurriest": "focus < 0, focus ASC, path",
+    "name": "path",
+}
+
+
 class PhotoCatalog:
     """Small local SQLite catalog for ratings, tags, and searchable image paths."""
 
@@ -211,6 +222,13 @@ class PhotoCatalog:
                 # the next scan only records their current time instead of re-importing them over
                 # ratings given in the app since. New rows are inserted with 0 explicitly.
                 connection.execute("ALTER TABLE photos ADD COLUMN xmp_mtime REAL DEFAULT -1")
+            # Colour label (xmp:Label, F21) and culling scores (app.culling, F20; -1 = not scored),
+            # added to older catalogs in place.
+            for column, declaration in (("label", "TEXT DEFAULT ''"), ("focus", "REAL DEFAULT -1"),
+                                        ("highlights", "REAL DEFAULT -1"), ("shadows", "REAL DEFAULT -1"),
+                                        ("scored_mtime", "REAL DEFAULT 0")):
+                if column not in columns:
+                    connection.execute(f"ALTER TABLE photos ADD COLUMN {column} {declaration}")
 
     @contextmanager
     def _connect(self):
@@ -256,16 +274,53 @@ class PhotoCatalog:
         with self._connect() as connection:
             connection.execute("UPDATE photos SET xmp_mtime = ? WHERE path = ?", (float(mtime), str(path)))
 
+    _COLUMNS = "path, rating, tags, label, focus, highlights, shadows"
+
+    @staticmethod
+    def _entry(row) -> dict[str, object]:
+        path, rating, tags, label, focus, highlights, shadows = row
+        return {
+            "path": path, "rating": rating, "tags": tags.split(",") if tags else [], "label": label or "",
+            "focus": None if focus is None or focus < 0 else focus,
+            "highlights": None if highlights is None or highlights < 0 else highlights,
+            "shadows": None if shadows is None or shadows < 0 else shadows,
+        }
+
     def get(self, path: str | Path) -> dict[str, object]:
         with self._connect() as connection:
-            row = connection.execute("SELECT rating, tags FROM photos WHERE path = ?", (str(path),)).fetchone()
+            row = connection.execute(f"SELECT {self._COLUMNS} FROM photos WHERE path = ?", (str(path),)).fetchone()
         if row is None:
-            return {"path": str(path), "rating": 0, "tags": []}
-        rating, tags = row
-        return {"path": str(path), "rating": rating, "tags": tags.split(",") if tags else []}
+            return {"path": str(path), "rating": 0, "tags": [], "label": "", "focus": None, "highlights": None, "shadows": None}
+        return self._entry(row)
 
-    def search(self, text: str = "", minimum_rating: int = 0) -> list[dict[str, object]]:
-        pattern = f"%{text}%"
+    def set_label(self, path: str | Path, label: str) -> None:
+        """The colour label (one of COLOR_LABELS, or "" for none)."""
+        if label not in ("", *COLOR_LABELS):
+            raise ValueError(f"Unknown colour label: {label!r}")
         with self._connect() as connection:
-            rows = connection.execute("SELECT path, rating, tags FROM photos WHERE rating >= ? AND (path LIKE ? OR tags LIKE ?) ORDER BY rating DESC, path", (minimum_rating, pattern, pattern)).fetchall()
-        return [{"path": path, "rating": rating, "tags": tags.split(",") if tags else []} for path, rating, tags in rows]
+            connection.execute("UPDATE photos SET label = ? WHERE path = ?", (label, str(path)))
+
+    def scored_mtime(self, path: str | Path) -> float | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT scored_mtime FROM photos WHERE path = ?", (str(path),)).fetchone()
+        return None if row is None else float(row[0])
+
+    def set_scores(self, path: str | Path, scores: dict, mtime: float) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE photos SET focus = ?, highlights = ?, shadows = ?, scored_mtime = ? WHERE path = ?",
+                (float(scores["focus"]), float(scores["highlights"]), float(scores["shadows"]), float(mtime), str(path)),
+            )
+
+    def search(self, text: str = "", minimum_rating: int = 0, label: str | None = None, sort: str = "rating") -> list[dict[str, object]]:
+        """Photos whose path or tags contain `text`, rated at least `minimum_rating`. `label`: None =
+        any, "" = no label, or one colour. `sort`: one of SEARCH_SORTS."""
+        pattern = f"%{text}%"
+        where, params = "rating >= ? AND (path LIKE ? OR tags LIKE ?)", [minimum_rating, pattern, pattern]
+        if label is not None:
+            where += " AND label = ?"
+            params.append(label)
+        order = SEARCH_SORTS.get(sort, SEARCH_SORTS["rating"])
+        with self._connect() as connection:
+            rows = connection.execute(f"SELECT {self._COLUMNS} FROM photos WHERE {where} ORDER BY {order}", params).fetchall()
+        return [self._entry(row) for row in rows]

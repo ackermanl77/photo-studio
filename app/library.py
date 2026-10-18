@@ -5,7 +5,8 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
-from app.major_features import PhotoCatalog
+from app.culling import score_file
+from app.major_features import COLOR_LABELS, PhotoCatalog
 from app.raw_import import SUPPORTED_EXTENSIONS, is_raw_path
 from app.xmp_sidecar import REJECTED_TAG, find_sidecar, read_sidecar, write_sidecar
 
@@ -53,20 +54,27 @@ def _import_changed_sidecar(catalog: PhotoCatalog, path: Path) -> None:
         if sidecar is not None:
             tags = sidecar["tags"] + ([REJECTED_TAG] if sidecar["rejected"] else [])
             catalog.upsert(path, rating=sidecar["rating"], tags=tags)
+            if sidecar.get("label") in COLOR_LABELS:
+                catalog.set_label(path, sidecar["label"])
     if known != mtime:
         catalog.set_xmp_mtime(path, mtime)
 
 
-def save_rating(catalog: PhotoCatalog, path: str | Path, rating: int, tags, write_xmp: bool = False) -> str | None:
+def save_rating(catalog: PhotoCatalog, path: str | Path, rating: int, tags, write_xmp: bool = False,
+                label: str | None = None) -> str | None:
     """Store a rating/tags change in the catalog and, with `write_xmp`, in the photo's XMP
     sidecar too (the "rejected" tag becomes xmp:Rating -1). Returns a message when the sidecar
-    couldn't be written -- the catalog is updated either way."""
+    couldn't be written -- the catalog is updated either way. `label` (a colour label, "" for none)
+    is changed only when given."""
     tags = list(tags)
     catalog.upsert(path, rating=rating, tags=tags)
+    if label is not None:
+        catalog.set_label(path, label)
     if not write_xmp:
         return None
     try:
-        write_sidecar(path, rating, [t for t in tags if t != REJECTED_TAG], rejected=REJECTED_TAG in tags)
+        write_sidecar(path, rating, [t for t in tags if t != REJECTED_TAG], rejected=REJECTED_TAG in tags,
+                      label=catalog.get(path)["label"])
     except (OSError, ValueError) as error:
         return f"Couldn't write the XMP sidecar: {error}"
     sidecar_file = find_sidecar(path)
@@ -119,8 +127,23 @@ def _raw_preview(source: Path) -> Image.Image | None:
 
 
 
+def _update_scores(catalog: PhotoCatalog, path: Path) -> None:
+    """Culling scores (app.culling, F20), recomputed only when the file changed since last time."""
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return
+    if catalog.scored_mtime(path) == mtime:
+        return
+    try:
+        scores = score_file(path)
+    except Exception:  # noqa: BLE001 -- an unreadable preview just stays unscored
+        return
+    catalog.set_scores(path, scores, mtime)
+
+
 def index_folder(folder: str | Path, database: str | Path, recursive: bool = True, progress=None,
-                 import_xmp: bool = True) -> list[dict[str, object]]:
+                 import_xmp: bool = True, score: bool = True) -> list[dict[str, object]]:
     """`progress`, when given, is called as `progress(index, total, info)` after each file --
     same shape as app.batch_release.process_files()'s own `progress` callback -- so the frontend's
     "Scan Folder" button can drive an st.progress() bar the same way Run Batch already does.
@@ -128,7 +151,11 @@ def index_folder(folder: str | Path, database: str | Path, recursive: bool = Tru
     With `import_xmp`, a photo takes its rating, reject flag and keywords from its XMP sidecar
     (app.xmp_sidecar) when it is catalogued for the first time, and again whenever the sidecar has
     changed since it was last read or written here (another program -- Lightroom, Bridge,
-    darktable -- rated it). Otherwise the catalog keeps what was set in this app."""
+    darktable -- rated it). Otherwise the catalog keeps what was set in this app. A colour label
+    (xmp:Label) comes along the same way.
+
+    With `score`, each photo gets its culling scores (focus, clipped highlights/shadows -- app.culling)
+    from a preview, recomputed only for files changed since they were last scored."""
     catalog = PhotoCatalog(database)
     paths = scan_folder(folder, recursive)
     total = len(paths)
@@ -139,6 +166,8 @@ def index_folder(folder: str | Path, database: str | Path, recursive: bool = Tru
             catalog.ensure(path)
             if import_xmp:
                 _import_changed_sidecar(catalog, path)
+            if score:
+                _update_scores(catalog, path)
             records.append(info)
         if progress:
             progress(index, total, info)

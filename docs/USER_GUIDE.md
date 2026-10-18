@@ -339,16 +339,24 @@ Three modes, selected via the radio buttons at the top of the tab.
   the next time you open the app, without scanning again. A photo scanned for the first time takes
   its rating, reject flag and keywords from an **XMP sidecar** next to it (`IMG_0001.xmp` or
   `photo.jpg.xmp`, as Lightroom, Capture One, Bridge and darktable write them), if it has one, and
-  a rescan picks up a sidecar another program changed since.
+  a rescan picks up a sidecar another program changed since (its colour label too).
+  The scan also scores each photo for culling, from a preview: **Focus** (0-100, how sharp the
+  photo's sharpest part is -- a sharp face in a shallow-focus portrait counts as sharp) and the
+  share of **clipped highlights and shadows**. Unchanged files aren't scored again.
 - **Thumbnail grid** — the matching photos as thumbnails (cached, RAW files via their embedded
   preview), each with **✏️ Edit** to open it in the editor. Your current adjustments are kept, so a
   look carries over to the next photo of a shoot; **↺** resets them.
-- **Search** + **Min Stars** — filters the indexed photos by filename/tag text and a minimum star
-  rating. If nothing matches, the app says so instead of showing a silent empty table.
+- **Search** + **Min Stars** + **Colour label** — filters the indexed photos by filename/tag text, a
+  minimum star rating and a colour label. **Sort by** Rating, **Sharpest first**, **Blurriest
+  first** (missed focus and camera shake at the top) or Name; a likely blurry photo shows 〰️ in the
+  grid. If nothing matches, the app says so instead of showing a silent empty table.
 - **Rate & Flag** — after a scan, step through your photos one at a time:
   - **⬅ Prev** / **Next ➡** to move between them.
   - Five star buttons to rate (or **Clear rating**).
   - **🚫 Reject** to flag a photo (stored as a tag, doesn't affect its rating).
+  - **Colour label** — None, 🔴 Red, 🟡 Yellow, 🟢 Green, 🔵 Blue or 🟣 Purple (Lightroom's labels;
+    written to the sidecar as `xmp:Label` when sidecar writing is on). The photo's Focus and
+    clipping scores are shown above, with "〰️ likely blurry" when focus is low.
   - A comma-separated **Tags** field, with **Save tags**.
   - **Also write ratings and tags to XMP sidecars** — off by default; when on, every rating,
     reject and tag change is also saved in the photo's `.xmp` sidecar (rejected = rating -1), so
@@ -356,8 +364,8 @@ Three modes, selected via the radio buttons at the top of the tab.
     (develop settings included); a damaged one is left alone and a warning says so.
   - **✏️ Edit this photo** — opens the current photo in the editor.
   - **Keyboard shortcuts** (work whenever this panel is visible and you're not typing in a text
-    field): **1–5** to rate, **0** to clear the rating, **X** to toggle reject, **←/→** to move
-    Prev/Next.
+    field): **1–5** to rate, **0** to clear the rating, **X** to toggle reject, **6–9** for the
+    Red/Yellow/Green/Blue label, **←/→** to move Prev/Next.
 
 ### Batch Processor
 
@@ -562,6 +570,7 @@ python -m app --input photo.jpg --output clean.jpg --remove-mask object-mask.png
 | 1–5 | Rate current photo | Library Catalog, Rate & Flag panel |
 | 0 | Clear rating | Library Catalog, Rate & Flag panel |
 | X | Toggle Reject | Library Catalog, Rate & Flag panel |
+| 6 / 7 / 8 / 9 | Red / Yellow / Green / Blue colour label | Library Catalog, Rate & Flag panel |
 | ← / → | Previous / Next photo | Library Catalog, Rate & Flag panel |
 
 ---

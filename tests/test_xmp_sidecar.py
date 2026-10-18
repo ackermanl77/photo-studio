@@ -37,9 +37,9 @@ def test_new_sidecar_round_trip_and_naming(tmp_path):
     assert read_sidecar(jpeg) is None
     path = write_sidecar(jpeg, 4, ["Sea", "sunset", "Sea", "rejected"])
     assert path == tmp_path / "shot.jpg.xmp"  # darktable-style for non-RAW: no clash with a RAW twin
-    assert read_sidecar(jpeg) == {"rating": 4, "rejected": False, "tags": ["Sea", "sunset"]}
+    assert read_sidecar(jpeg) == {"rating": 4, "rejected": False, "tags": ["Sea", "sunset"], "label": ""}
     write_sidecar(jpeg, 4, ["Sea"], rejected=True)
-    assert read_sidecar(jpeg) == {"rating": 0, "rejected": True, "tags": ["Sea"]}
+    assert read_sidecar(jpeg) == {"rating": 0, "rejected": True, "tags": ["Sea"], "label": ""}
     assert 'xmp:Rating="-1"' in path.read_text(encoding="utf-8")
     raw = tmp_path / "IMG_0001.dng"
     assert sidecar_candidates(raw)[0] == tmp_path / "IMG_0001.xmp"  # Lightroom / Capture One convention
@@ -49,12 +49,12 @@ def test_an_existing_lightroom_sidecar_keeps_its_develop_settings(tmp_path):
     raw = _photo(tmp_path, "IMG_0002.dng")
     sidecar = tmp_path / "IMG_0002.xmp"
     sidecar.write_text(LIGHTROOM_SIDECAR, encoding="utf-8")
-    assert read_sidecar(raw) == {"rating": 3, "rejected": False, "tags": ["beach", "family"]}
+    assert read_sidecar(raw) == {"rating": 3, "rejected": False, "tags": ["beach", "family"], "label": ""}
     assert write_sidecar(raw, 5, ["beach"]) == sidecar
     text = sidecar.read_text(encoding="utf-8")
     assert 'crs:Exposure2012="+0.35"' in text and 'crs:WhiteBalance="As Shot"' in text  # prefixes kept
     assert "ns0:" not in text and text.count("Rating") == 1
-    assert read_sidecar(raw) == {"rating": 5, "rejected": False, "tags": ["beach"]}
+    assert read_sidecar(raw) == {"rating": 5, "rejected": False, "tags": ["beach"], "label": ""}
 
 
 def test_a_photo_named_with_the_other_convention_is_found(tmp_path):
@@ -89,7 +89,7 @@ def test_scanning_imports_sidecars_only_for_new_photos(tmp_path):
     assert sorted(catalog.get(jpeg)["tags"]) == ["beach", "family", "rejected"]
     catalog.upsert(jpeg, rating=5, tags=["keeper"])
     index_folder(folder, database)  # a rescan doesn't bring the sidecar's values back
-    assert catalog.get(jpeg) == {"path": str(jpeg), "rating": 5, "tags": ["keeper"]}
+    assert {k: v for k, v in catalog.get(jpeg).items() if k in ("path", "rating", "tags")} == {"path": str(jpeg), "rating": 5, "tags": ["keeper"]}
 
 
 def test_save_rating_writes_the_sidecar_only_when_asked(tmp_path):
@@ -98,7 +98,7 @@ def test_save_rating_writes_the_sidecar_only_when_asked(tmp_path):
     assert save_rating(catalog, jpeg, 3, ["a"]) is None
     assert find_sidecar(jpeg) is None
     assert save_rating(catalog, jpeg, 3, ["a", "rejected"], write_xmp=True) is None
-    assert read_sidecar(jpeg) == {"rating": 0, "rejected": True, "tags": ["a"]}
+    assert read_sidecar(jpeg) == {"rating": 0, "rejected": True, "tags": ["a"], "label": ""}
 
 
 def _touch_later(path, seconds=10):
