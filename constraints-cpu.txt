@@ -30,6 +30,7 @@ packaging==26.3
 pandas==3.0.6
 pefile==2024.8.26
 pillow==12.3.0
+pillow-heif==1.8.1
 protobuf==7.36.2
 proxy_tools==0.1.0
 pyarrow==25.0.1

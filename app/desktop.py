@@ -297,7 +297,9 @@ def self_test_report() -> dict:
     modules["app.frontend_unified_app"] = "ok" if importlib.util.find_spec("app.frontend_unified_app") else "missing"
 
     from app.ai_upscale import ai_upscale_available, ai_upscale_installed
+    from app.export import EXPORT_FORMATS
     from app.gpu_pack import gpu_pack_status
+    from app.raw_import import SUPPORTED_EXTENSIONS
     from app.lens_lookup import lens_database_size
     from app.portrait_tools import face_detection_backend
     from app.ui.theme import page_style
@@ -306,6 +308,9 @@ def self_test_report() -> dict:
     installed = ai_upscale_installed()
     capabilities = {
         "rawpy": importlib.util.find_spec("rawpy") is not None,
+        # HEIC/AVIF import and AVIF export (F19): the frozen build must bundle pillow-heif's libheif.
+        "heif": ".heic" in SUPPORTED_EXTENSIONS,
+        "avif": "AVIF" in EXPORT_FORMATS,
         "lensfun_lenses": lens_database_size(),
         "face_detection": face_detection_backend(),
         "ai_upscale_installed": installed,
@@ -319,6 +324,7 @@ def self_test_report() -> dict:
     ok = (
         all(status == "ok" for status in modules.values())
         and capabilities["rawpy"]
+        and capabilities["heif"]
         and capabilities["lensfun_lenses"] > 0
         and capabilities["face_detection"] != "none"
     )

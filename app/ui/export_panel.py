@@ -18,7 +18,7 @@ from PIL import Image
 from app import ai_upscale, backend_client
 from app.batch_release import export_multiple
 from app.color_profiles import COLOR_SPACES
-from app.export import DEFAULT_NAME_TEMPLATE, EXPORT_FORMATS, HIGH_BIT_FORMATS, METADATA_POLICIES, METADATA_POLICY_LABELS, OUTPUT_SHARPENING, ExportPresetStore, cached_export, render_export_name
+from app.export import DEFAULT_NAME_TEMPLATE, EXPORT_FORMATS, HIGH_BIT_FORMATS, LOSSY_FORMATS, METADATA_POLICIES, METADATA_POLICY_LABELS, OUTPUT_SHARPENING, ExportPresetStore, cached_export, render_export_name
 from app.painted_masks import inline_painted_masks, session_painted_masks
 from app.pipeline import check_upscale_output, expected_output_size
 from app.professional_tools import EXPORT_PROFILES, WATERMARK_POSITIONS
@@ -231,7 +231,7 @@ def save_footer(ctx) -> None:
     with exp_c1:
         out_format = st.selectbox(t("Export Format"), list(EXPORT_FORMATS), key="exp-fmt", label_visibility="collapsed", format_func=t_option)
     with exp_c2:
-        out_quality = st.slider(t("Quality"), 50, 100, 92, key="exp-qual", disabled=out_format in ["PNG", "TIFF"], label_visibility="collapsed")
+        out_quality = st.slider(t("Quality"), 50, 100, 92, key="exp-qual", disabled=out_format not in LOSSY_FORMATS, label_visibility="collapsed")
     with exp_c3:
         watermark = settings["watermark"]
         export_settings = {
