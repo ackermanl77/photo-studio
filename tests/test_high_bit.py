@@ -322,8 +322,11 @@ def test_colour_and_detail_steps_compute_in_float_in_16_bit_mode():
     for step, expected in cases:
         processor = step(_processor_on(array.copy()))
         assert np.allclose(processor.hdr, expected, atol=1e-6)
-    grained = _processor_on(array.copy()).apply_film_grain(40).hdr
-    noise = grained - array
+    # Mid-tones only: the grain is unseeded noise (std ~0.031 at amount 40), and on pixels near 0 or 1
+    # a rare 3-sigma draw clips one channel but not the others -- that made this check flaky.
+    mid = (array * 0.4 + 0.3).astype(np.float32)
+    grained = _processor_on(mid.copy()).apply_film_grain(40).hdr
+    noise = grained - mid
     assert np.abs(noise).mean() > 0.005  # grain applied...
     assert np.allclose(noise, noise[..., :1], atol=1e-6)  # ...monochromatic, the same on all channels
     assert not np.allclose(noise * 255, np.rint(noise * 255), atol=1e-3)  # not quantized to 8-bit levels
