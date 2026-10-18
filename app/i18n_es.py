@@ -780,4 +780,17 @@ ES = {
         "El LUT se copia a la carpeta de datos de la app y aparece en la lista de LUTs.",
     "LUT '{0}' imported": "LUT «{0}» importado",
     "{0} (missing)": "{0} (no está en esta PC)",
+    # Culling scores and colour labels (F20/F21)
+    "Colour label": "Etiqueta de color",
+    "Any": "Cualquiera",
+    "Sort by": "Ordenar por",
+    "Rating": "Estrellas",
+    "Sharpest first": "Más nítidas primero",
+    "Blurriest first": "Más borrosas primero",
+    "Focus is measured when a folder is scanned: the sharpness of the photo's sharpest part. Blurriest first finds missed focus and camera shake.":
+        "El enfoque se mide al escanear una carpeta: la nitidez de la parte más nítida de la foto. «Más borrosas primero» encuentra fotos desenfocadas o movidas.",
+    "Colour label (keys 6-9)": "Etiqueta de color (teclas 6-9)",
+    "No colour label": "Sin etiqueta de color",
+    "Focus {0}/100 · clipped highlights {1} % · shadows {2} %": "Enfoque {0}/100 · luces quemadas {1} % · sombras empastadas {2} %",
+    "〰️ likely blurry": "〰️ probablemente borrosa",
 }

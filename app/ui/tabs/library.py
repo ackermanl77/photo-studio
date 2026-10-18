@@ -12,8 +12,9 @@ import streamlit.components.v1 as components
 from app.batch_release import FileLike, stream_to_zip
 from app.config import user_data_dir, user_data_file
 from app.custom_presets import PresetStore
+from app.culling import is_likely_blurry
 from app.library import index_folder, save_rating, thumbnail
-from app.major_features import PhotoCatalog
+from app.major_features import COLOR_LABELS, PhotoCatalog
 from app.painted_masks import inline_painted_masks
 from app.preset_exchange import export_presets, import_presets
 from app.presets import PRESETS
@@ -100,6 +101,29 @@ def presets_section(ctx) -> None:
     st.caption(t("↶ Undo / ↷ Redo and 📌 Named Snapshots are always available in the bar above the canvas; Save Project is in ⬇ Export."))
 
 
+LABEL_DOTS = {"Red": "🔴", "Yellow": "🟡", "Green": "🟢", "Blue": "🔵", "Purple": "🟣"}
+SORT_LABELS = {"rating": "Rating", "sharpest": "Sharpest first", "blurriest": "Blurriest first", "name": "Name"}
+
+
+def grid_caption(entry: dict) -> str:
+    """A thumbnail's caption: stars, colour label, a blur warning, the file name."""
+    parts = ["⭐" * int(entry["rating"])]
+    if entry.get("label"):
+        parts.append(LABEL_DOTS[entry["label"]])
+    if is_likely_blurry(entry.get("focus")):
+        parts.append("〰️")
+    parts.append(Path(entry["path"]).name)
+    return " ".join(part for part in parts if part)
+
+
+def score_caption(entry: dict) -> str:
+    text = t("Focus {0}/100 · clipped highlights {1} % · shadows {2} %").format(
+        f"{entry['focus']:.0f}", f"{entry['highlights']:.1f}", f"{entry['shadows']:.1f}")
+    if is_likely_blurry(entry["focus"]):
+        text += " · " + t("〰️ likely blurry")
+    return text
+
+
 def library_section(ctx) -> None:
     more_mode = st.radio(t("Tool"), ["Library Catalog", "Batch Processor", "System Health"], horizontal=True, label_visibility="collapsed", key="more-mode", format_func=t_option)
     if more_mode == "Library Catalog":
@@ -126,8 +150,18 @@ def library_section(ctx) -> None:
             for entry in PhotoCatalog(lib_db).search() if Path(entry["path"]).is_file()
         ]
         q = st.text_input(t("Search"), key="lib-q-in")
-        r_min = st.slider(t("Min Stars"), 0, 5, 0, key="lib-r-in")
-        search_results = PhotoCatalog(lib_db).search(q, r_min) if rec else []
+        filter_cols = st.columns([2, 2, 2])
+        with filter_cols[0]:
+            r_min = st.slider(t("Min Stars"), 0, 5, 0, key="lib-r-in")
+        with filter_cols[1]:
+            label_filter = st.selectbox(t("Colour label"), ["Any", "None", *COLOR_LABELS], key="lib-label-filter",
+                                        format_func=lambda name: t(name) if name in ("Any", "None") else f"{LABEL_DOTS[name]} {t(name)}")
+        with filter_cols[2]:
+            sort = st.selectbox(t("Sort by"), list(SORT_LABELS), key="lib-sort", format_func=lambda key: t(SORT_LABELS[key]),
+                                help=t("Focus is measured when a folder is scanned: the sharpness of the photo's sharpest part. "
+                                       "Blurriest first finds missed focus and camera shake."))
+        label_arg = None if label_filter == "Any" else ("" if label_filter == "None" else label_filter)
+        search_results = PhotoCatalog(lib_db).search(q, r_min, label=label_arg, sort=sort) if rec else []
         if rec and not search_results:
             st.caption(t("No photos match this search / star filter."))
         if search_results and tab_visible():
@@ -139,7 +173,7 @@ def library_section(ctx) -> None:
                 entry_path = Path(entry["path"])
                 with grid_cols[grid_index % 4]:
                     try:
-                        st.image(str(thumbnail(entry_path, user_data_dir() / "thumbs")), caption=f"{'⭐' * int(entry['rating'])} {entry_path.name}", use_container_width=True)
+                        st.image(str(thumbnail(entry_path, user_data_dir() / "thumbs")), caption=grid_caption(entry), use_container_width=True)
                     except (OSError, ValueError):
                         st.caption(t("{0} (no preview)").format(t(entry_path.name)))
                     if st.button(t("✏️ Edit"), key=f"lib-edit-{image_digest(str(entry_path).encode('utf-8'))[:16]}", use_container_width=True):
@@ -158,6 +192,8 @@ def library_section(ctx) -> None:
             is_rejected = "rejected" in existing["tags"]
 
             st.caption(t(f"{cursor + 1} / {len(rec)} — {Path(current_path).name}" + (" — 🚫 rejected" if is_rejected else "")))
+            if existing["focus"] is not None:
+                st.caption(score_caption(existing))
             write_xmp = st.checkbox(
                 t("Also write ratings and tags to XMP sidecars"), key="lib-xmp-write",
                 help=t("Saves each rating, reject flag and tag change in a .xmp file next to the photo, which "
@@ -165,8 +201,8 @@ def library_section(ctx) -> None:
                      "they hold. Ratings already in sidecars are always read when a folder is first scanned."),
             )
 
-            def _save(rating: int, tags) -> None:
-                problem = save_rating(catalog, current_path, rating, tags, write_xmp=write_xmp)
+            def _save(rating: int, tags, label: str | None = None) -> None:
+                problem = save_rating(catalog, current_path, rating, tags, write_xmp=write_xmp, label=label)
                 if problem:
                     st.toast(t(problem), icon="⚠️")
             try:
@@ -204,6 +240,18 @@ def library_section(ctx) -> None:
                     new_tags = [t for t in existing["tags"] if t != "rejected"] if is_rejected else existing["tags"] + ["rejected"]
                     _save(existing["rating"], new_tags)
                     request_rerun()
+
+                # Colour labels (F21): keys 6-9 = Red/Yellow/Green/Blue, as in Lightroom. Keep this button
+                # order in sync with app/ui/static/library_shortcuts.html.
+                st.caption(t("Colour label (keys 6-9)"))
+                label_cols = st.columns(len(COLOR_LABELS) + 1)
+                for column, name in zip(label_cols, ("", *COLOR_LABELS)):
+                    mark = "✔ " if existing["label"] == name else ""
+                    text = mark + (t("None") if not name else LABEL_DOTS[name])
+                    if column.button(text, key=f"lib-label-{name or 'none'}", use_container_width=True,
+                                     help=t(name) if name else t("No colour label")):
+                        _save(existing["rating"], existing["tags"], label=name)
+                        request_rerun()
 
                 visible_tags = ", ".join(t for t in existing["tags"] if t != "rejected")
                 tags_text = st.text_input(t("Tags (comma-separated)"), value=visible_tags, key=f"lib-tags-{cursor}")

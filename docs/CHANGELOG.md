@@ -7,6 +7,18 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-17 -- Culling scores and colour labels (F20, F21)
+
+- `app/culling.py`: each scanned photo gets a **Focus** score (90th-percentile tile Laplacian
+  variance above the noise floor, log scale, calibrated on real photos: sharp ~80-100, a 4 px blur
+  under 25) and its clipped highlight/shadow share, from a ~1024 px preview (RAW: the embedded
+  JPEG), cached per file modification time. Library: sort by Sharpest/Blurriest first, a 〰️ mark
+  and "likely blurry" under the threshold.
+- Colour labels (Red/Yellow/Green/Blue/Purple, Lightroom's `xmp:Label` values): buttons and keys
+  6-9 in Rate & Flag, a filter, read from sidecars on scan and written with the rating when sidecar
+  writing is on (a rating change keeps the label). The catalog gains `label`, `focus`, `highlights`,
+  `shadows`, `scored_mtime` columns, added to an older catalog in place. Tests: `tests/test_culling.py`.
+
 ## 2026-10-17 -- LUTs (F17)
 
 - Curves & Color > 🎞️ LUT: a `.cube` 3D or 1D LUT from the LUT library (`app/lut.py`,

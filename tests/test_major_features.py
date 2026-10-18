@@ -147,15 +147,17 @@ def test_photo_catalog_supports_rating_tags_and_search(tmp_path):
 
     results = catalog.search("portrait", minimum_rating=4)
 
-    assert results == [{"path": "portraits/one.jpg", "rating": 5, "tags": ["favorite", "portrait"]}]
+    assert [{k: r[k] for k in ("path", "rating", "tags")} for r in results] == [{"path": "portraits/one.jpg", "rating": 5, "tags": ["favorite", "portrait"]}]
 
 
 def test_photo_catalog_get_returns_a_default_for_an_unseen_path(tmp_path):
     catalog = PhotoCatalog(tmp_path / "photos.sqlite")
     catalog.upsert("portraits/one.jpg", rating=4, tags=["favorite"])
 
-    assert catalog.get("portraits/one.jpg") == {"path": "portraits/one.jpg", "rating": 4, "tags": ["favorite"]}
-    assert catalog.get("never/scanned.jpg") == {"path": "never/scanned.jpg", "rating": 0, "tags": []}
+    assert catalog.get("portraits/one.jpg") == {"path": "portraits/one.jpg", "rating": 4, "tags": ["favorite"], "label": "",
+                                                "focus": None, "highlights": None, "shadows": None}
+    assert catalog.get("never/scanned.jpg") == {"path": "never/scanned.jpg", "rating": 0, "tags": [], "label": "",
+                                                "focus": None, "highlights": None, "shadows": None}
 
 
 def test_photo_catalog_closes_every_connection_it_opens(tmp_path, monkeypatch):

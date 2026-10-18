@@ -541,7 +541,7 @@ def test_rescanning_a_folder_keeps_ratings(tmp_path):
     index_folder(photo.parent, database)
     PhotoCatalog(database).upsert(photo, rating=4, tags=["keeper"])
     index_folder(photo.parent, database)
-    assert PhotoCatalog(database).get(photo) == {"path": str(photo), "rating": 4, "tags": ["keeper"]}
+    assert {k: v for k, v in PhotoCatalog(database).get(photo).items() if k in ("path", "rating", "tags")} == {"path": str(photo), "rating": 4, "tags": ["keeper"]}
 
 
 def test_library_thumbnails_are_cached_and_cover_raw(tmp_path):

@@ -123,7 +123,8 @@ Pillow / NumPy / OpenCV / tifffile / optional rawpy / optional torch (GPU pack: 
 - `app/edit_history.py` — Undo/Redo recipe history (capped at 200 steps) and named snapshots.
 - `app/project_bundle.py` — Save/Load Project (`.photoproject` v2; layers as `layers/stack.json` + `layers/<id>.png`). `ProjectBundle.load()` still opens the original v1 format (the old writer is kept only as a test fixture, `tests/legacy_project.py`).
 - `app/reliability.py` — archive validation (`validate_project_archive()`: real decompressed-byte-count enforcement, path-traversal/drive-letter checks, manifest-reference checks) guarding the project format against a malicious `.photoproject` zip; image validation, request ids, digests.
-- `app/library.py` — folder scanning/indexing into the catalog, cached thumbnails, `save_rating()` (catalog + optional XMP sidecar).
+- `app/library.py` — folder scanning/indexing into the catalog (with culling scores), cached thumbnails, `save_rating()` (catalog + optional XMP sidecar; rating, tags, colour label).
+- `app/culling.py` — culling scores (F20): `score_image()` (focus 0-100, clipped highlights/shadows %), `score_file()` from a cheap preview, `is_likely_blurry()`.
 - `app/xmp_sidecar.py` — XMP sidecars: read/write `xmp:Rating` (-1 = rejected) and `dc:subject` keywords, keeping the rest of an existing sidecar.
 - `app/presets.py` (built-in named looks) / `app/custom_presets.py` (`PresetStore`, user-saved) / `app/preset_exchange.py` (JSON export/import).
 - `app/batch.py` / `app/batch_release.py` — folder batch processing, filename templates, ZIP delivery; `recipe_to_options()` in `app/recipe_options.py` converts a saved recipe into backend `options` shape for "sync settings across a batch." `export_multiple()` is a different axis (one photo, several `EXPORT_PROFILES` variants zipped together) — "Export As," not batch processing.

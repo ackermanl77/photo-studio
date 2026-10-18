@@ -61,8 +61,15 @@ def read_sidecar(photo: str | Path) -> dict | None:
     except (ET.ParseError, OSError):
         return None
     rating = None
+    label = ""
     tags: list[str] = []
     for description in _descriptions(root):
+        raw_label = description.get(_q(XMP_NS, "Label"))
+        label_element = description.find(_q(XMP_NS, "Label"))
+        if raw_label is None and label_element is not None:
+            raw_label = label_element.text
+        if raw_label and not label:
+            label = raw_label.strip()
         raw = description.get(_q(XMP_NS, "Rating"))
         element = description.find(_q(XMP_NS, "Rating"))
         if raw is None and element is not None:
@@ -80,6 +87,7 @@ def read_sidecar(photo: str | Path) -> dict | None:
         "rating": 0 if rating is None or rejected else max(0, min(5, rating)),
         "rejected": rejected,
         "tags": [tag for tag in dict.fromkeys(tags) if tag != REJECTED_TAG],
+        "label": label,
     }
 
 
@@ -103,9 +111,10 @@ def _new_tree() -> ET.ElementTree:
     return ET.ElementTree(root)
 
 
-def write_sidecar(photo: str | Path, rating: int, tags, rejected: bool = False) -> Path:
+def write_sidecar(photo: str | Path, rating: int, tags, rejected: bool = False, label: str | None = None) -> Path:
     """Write ``rating`` (0-5; ``-1`` when ``rejected``) and ``tags`` into ``photo``'s sidecar,
-    creating it when there is none. Returns the sidecar's path. Raises OSError when it can't be
+    creating it when there is none, and ``label`` into xmp:Label unless it is None ("" removes it).
+    Returns the sidecar's path. Raises OSError when it can't be
     written; an existing sidecar that isn't valid XML is left alone (ValueError)."""
     path = find_sidecar(photo) or sidecar_candidates(photo)[0]
     if path.is_file():
@@ -133,6 +142,13 @@ def write_sidecar(photo: str | Path, rating: int, tags, rejected: bool = False) 
                 description.remove(element)
     first = descriptions[0]
     first.set(_q(XMP_NS, "Rating"), value)
+    if label is not None:
+        for description in descriptions:
+            description.attrib.pop(_q(XMP_NS, "Label"), None)
+            for element in description.findall(_q(XMP_NS, "Label")):
+                description.remove(element)
+        if label:
+            first.set(_q(XMP_NS, "Label"), label)
     keywords = [tag for tag in dict.fromkeys(t.strip() for t in tags if t and t.strip()) if tag != REJECTED_TAG]
     if keywords:
         bag = ET.SubElement(ET.SubElement(first, _q(DC_NS, "subject")), _q(RDF_NS, "Bag"))
