@@ -36,6 +36,16 @@ def render_control(key: str, container=None, *, label: str | None = None, disabl
         return target.slider(*args, **kwargs)
     if widget == "checkbox":
         return target.checkbox(text, value=control.default, **kwargs)
+    if widget == "selectbox" and control.kind == "lut":
+        # The LUT library (app.lut, F17): "" = none, then every imported LUT; a name a restored
+        # recipe or preset refers to but this computer doesn't have stays selectable, marked missing.
+        from app.lut import list_luts
+
+        names = list_luts()
+        current = st.session_state.get(control.widget_key, "")
+        choices = ["", *names, *([current] if current and current not in names else [])]
+        kwargs["format_func"] = lambda name: t("None") if not name else (name if name in names else t("{0} (missing)").format(name))
+        return target.selectbox(text, choices, index=0, **kwargs)
     if widget == "selectbox":
         choices = list(control.choices)
         kwargs["format_func"] = t_format(format_func) if format_func is not None else t_option

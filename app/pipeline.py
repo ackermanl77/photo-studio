@@ -260,6 +260,8 @@ def run_pipeline(
             processor.apply_curves(options["curve"])
         if options.get("curve_channels"):
             processor.apply_channel_curves(options["curve_channels"])
+        # LUT (F17): last in the colour chain, so the look sits on top of the photo's own grade.
+        processor.apply_lut(options.get("lut"), options.get("lut_amount", 100))
 
         checkpoint()
         # Detail

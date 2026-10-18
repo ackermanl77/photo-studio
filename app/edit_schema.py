@@ -69,6 +69,8 @@ def _control_option_spec(control) -> OptionSpec:
         return OptionSpec("choice", choices=control.choices, nullable=control.option_nullable, stage=control.stage)
     if kind == "bool":
         return OptionSpec("bool", nullable=control.option_nullable, stage=control.stage)
+    if kind == "lut":
+        return OptionSpec("lut", nullable=control.option_nullable, stage=control.stage)
     low, high = control.option_domain or (control.to_option(control.minimum), control.to_option(control.maximum))
     return OptionSpec(kind, low, high, nullable=control.option_nullable, stage=control.stage)
 
@@ -164,6 +166,16 @@ def _check_value(key: str, spec: OptionSpec, value):
     if kind == "bool":
         if not isinstance(value, bool):
             raise OptionsError(f"{key} must be true or false, got {value!r}")
+        return value
+    if kind == "lut":
+        # A LUT library name (app.lut) -- never a path; "" means none. Whether the file exists is
+        # checked when the pipeline loads it, with a message naming the LUT.
+        from app.lut import is_valid_name
+
+        if value == "":
+            return None
+        if not is_valid_name(value):
+            raise OptionsError(f"{key} must be the name of a LUT in the LUT library, got {value!r}")
         return value
     if kind == "choice":
         if value not in spec.choices:
@@ -279,6 +291,10 @@ def _sanitize_control(control: RecipeControl, value):
         return value if isinstance(value, bool) else control.default
     if control.kind == "choice":
         return value if value in control.choices else control.default
+    if control.kind == "lut":
+        from app.lut import is_valid_name
+
+        return value if value == "" or is_valid_name(value) else control.default
     if not _is_number(value):
         return control.default
     clamped = min(max(float(value), control.minimum), control.maximum)

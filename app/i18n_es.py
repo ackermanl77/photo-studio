@@ -765,4 +765,19 @@ ES = {
     "Zoomed photo. Drag to pan, or use the arrow keys (Shift = faster).":
         "Foto ampliada. Arrastra para desplazarte o usa las flechas (Mayús = más rápido).",
     "Drag the photo to pan (arrow keys work too).": "Arrastra la foto para desplazarte (también sirven las flechas).",
+    # LUT (F17)
+    "LUT": "LUT",
+    "A 3D LUT (.cube) -- a film emulation or creative look -- applied after the other colour and curve adjustments.":
+        "Un LUT 3D (.cube) -- una emulación de película o un look creativo -- aplicado después de los demás ajustes de color y de curvas.",
+    "LUT strength": "Intensidad del LUT",
+    "How much of the LUT's look to apply: 100 is the LUT as designed, lower blends it with the photo.":
+        "Cuánto aplicar del look del LUT: 100 es el LUT tal como se diseñó; menos lo mezcla con la foto.",
+    "🎞️ LUT": "🎞️ LUT",
+    "Apply a 3D LUT (.cube) -- a film emulation or creative look from Resolve, Premiere or a LUT pack. It is applied after the other colour adjustments.":
+        "Aplica un LUT 3D (.cube) -- una emulación de película o un look creativo de Resolve, Premiere o un pack de LUTs. Se aplica después de los demás ajustes de color.",
+    "Import a LUT (.cube)": "Importar un LUT (.cube)",
+    "The LUT is copied into the app's data folder and listed in the LUT choice.":
+        "El LUT se copia a la carpeta de datos de la app y aparece en la lista de LUTs.",
+    "LUT '{0}' imported": "LUT «{0}» importado",
+    "{0} (missing)": "{0} (no está en esta PC)",
 }

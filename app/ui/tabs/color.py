@@ -105,6 +105,32 @@ def grading_section(ctx) -> None:
         values["cg_balance"] = render_control("cg_balance")
 
 
+def lut_section(ctx) -> None:
+    """LUT (F17): a .cube look from the library, its strength, and importing new ones."""
+    from app import lut as lut_module
+
+    values = ctx.values
+    with st.expander(t(section_label("🎞️ LUT", "lut")), expanded=False, key="sec-lut"):
+        st.caption(t("Apply a 3D LUT (.cube) -- a film emulation or creative look from Resolve, Premiere or a LUT pack. It is applied after the other colour adjustments."))
+        values["lut"] = render_control("lut")
+        values["lut_amount"] = render_control("lut_amount", disabled=not values["lut"])
+        upload = st.file_uploader(t("Import a LUT (.cube)"), type=["cube"], key="lut-upload",
+                                  help=t("The LUT is copied into the app's data folder and listed in the LUT choice."))
+        if upload is not None:
+            imported = st.session_state.setdefault("_luts_imported", set())
+            if upload.file_id not in imported:  # a file_uploader keeps its file across reruns
+                imported.add(upload.file_id)
+                try:
+                    name = lut_module.import_lut(upload.getvalue(), upload.name)
+                except ValueError as error:
+                    st.error(t("⚠️ {0}").format(t(str(error))))
+                else:
+                    st.toast(t("LUT '{0}' imported").format(name), icon="🎞️")
+                    st.session_state["_pending_restore"] = {"lut": name}
+                    request_rerun()
+        section_reset_button("lut", "LUT")
+
+
 def soft_proof_section(ctx) -> None:
     with st.expander(t("🎯 Soft Proof: Gamut Warning"), expanded=False):
         source_icc_bytes = ctx.source.info.get("icc_profile")

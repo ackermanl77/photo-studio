@@ -55,7 +55,7 @@ class Control:
     key: str  # recipe key
     widget_key: str | None  # session_state key of its widget (None: kept in session_state by an editor)
     label: str
-    kind: str  # "int", "float", "bool", "choice"
+    kind: str  # "int", "float", "bool", "choice", "lut" (a LUT library name, app.lut; "" = none)
     default: object
     minimum: float | None = None
     maximum: float | None = None
@@ -81,7 +81,7 @@ class Control:
     def widget_type(self) -> str:
         if self.widget:
             return self.widget
-        return {"bool": "checkbox", "choice": "selectbox"}.get(self.kind, "slider")
+        return {"bool": "checkbox", "choice": "selectbox", "lut": "selectbox"}.get(self.kind, "slider")
 
     def to_option(self, value):
         return TRANSFORMS[self.transform](value) if self.transform else value
@@ -225,6 +225,11 @@ CONTROLS: tuple[Control, ...] = (
     )),
     _slider("cg_balance", "cg-balance", "Balance", -100, 100, section="grading", option=True, stage=_D,
             help="Shifts where shadows end and highlights begin -- negative gives shadows more of the tonal range, positive gives highlights more."),
+    # --- LUT (F17): a .cube look from the user's LUT library, last in the colour chain ------------------
+    Control("lut", "lut-name", "LUT", "lut", "", section="lut", option="lut", stage=_D, option_nullable=True,
+            help="A 3D LUT (.cube) -- a film emulation or creative look -- applied after the other colour and curve adjustments."),
+    _slider("lut_amount", "lut-amount", "LUT strength", 0, 100, 100, section="lut", option=True, stage=_D,
+            help="How much of the LUT's look to apply: 100 is the LUT as designed, lower blends it with the photo."),
     # --- HSL color mixer (feeds "hsl_bands") --------------------------------------------------------------
     *(_slider(f"hsl_{band.lower()}_{channel}", f"hsl-{band.lower()}-{channel[0]}", label, -100, 100, section="hsl", composite="hsl_bands")
       for band in HSL_BAND_ORDER for channel, label in (("hue", "Hue"), ("sat", "Saturation"), ("lum", "Luminance"))),
