@@ -7,6 +7,20 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-18 -- Collections, saved searches, virtual copies, two-up compare (F21)
+
+- `PhotoCatalog` gains three tables (created in older catalogs in place): `collections` (name,
+  path), `saved_searches` (name, the search() arguments as JSON) and `virtual_copies` (id, path,
+  name, recipe JSON). `search(collection=...)` filters by collection.
+- Library Catalog: a Collection filter, a Saved searches expander (save / apply -- through
+  `_lib_pending_search`, applied before the filter widgets are created -- / delete), virtual copies
+  as extra grid tiles, and under Rate & Flag (outside the shortcut-driven button container):
+  Collections (add / remove), Virtual copies (save the editor's recipe, painted masks inlined,
+  against the open file -- `open_library_photo()` now records `_library_open_path`; edit = open the
+  file and restore the copy's recipe; update; delete) and a Two-up compare (larger previews in
+  `thumbs-large`, scores, +1 star / reject per side, swap). Tests:
+  `tests/test_library_organisation.py`.
+
 ## 2026-10-17 -- Culling scores and colour labels (F20, F21)
 
 - `app/culling.py`: each scanned photo gets a **Focus** score (90th-percentile tile Laplacian

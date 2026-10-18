@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -229,6 +232,12 @@ class PhotoCatalog:
                                         ("scored_mtime", "REAL DEFAULT 0")):
                 if column not in columns:
                     connection.execute(f"ALTER TABLE photos ADD COLUMN {column} {declaration}")
+            # Library organisation (F21): collections, saved searches and virtual copies.
+            connection.execute("CREATE TABLE IF NOT EXISTS collections (name TEXT NOT NULL, path TEXT NOT NULL, "
+                               "PRIMARY KEY (name, path))")
+            connection.execute("CREATE TABLE IF NOT EXISTS saved_searches (name TEXT PRIMARY KEY, params TEXT NOT NULL)")
+            connection.execute("CREATE TABLE IF NOT EXISTS virtual_copies (id TEXT PRIMARY KEY, path TEXT NOT NULL, "
+                               "name TEXT NOT NULL, recipe TEXT NOT NULL, created REAL NOT NULL)")
 
     @contextmanager
     def _connect(self):
@@ -312,15 +321,113 @@ class PhotoCatalog:
                 (float(scores["focus"]), float(scores["highlights"]), float(scores["shadows"]), float(mtime), str(path)),
             )
 
-    def search(self, text: str = "", minimum_rating: int = 0, label: str | None = None, sort: str = "rating") -> list[dict[str, object]]:
+    def search(self, text: str = "", minimum_rating: int = 0, label: str | None = None, sort: str = "rating",
+               collection: str | None = None) -> list[dict[str, object]]:
         """Photos whose path or tags contain `text`, rated at least `minimum_rating`. `label`: None =
-        any, "" = no label, or one colour. `sort`: one of SEARCH_SORTS."""
+        any, "" = no label, or one colour. `sort`: one of SEARCH_SORTS. `collection`: only its photos."""
         pattern = f"%{text}%"
         where, params = "rating >= ? AND (path LIKE ? OR tags LIKE ?)", [minimum_rating, pattern, pattern]
         if label is not None:
             where += " AND label = ?"
             params.append(label)
+        if collection:
+            where += " AND path IN (SELECT path FROM collections WHERE name = ?)"
+            params.append(collection)
         order = SEARCH_SORTS.get(sort, SEARCH_SORTS["rating"])
         with self._connect() as connection:
             rows = connection.execute(f"SELECT {self._COLUMNS} FROM photos WHERE {where} ORDER BY {order}", params).fetchall()
         return [self._entry(row) for row in rows]
+
+    # ---- collections (F21) ----
+    def add_to_collection(self, name: str, path: str | Path) -> None:
+        name = name.strip()
+        if not name:
+            raise ValueError("A collection needs a name.")
+        with self._connect() as connection:
+            connection.execute("INSERT OR IGNORE INTO collections(name, path) VALUES (?, ?)", (name, str(path)))
+
+    def remove_from_collection(self, name: str, path: str | Path) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM collections WHERE name = ? AND path = ?", (name, str(path)))
+
+    def collections(self) -> dict[str, int]:
+        """Collection name -> number of photos, by name."""
+        with self._connect() as connection:
+            rows = connection.execute("SELECT name, COUNT(*) FROM collections GROUP BY name ORDER BY name COLLATE NOCASE").fetchall()
+        return {name: count for name, count in rows}
+
+    def collections_of(self, path: str | Path) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT name FROM collections WHERE path = ? ORDER BY name COLLATE NOCASE", (str(path),)).fetchall()
+        return [row[0] for row in rows]
+
+    def delete_collection(self, name: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM collections WHERE name = ?", (name,))
+
+    # ---- saved searches (F21) ----
+    SEARCH_KEYS = ("text", "minimum_rating", "label", "sort", "collection")
+
+    def save_search(self, name: str, params: dict) -> None:
+        """Store a search under `name`: the keyword arguments of search() (unknown keys dropped)."""
+        name = name.strip()
+        if not name:
+            raise ValueError("A saved search needs a name.")
+        clean = {key: params[key] for key in self.SEARCH_KEYS if key in params}
+        with self._connect() as connection:
+            connection.execute("INSERT INTO saved_searches(name, params) VALUES (?, ?) ON CONFLICT(name) DO UPDATE "
+                               "SET params = excluded.params", (name, json.dumps(clean)))
+
+    def saved_searches(self) -> dict[str, dict]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT name, params FROM saved_searches ORDER BY name COLLATE NOCASE").fetchall()
+        out = {}
+        for name, params in rows:
+            try:
+                data = json.loads(params)
+            except ValueError:
+                continue
+            if isinstance(data, dict):
+                out[name] = {key: data[key] for key in self.SEARCH_KEYS if key in data}
+        return out
+
+    def delete_search(self, name: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM saved_searches WHERE name = ?", (name,))
+
+    # ---- virtual copies (F21): another recipe for the same file ----
+    def add_virtual_copy(self, path: str | Path, name: str, recipe: dict) -> str:
+        copy_id = uuid.uuid4().hex[:12]
+        with self._connect() as connection:
+            connection.execute("INSERT INTO virtual_copies(id, path, name, recipe, created) VALUES (?, ?, ?, ?, ?)",
+                               (copy_id, str(path), name.strip() or "Virtual copy", json.dumps(recipe), time.time()))
+        return copy_id
+
+    def update_virtual_copy(self, copy_id: str, recipe: dict | None = None, name: str | None = None) -> None:
+        with self._connect() as connection:
+            if recipe is not None:
+                connection.execute("UPDATE virtual_copies SET recipe = ? WHERE id = ?", (json.dumps(recipe), copy_id))
+            if name is not None and name.strip():
+                connection.execute("UPDATE virtual_copies SET name = ? WHERE id = ?", (name.strip(), copy_id))
+
+    def delete_virtual_copy(self, copy_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM virtual_copies WHERE id = ?", (copy_id,))
+
+    def virtual_copies(self, path: str | Path | None = None) -> list[dict[str, object]]:
+        """Virtual copies (of `path`, or all), oldest first: {"id", "path", "name", "recipe"}."""
+        query = "SELECT id, path, name, recipe FROM virtual_copies"
+        params: tuple = ()
+        if path is not None:
+            query += " WHERE path = ?"
+            params = (str(path),)
+        with self._connect() as connection:
+            rows = connection.execute(query + " ORDER BY created", params).fetchall()
+        out = []
+        for copy_id, copy_path, name, recipe in rows:
+            try:
+                data = json.loads(recipe)
+            except ValueError:
+                data = {}
+            out.append({"id": copy_id, "path": copy_path, "name": name, "recipe": data if isinstance(data, dict) else {}})
+        return out
