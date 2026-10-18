@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import uuid
+from io import BytesIO
 from pathlib import Path
 
 import streamlit as st
@@ -275,8 +276,70 @@ def compare_section(catalog: PhotoCatalog, rec: list, cursor: int) -> None:
         request_rerun()
 
 
+# ---- HDR merge and panorama (F18) ----
+HDR_METHOD_LABELS = {"fusion": "Exposure fusion (natural, no exposure times needed)",
+                     "debevec": "HDR merge + tone map (stronger; needs EXIF exposure times)"}
+
+
+def merge_section() -> None:
+    """Merge bracketed exposures into one HDR photo, or stitch overlapping frames into a panorama;
+    the result opens in the editor as a new 16-bit source."""
+    from app.merge import MAX_INPUTS, MergeError, encode_16bit_tiff, load_source, merge_hdr, preview_image, stitch_panorama
+
+    kind = st.radio(t("Merge"), ["HDR", "Panorama"], horizontal=True, key="merge-kind", format_func=t_option)
+    if kind == "HDR":
+        st.caption(t("Two or more shots of the same scene at different exposures (a bracket, ideally from a "
+                     "tripod). Small hand-held shifts are aligned."))
+    else:
+        st.caption(t("Two or more overlapping shots (about a third overlap), taken by turning the camera from "
+                     "one spot."))
+    files = st.file_uploader(t("Photos to merge"), type=uploader_types(), accept_multiple_files=True, key="merge-up")
+    if kind == "HDR":
+        method = st.selectbox(t("Method"), list(HDR_METHOD_LABELS), key="merge-hdr-method",
+                              format_func=lambda key: t(HDR_METHOD_LABELS[key]))
+        align = st.checkbox(t("Align the photos"), value=True, key="merge-align")
+    else:
+        crop = st.checkbox(t("Crop to the stitched area"), value=True, key="merge-crop",
+                           help=t("Cuts away the ragged, empty edge a panorama has after warping"))
+        scans = st.checkbox(t("Flat subject (documents, a mural)"), value=False, key="merge-scans",
+                            help=t("For photos taken by moving the camera along a flat subject instead of turning it"))
+    count = len(files or [])
+    if st.button(t("🔀 Merge"), key="merge-run", disabled=not 2 <= count <= MAX_INPUTS, use_container_width=True):
+        try:
+            with st.spinner(t("Merging {0} photos…").format(count)):
+                sources = [load_source(f.getvalue(), f.name) for f in files]
+                pixels = (merge_hdr(sources, method, align=align) if kind == "HDR"
+                          else stitch_panorama(sources, crop=crop, scans=scans))
+                stem = Path(files[0].name).stem
+                name = f"{stem}-{'hdr' if kind == 'HDR' else 'pano'}.tif"
+                preview = BytesIO()
+                preview_image(pixels).save(preview, format="JPEG", quality=90)
+                st.session_state["_merge_result"] = (name, encode_16bit_tiff(pixels), preview.getvalue(),
+                                                     f"{pixels.shape[1]} × {pixels.shape[0]}")
+        except MergeError as error:
+            st.error(t(str(error)))
+        except (OSError, ValueError) as error:
+            st.error(t("Couldn't read the photos: {0}").format(error))
+    elif count == 1 or count > MAX_INPUTS:
+        st.caption(t("Choose 2 to {0} photos.").format(MAX_INPUTS))
+    result = st.session_state.get("_merge_result")
+    if result:
+        name, tiff, preview, size = result
+        st.image(preview, caption=f"{name} · {size}", use_container_width=True)
+        open_col, download_col = st.columns(2)
+        if open_col.button(t("✏️ Open in the editor"), key="merge-open", use_container_width=True,
+                           help=t("Opens the result as a new 16-bit photo; the current adjustments are kept (↺ resets them)")):
+            st.session_state["restored_source_bytes"] = tiff
+            st.session_state["restored_source_name"] = name
+            st.session_state["_main_upload_generation"] = st.session_state.get("_main_upload_generation", 0) + 1
+            st.session_state.pop("_library_open_path", None)
+            request_rerun()
+        download_col.download_button(t("⬇️ Download 16-bit TIFF"), tiff, file_name=name, mime="image/tiff",
+                                     key="merge-download", use_container_width=True)
+
+
 def library_section(ctx) -> None:
-    more_mode = st.radio(t("Tool"), ["Library Catalog", "Batch Processor", "System Health"], horizontal=True, label_visibility="collapsed", key="more-mode", format_func=t_option)
+    more_mode = st.radio(t("Tool"), ["Library Catalog", "Batch Processor", "HDR & Panorama", "System Health"], horizontal=True, label_visibility="collapsed", key="more-mode", format_func=t_option)
     if more_mode == "Library Catalog":
         lib_folder = st.text_input(t("Folder"), str(Path.home() / "Pictures"), key="lib-f-in")
         # The per-user data folder (migrated from the old ~/.photo-studio on first use).
@@ -512,6 +575,8 @@ def library_section(ctx) -> None:
             st.download_button(
                 t("Download ZIP"), functools.partial(Path(batch_result[0]).read_bytes), "batch.zip", "application/zip", key="b-dl",
             )
+    elif more_mode == "HDR & Panorama":
+        merge_section()
     else:
         from app.diagnostics import check_environment, logs_folder, open_folder
         st.dataframe([{"check": c.name, "status": c.status, "message": c.message} for c in check_environment()], use_container_width=True)

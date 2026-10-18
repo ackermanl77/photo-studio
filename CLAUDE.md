@@ -123,6 +123,7 @@ Pillow / NumPy / OpenCV / tifffile / optional rawpy / optional torch (GPU pack: 
 - `app/edit_history.py` — Undo/Redo recipe history (capped at 200 steps) and named snapshots.
 - `app/project_bundle.py` — Save/Load Project (`.photoproject` v2; layers as `layers/stack.json` + `layers/<id>.png`). `ProjectBundle.load()` still opens the original v1 format (the old writer is kept only as a test fixture, `tests/legacy_project.py`).
 - `app/reliability.py` — archive validation (`validate_project_archive()`: real decompressed-byte-count enforcement, path-traversal/drive-letter checks, manifest-reference checks) guarding the project format against a malicious `.photoproject` zip; image validation, request ids, digests.
+- `app/merge.py` — HDR merge (align + exposure fusion or Debevec + tone map) and panorama stitching (`cv2.Stitcher`, cropped to content), OpenCV only; the result is a 16-bit TIFF opened as the source (Library & Batch > HDR & Panorama). Streamlit-free.
 - `app/library.py` — folder scanning/indexing into the catalog (with culling scores), cached thumbnails, `save_rating()` (catalog + optional XMP sidecar; rating, tags, colour label).
 - `app/culling.py` — culling scores (F20): `score_image()` (focus 0-100, clipped highlights/shadows %), `score_file()` from a cheap preview, `is_likely_blurry()`.
 - `app/xmp_sidecar.py` — XMP sidecars: read/write `xmp:Rating` (-1 = rejected) and `dc:subject` keywords, keeping the rest of an existing sidecar.

@@ -329,7 +329,7 @@ Undo/Redo/Reset live in the canvas header bar above, not in this tab — see
 
 ## 13. Library & Batch (✦ Presets & Library → ☰ Library & Batch)
 
-Three modes, selected via the radio buttons at the top of the tab.
+Four modes, selected via the radio buttons at the top of the tab.
 
 ### Library Catalog
 
@@ -395,6 +395,27 @@ Three modes, selected via the radio buttons at the top of the tab.
 - **Run Batch** — shows a live progress bar and per-file status as it processes, writing each
   result into a ZIP (with a `report.csv`) as it goes, ending in a results table and a **Download ZIP**
   button. **⏹ Stop** ends a running batch; the files finished so far stay in the ZIP.
+
+### HDR & Panorama
+
+Combines several photos into one new photo, which opens in the editor as a 16-bit file, so the whole
+edit keeps the extra range.
+
+- **HDR**: two or more shots of the same scene at different exposures (a bracket; a tripod helps,
+  but small hand-held shifts are aligned when **Align the photos** is on). **Method**:
+  - **Exposure fusion** (the default) blends the best-exposed parts of each shot. It looks natural
+    and needs nothing but the photos.
+  - **HDR merge + tone map** builds a true high-dynamic-range image from the shots' exposure times
+    (read from their EXIF) and tone-maps it, which gives a stronger, flatter look. Photos without
+    exposure times, or all at the same one, are refused with an explanation.
+- **Panorama**: two or more overlapping shots (about a third overlap), taken by turning the camera
+  from one spot. **Crop to the stitched area** removes the ragged empty edge. Tick **Flat subject**
+  for photos taken by moving the camera along a flat subject (documents, a mural). Photos that don't
+  overlap enough are refused with the reason.
+
+Choose the photos (2 to 12, any format the editor opens, RAW included) and click **🔀 Merge**. The
+result is previewed with its size; **✏️ Open in the editor** opens it as a new photo (your current
+adjustments are kept; **↺** resets them) and **⬇️ Download 16-bit TIFF** saves it.
 
 ### System Health
 

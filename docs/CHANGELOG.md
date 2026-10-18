@@ -7,6 +7,22 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-18 -- HDR merge and panorama (F18)
+
+- `app/merge.py` (OpenCV, no model): inputs decoded at full precision (`app.high_bit`; RAW at 16
+  bits) with their EXIF exposure time.
+  - HDR: aligned with `createAlignMTB` (on grey 8-bit copies, shifts applied to the float frames),
+    then exposure fusion (`createMergeMertens`, 0.1-99.9 % stretched back to 0..1) or Debevec
+    calibration + merge from the exposure times, tone-mapped with Reinhard (gamma 2.2); refused
+    without times or with equal times.
+  - Panorama: `cv2.Stitcher` (PANORAMA, or SCANS for flat subjects), with clear reasons for its
+    error codes, cropped to the largest rectangle of real pixels.
+  - The result is written as a zlib 16-bit TIFF and opened as the editor's source (`restored_source_bytes`).
+  - UI: Presets & Library > Library & Batch > **HDR & Panorama**.
+- Synthetic checks: a three-shot bracket (+-2 EV) brought clipping from 9.3 % (the middle shot) to
+  0.1 % (fusion) or 0 % (Debevec); a textured strip cut into three overlapping frames stitched back
+  to 1997 x 693 (panorama, 2.2 s) or 1996 x 697 (scans, 0.2 s). Tests: `tests/test_merge.py`.
+
 ## 2026-10-18 -- Collections, saved searches, virtual copies, two-up compare (F21)
 
 - `PhotoCatalog` gains three tables (created in older catalogs in place): `collections` (name,
