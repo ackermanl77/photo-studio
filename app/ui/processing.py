@@ -274,6 +274,7 @@ def build_options(ctx) -> dict:
     options["local_adjustments"] = [dict(layer["adjustments"]) for layer in ctx.own_mask_layers] or None
     options["aspect"] = ctx.aspect_code
     options["crop_box"] = list(ctx.crop_box) if ctx.crop_box else None
+    options["liquify"] = list(st.session_state.get("liquify_strokes", [])) or None
     return options
 
 

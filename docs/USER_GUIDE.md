@@ -44,7 +44,7 @@ The screen is split in two:
   | **☼ Basic** | ✨ Auto Enhance, 🎞️ Preset Look, Tone (exposure, contrast, highlights, shadows, whites, blacks), Color (white balance, saturation, vibrance, 🎯 Pick White Balance) and Presence (texture, clarity, dehaze) |
   | **🎨 Curves & Color** | RGB Tone Curve, Color Mixer (HSL), Black & White, Color Grading, LUT, Soft Proof |
   | **🔬 Detail** | Denoise, Color Noise, Sharpen |
-  | **⛶ Geometry** | Rotate & Straighten, Lens Corrections, Crop / Aspect Ratio |
+  | **⛶ Geometry** | Rotate & Straighten, Lens Corrections, 🌀 Liquify, Crop / Aspect Ratio |
   | **◉ Local** | three sub-tabs: ◉ Masks, 🩹 Repair, ◌ Portrait |
   | **◈ Layers** | image, text, shape and pen-path layers |
   | **✨ Effects** | post-crop vignette, film grain |
@@ -109,6 +109,26 @@ Corrects distortion from the lens/shooting angle.
 - **Vertical / Horizontal Keystone** — corrects converging lines from the shooting angle (e.g. a
   building shot from below). Not part of a lens profile — this depends on how you held the camera,
   not what lens you used.
+
+### 🌀 Liquify (⛶ Geometry)
+
+A warp brush, like Photoshop's Liquify. Choose a **Tool**, a **Brush size** (a percentage of the photo's
+short edge) and a **Strength**, then drag on the photo:
+
+- **Forward Warp** drags the pixels along your stroke.
+- **Bloat** / **Pucker** push the pixels away from, or pull them toward, the brush centre. A single
+  click works too.
+- **Twirl clockwise / counter-clockwise** turn the pixels around the brush centre.
+
+How the strokes behave:
+
+- **Stored as editable strokes:** **↶ Undo last stroke**, **✖ Clear Liquify** and the global Undo remove
+  them, and they are saved in projects.
+- **Resolution-independent:** the preview and the exported file warp the same way.
+- **Applied after the lens corrections**, before Masks, Repair and Crop, which see the warped photo.
+- **Kept with this photo only:** Liquify is never synced to other photos (batch sync, `--recipe`).
+
+With the keyboard, the arrow keys move the brush (Shift = 10×) and Space applies one stamp there.
 
 ## 5. Crop, Rotate & Straighten (⛶ Geometry)
 

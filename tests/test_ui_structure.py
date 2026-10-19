@@ -276,7 +276,7 @@ def test_every_editor_is_a_static_html_and_js_pair_with_no_python_built_script()
     from app import ui_editors
 
     names = {path.stem for path in ui_editors.EDITORS_DIR.glob("*.html")}
-    assert names == {"before_after", "curve", "paint", "picker", "crop", "pen", "pan"}
+    assert names == {"before_after", "curve", "paint", "picker", "crop", "pen", "pan", "liquify"}
     assert all((ui_editors.EDITORS_DIR / f"{name}.js").is_file() for name in names)
     source = open(ui_editors.__file__, encoding="utf-8").read()
     assert "addEventListener" not in source and "getElementById" not in source

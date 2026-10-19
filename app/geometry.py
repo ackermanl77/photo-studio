@@ -5,7 +5,8 @@ Masks and Repair tools draw against (they must agree with the pipeline on which 
 Order: rotate/flip first (it's how the photo is oriented, like EXIF orientation), then the lens
 corrections (distortion, perspective, chromatic aberration, vignette -- app.lens_corrections),
 then the straighten rotation, then -- when `constrain_crop` is on -- a crop to the largest centered
-rectangle with the frame's aspect ratio that contains no area the warps left uncovered. Without it,
+rectangle with the frame's aspect ratio that contains no area the warps left uncovered, and last the
+Liquify strokes (F23, app.liquify), drawn on that frame. Without it,
 distortion +35 left ~7 % pure-black corners and keystone/straighten smeared or blackened the edges
 (B9 in the improvement report).
 
@@ -31,7 +32,7 @@ _PROBE_LONG_EDGE = 600
 GEOMETRY_OPTION_KEYS = (
     "rotate", "flip_horizontal", "flip_vertical", "straighten", "constrain_crop",
     "lens_distortion", "lens_vignette_amount", "lens_vignette_midpoint", "lens_chromatic_aberration",
-    "lens_perspective_v", "lens_perspective_h",
+    "lens_perspective_v", "lens_perspective_h", "liquify",
 )
 
 
@@ -166,7 +167,12 @@ def apply_geometry(image: Image.Image, options: dict) -> Image.Image:
         # rather than painting them black.
         border = cv2.BORDER_CONSTANT if options.get("constrain_crop") else cv2.BORDER_REPLICATE
         image = straighten(image, options["straighten"], border=border)
-    return _crop_to_fractions(image, constrain_fractions(oriented, options))
+    image = _crop_to_fractions(image, constrain_fractions(oriented, options))
+    if options.get("liquify"):
+        from app.liquify import apply_liquify
+
+        image = apply_liquify(image, options["liquify"])
+    return image
 
 
 def geometry_output_size(source_size: tuple[int, int], options: dict) -> tuple[int, int]:

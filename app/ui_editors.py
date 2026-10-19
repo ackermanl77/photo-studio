@@ -306,6 +306,22 @@ def _pen_editor_html(background: Image.Image, key_prefix: str, points: list[dict
     return _render("pen", fields, config), display_h + 60
 
 
+def _liquify_editor_html(background: Image.Image, key_prefix: str, size: float, max_points: int) -> tuple[str, int]:
+    """Liquify (F23): drag on the photo to record one stroke, committed as {"points": [[x, y], ...]}
+    (fractions of the frame) when the pointer lifts -- the tool, size and strength come from the
+    widgets beside the editor, and the warp itself is rendered by the backend (app.liquify), so the
+    editor only draws the brush outline (`size`, a fraction of the short edge) and the stroke being
+    recorded. Arrow keys move the brush (Shift = 10x); Space/Enter applies one stamp there."""
+    display_w, display_h = _display_size(background)
+    fields = {
+        "label_wrap": _tx("Liquify brush. Drag on the photo to warp it; arrow keys move the brush (Shift = 10x), Space applies it there."),
+        "display_w": display_w, "display_h": display_h, "bg_b64": _png_b64(background),
+        "label_help": _tx("Drag on the photo to warp it with the chosen tool. Each stroke can be undone."),
+    }
+    config = {"hiddenSelector": f".st-key-{key_prefix}-hidden", "size": float(size), "maxPoints": int(max_points)}
+    return _render("liquify", fields, config), display_h + 40
+
+
 def _pan_viewer_html(
     view: Image.Image, key_prefix: str, center: tuple[float, float], zoom: float, image_size: tuple[int, int],
     max_display_height: int = 640,

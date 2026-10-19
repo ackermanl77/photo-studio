@@ -1,0 +1,9 @@
+<div style="background:var(--ps-panel);border-radius:8px;padding:8px;">
+  <div id="liq-wrap" tabindex="0" role="application" aria-label="{{label_wrap}}"
+       style="position:relative;width:100%;max-width:{{display_w}}px;line-height:0;touch-action:none;outline:none;">
+    <img id="liq-bg" src="data:image/png;base64,{{bg_b64}}" style="display:block;width:100%;height:auto;border-radius:4px;">
+    <canvas id="liq-canvas" width="{{display_w}}" height="{{display_h}}"
+            style="position:absolute;inset:0;width:100%;height:100%;cursor:none;"></canvas>
+  </div>
+  <div style="color:var(--ps-text-muted);font:12px system-ui;margin-top:6px;">{{label_help}}</div>
+</div>
