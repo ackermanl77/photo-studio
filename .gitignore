@@ -56,3 +56,6 @@ vendor/
 # OS
 Thumbs.db
 Desktop.ini
+
+# graphify knowledge-graph output (regenerated locally)
+graphify-out/
