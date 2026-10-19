@@ -252,6 +252,18 @@ the image renders.
 | **Adjustment** | An adjustment layer: Exposure, Contrast, Saturation, Temperature, Tint and Clarity applied to *everything below it* in the stack (the photo and the layers under it, not those above). Limit it to part of the photo with a layer mask (⚙️ Settings → a selection from the Masks tab) and fade it with its opacity; it has no pixels, so no blend mode or layer styles. In a layered PSD export it isn't a separate layer (its effect is in the composite). |
 | **PSD** | Upload a Photoshop file: each layer becomes an Image layer, with its name, opacity, blend mode and visibility, placed where it was in the document and stretched to the photo's frame. Layers inside a hidden group arrive hidden. Masks, clipping masks and fill opacity are applied to the pixels. **Skip the bottom layer** (on by default) leaves out the photo itself. Text, shapes and smart objects arrive rasterized, as Photoshop stored them. Adjustment layers, layer effects (shadows, glows, strokes) and vector masks aren't imported. Reads RGB and Grayscale PSDs at 8 or 16 bits, not PSB or CMYK. A PSD can also be opened as the photo itself, which opens its composite image. |
 
+**Gradient fills** — a Shape's fill, or a closed Pen path's, can be **Solid**, a **Linear
+gradient** (from the Fill Color to the **Gradient end color**, at an **Angle**: 0° left to right,
+90° bottom to top) or a **Radial gradient** (centre outwards).
+
+**📐 Align & distribute** (above the layer list):
+- Choose some Text, Shape, Pen or placed Image layers.
+- Align them **to the Photo** (its edges and centre) or **to the Selection** (their combined
+  bounds): left, center, right, top, middle or bottom. Layers are aligned by what they show, so a
+  rotated shape or a block of text lines up by its visible edges.
+- **Distribute horizontally / vertically** spaces three or more evenly. The outer two stay where
+  they are.
+
 **The layer stack** — each layer's own expander (click its name to open it) splits into three
 sub-tabs:
 
@@ -536,6 +548,15 @@ Always visible above/below the preview, on every tab:
   at several sizes/formats in one click, instead of downloading each one separately. This is
   different from the Batch Processor (below): this is *one photo, several output variants*; Batch
   is *one recipe, many photos*.
+- **⬇ Download SVG** (⬇ Export tab) — the Layers tab's Shape, Pen and Text layers as real,
+  editable vectors for Illustrator, Inkscape, Figma or a browser.
+  - **Fills:** gradients are kept.
+  - **Image layers:** embedded.
+  - **The photo:** **Include the photo underneath** adds the edited photo.
+  - **Per layer:** name, opacity, visibility and blend mode carry over, and the SVG is cropped like
+    the photo.
+  - **Not included:** layer styles and adjustment layers.
+  - **Text:** uses the font's name, so the viewer needs the same font.
 - **⬇ Download layered PSD** (⬇ Export tab) — a Photoshop file for further work in Photoshop, GIMP,
   Krita or Affinity.
   - **Background:** the full-resolution edit without the Layers stack.

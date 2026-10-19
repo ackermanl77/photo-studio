@@ -7,6 +7,34 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-19 -- SVG export, align/distribute, gradient fills (F27)
+
+- **Gradient fills:** `app/vector_shapes.py` adds `FILL_STYLES` (Solid / Linear gradient / Radial
+  gradient) for Shapes and closed Paths.
+  - **How:** the filled silhouette drives `gradient_fill()` (linear reuses the Gradient Overlay math,
+    angle across the shape's bounds; radial goes from the bounds' centre to the half-diagonal), and
+    the outline is drawn on top.
+  - **UI:** a Fill style selector, an end colour and an angle.
+- **SVG export:** `app/svg_export.py::layers_to_svg()`.
+  - **Elements:** `rect`/`ellipse`/`line` with a rotate transform; `polygon` for Polygon/Star (the
+    raster's own vertices); `path` with one cubic `C` per segment (the raster's symmetric handles);
+    multi-line `text` with `tspan`s; `image` for Image layers (stretched or placed).
+  - **Fills:** `userSpaceOnUse` linear/radial gradients.
+  - **Per layer:** a group with the name (`inkscape:label`), opacity, `display="none"` when hidden
+    and `mix-blend-mode`.
+  - **Crop and photo:** the crop becomes the viewBox, and the photo is optionally placed underneath.
+  - **Producer:** `processing.render_layers_svg()` (the edit without layers, from the backend) →
+    Export tab → ⬇ Download SVG.
+  - **Checked:** a headless Chrome render of an exported SVG matches the app's raster of the same layers.
+- **Align & distribute:** `app/layer_align.py`.
+  - **Moves:** `alignment_moves` (to the Photo or the Selection's union) and `distribution_moves`
+    (equal gaps, outer two fixed), using bounds measured from each layer's render
+    (`app.ui.layers.layer_bounds`, styles left out).
+  - `move_layer` shifts the position, or every point of a Pen path.
+  - **UI:** the Layers tab's 📐 Align & distribute. Its buttons work in `on_click` callbacks, so the
+    layers' position sliders are updated before they render.
+- Tests: `tests/test_vector_tools.py`.
+
 ## 2026-10-19 -- AI masks (F16)
 
 - **`app/ai_masks.py`:**
