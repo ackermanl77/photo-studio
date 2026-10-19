@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import importlib.util
+import os
+import sys
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
@@ -45,8 +47,6 @@ hiddenimports += collect_submodules("app")
 # frozen base must already carry every standard-library module torch & co. might import -- the
 # app's own analysis only bundles the ones the app uses. Bundle the whole stdlib (a few MB) except
 # GUI/test/developer-only parts.
-import sys
-
 _STDLIB_SKIP = {"tkinter", "turtle", "turtledemo", "idlelib", "test", "ensurepip", "lib2to3", "pydoc_data", "venv", "__phello__", "antigravity", "this"}
 for _name in sorted(sys.stdlib_module_names):
     if _name in _STDLIB_SKIP:
@@ -103,11 +103,25 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # numba/llvmlite (~150 MB, llvmlite.dll alone 115 MB) arrive only through facexlib, which
+    # realesrgan's package metadata pulls in (with gfpgan/filterpy) for its face-enhance script;
+    # neither app/ nor Real-ESRGAN's RealESRGANer/basicsr's RRDBNet import any of them (verified with
+    # an import blocker in the gpu build venv), so they never belong in a bundle. The GPU pack prunes
+    # the same names (scripts/gpu_pack_tools.py::ALWAYS_PRUNE).
+    excludes=["numba", "llvmlite", "facexlib", "gfpgan", "filterpy"],
     noarchive=False,
 )
 
 pyz = PYZ(a.pure)
+
+# K6/K7: the version resource (from app.__version__), the manifest (UTF-8 active code page,
+# PerMonitorV2) and the .photoproject document icon as the exe's second icon group (index 1, which
+# installer/PhotoStudio.iss's DefaultIcon names) -- all from scripts/windows_resources.py.
+sys.path.insert(0, os.path.join(SPECPATH, "scripts"))
+import windows_resources  # noqa: E402
+
+version_path = windows_resources.write_version_file(workpath)
+manifest_path = windows_resources.write_manifest(workpath)
 # One-folder build (exe + _internal\), not one-file: with the optional CUDA torch stack the bundle
 # is several GB, which a one-file exe would re-extract to a temp folder on every launch.
 # scripts/build_release.ps1 already copies either layout into the release folder.
@@ -122,7 +136,9 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    icon="app/assets/photostudio.ico",
+    icon=["app/assets/photostudio.ico", "app/assets/photoproject.ico"],
+    version=version_path,
+    manifest=manifest_path,
 )
 coll = COLLECT(
     exe,

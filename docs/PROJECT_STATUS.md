@@ -92,6 +92,13 @@ packages stay first). The base bundles the whole standard library so the pack's 
 what they need. The installer offers the pack as an optional component when it was built;
 `-BuildProfile gpu` still builds the older all-in-one folder.
 
+**Exe resources (K6/K7).** `PhotoStudio.spec` embeds three things from `scripts/windows_resources.py`:
+- a version resource rendered from `app.__version__` (publisher "MELEJ", as in the installer);
+- a manifest with `activeCodePage` UTF-8 and `dpiAwareness` PerMonitorV2;
+- `app/assets/photoproject.ico` as the second icon group, which the `.photoproject` `DefaultIcon` uses as `PhotoStudio.exe,1`.
+
+The spec excludes numba/llvmlite/facexlib/gfpgan/filterpy (realesrgan's metadata pulls them in; nothing imports them), and the GPU pack prunes the same names.
+
 `scripts/build_release.ps1` cleans up after itself: PyInstaller's output is moved into `release/` (no second version-named copy anymore), and `build-release/`/`dist-release/` are deleted after a successful build (`-KeepBuildFiles` keeps them). Rebuild with `scripts/build_release.ps1`.
 
 **Installer.** `build_release.ps1 -Installer` runs Inno Setup 6 (`ISCC.exe` on `PATH`, in Program Files,

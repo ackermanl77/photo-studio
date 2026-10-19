@@ -4,7 +4,8 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.2.0"
 #endif
-#define MyAppPublisher "Photo Studio"
+; One publisher name across the projects (K6/K7), the same CompanyName as the exe's version resource.
+#define MyAppPublisher "MELEJ"
 #define MyAppExeName "PhotoStudio.exe"
 ; The optional GPU pack (AI Upscale's torch/Real-ESRGAN stack, app/gpu_pack.py) becomes an optional
 ; component when build_release.ps1 -GpuPack has built it next to this repo's release folder.
@@ -57,7 +58,7 @@ Name: "assocproject"; Description: "Open .photoproject files with Photo Studio";
 [Registry]
 Root: HKA; Subkey: "Software\Classes\.photoproject"; ValueType: string; ValueName: ""; ValueData: "PhotoStudio.Project"; Flags: uninsdeletevalue uninsdeletekeyifempty; Tasks: assocproject
 Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project"; ValueType: string; ValueName: ""; ValueData: "Photo Studio Project"; Flags: uninsdeletekey; Tasks: assocproject
-Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\PhotoStudio.exe,0"; Tasks: assocproject
+Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\PhotoStudio.exe,1"; Tasks: assocproject
 Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\PhotoStudio.exe"" ""%1"""; Tasks: assocproject
 
 [Files]
