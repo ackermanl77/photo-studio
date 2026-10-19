@@ -116,6 +116,30 @@ def _fit(mask: Image.Image | None, size: tuple[int, int]) -> Image.Image | None:
     return mask if mask.size == size else mask.resize(size, Image.Resampling.NEAREST)
 
 
+def crop_rect(frame_size: tuple[int, int], options: dict) -> tuple[int, int, int, int] | None:
+    """The Crop step's (left, top, right, bottom) on a `frame_size` (post-geometry, full-resolution)
+    frame, or None when nothing is cropped -- an explicit crop_box wins over a named aspect, which
+    center-crops (PhotoProcessor.fit_aspect_ratio's math). Used to crop the layers of a layered PSD
+    export (F22) exactly like the pipeline crops the photo under them."""
+    width, height = frame_size
+    crop_box = options.get("crop_box")
+    if crop_box:
+        left, top, right, bottom = (int(value) for value in crop_box)
+        left, top = max(0, left), max(0, top)
+        return left, top, max(min(width, right), left + 1), max(min(height, bottom), top + 1)
+    ratio = parse_aspect(options.get("aspect"))
+    if not ratio:
+        return None
+    target = ratio[0] / ratio[1]
+    if width / height > target:
+        new_width = int(height * target)
+        left = (width - new_width) // 2
+        return left, 0, left + new_width, height
+    new_height = int(width / target)
+    top = (height - new_height) // 2
+    return 0, top, width, top + new_height
+
+
 def expected_output_size(source_size: tuple[int, int], options: dict) -> tuple[int, int]:
     """The pixel size run_pipeline() will produce for `options` on a `source_size` image --
     without running it. Geometry (a 90° rotation, constrain crop), Crop and AI Upscale change the

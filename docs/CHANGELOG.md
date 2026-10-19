@@ -7,6 +7,37 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-18 -- Layered PSD import and export (F22)
+
+- `app/psd.py`, in NumPy + zlib rather than psd-tools: psd-tools' compositing extra needs
+  scikit-image/scipy/aggdraw, and Pillow reads layers but can't write them.
+  - **Reader:**
+    - PSD v1, RGB/Grayscale, 8/16 bits;
+    - raw, RLE, ZIP and ZIP+prediction channels;
+    - names (Unicode `luni`), offsets, opacity, all 26 blend modes, visibility (incl. hidden groups via
+      the `lsct` section dividers), user masks, clipping masks, fill opacity (`iOpa`);
+    - layers without pixels skipped and counted; the composite.
+    - Refused with a clear message: PSB, CMYK, 32-bit.
+  - **Writer:** 8-bit RGB, one raster layer per entry (cropped to its pixels, Pascal + Unicode name,
+    opacity, blend key, visibility) and the composite.
+- **Checked against:**
+  - Pillow's PSD plugin, which reads the written layers' names, bounds and composite.
+  - 23 of psd-tools' public Photoshop test files, kept in a scratch folder and not in the repo. Restacking
+    the imported layers reproduces Photoshop's own composite exactly for the normal-blend files (masks,
+    groups, hidden groups, text, smart objects, Grayscale).
+  - The differences left come from what isn't imported: adjustment layers, layer effects and vector masks.
+- **App:**
+  - `.psd` is a supported photo (its composite opens: `raw_import._decode_psd`).
+  - Layers tab → ➕ Add a layer → **PSD** (`psd_layer_dicts()`/`import_psd_layers()`: Image layers on the
+    document canvas, stretched to the frame; Skip the bottom layer by default).
+  - ⬇ Export → **⬇ Download layered PSD** (`render_layered_psd()`):
+    - two backend renders, without and with the layers, give the Background and the composite;
+    - each layer is rasterized at the full frame with styles and mask, then cropped with the new
+      `app.pipeline.crop_rect()`;
+    - Spanish strings added.
+- Tests: `tests/test_psd.py`, with a generated-PSD builder for every compression, groups, masks, clipping,
+  fill, 16-bit and Grayscale, plus the import, the export producer and the Layers tab under AppTest.
+
 ## 2026-10-18 -- Liquify (F23)
 
 - **`app/liquify.py`:** a parametric mesh-warp brush.

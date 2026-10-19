@@ -24,7 +24,7 @@ from app.pipeline import check_upscale_output, expected_output_size
 from app.professional_tools import EXPORT_PROFILES, WATERMARK_POSITIONS
 from app.reliability import image_digest
 from app.ui.layers import font_select, layers_payload
-from app.ui.processing import encode_rendered_export, render_full_resolution_export
+from app.ui.processing import encode_rendered_export, render_full_resolution_export, render_layered_psd
 from app.ui.project_io import PROJECT_MAX_BYTES, estimated_project_bytes, project_archive
 from app.ui.selections import combined_mask_png, local_masks_payload
 from app.ui.state import build_recipe, request_rerun, section_header
@@ -198,6 +198,27 @@ def export_multiple_section(ctx) -> None:
                 mime="application/zip",
                 key="exp-multi-dl-btn",
             )
+
+
+def layered_psd_section(ctx) -> None:
+    """⬇ Layered PSD (F22): the edited photo as the Background plus every Layers-tab layer as its own
+    Photoshop layer, built only when the button is pressed (a data callable on the download thread)."""
+    st.markdown(t("**Layered PSD**"))
+    layers = st.session_state.get("image_layers", [])
+    st.caption(t("For Photoshop, GIMP, Krita or Affinity: the edited photo as the Background and each layer from the Layers tab as its own layer (rasterized), with its name, opacity, blend mode and visibility."))
+    producer = functools.partial(
+        render_layered_psd, ctx.upload_bytes, ctx.upload_name, _full_options(ctx), ctx.mask_source,
+        ctx.mask_signature if ctx.shared_mask_layers else None, ctx.removal_signature if ctx.removal_active else None,
+        ctx.layers_signature, ctx.own_signatures, tuple(ctx.full_canvas), session_painted_masks(),
+    )
+    st.download_button(
+        t("⬇ Download layered PSD"),
+        data=producer,
+        file_name=f"{Path(ctx.upload_name).stem}.psd",
+        mime="image/vnd.adobe.photoshop",
+        key="exp-psd-btn",
+        help=None if layers else t("No layers yet: the PSD holds the edited photo as a single Background layer."),
+    )
 
 
 def project_file_section(ctx) -> None:
