@@ -12,6 +12,42 @@ from PIL import Image, ImageDraw
 # app.advanced_masks.MaskLayer's selections and Text layers (app.layer_workspace.render_text_layer)
 # already use.
 SHAPE_TYPES = ("Rectangle", "Ellipse", "Line", "Polygon", "Star")
+# Fill styles of a Shape or closed Path (F27): a flat colour, or a gradient from fill_color to
+# fill_color2 across the shape's own bounds -- linear at gradient_angle degrees (0 = left to right,
+# 90 = bottom to top), or radial from its centre outwards.
+FILL_STYLES = ("Solid", "Linear gradient", "Radial gradient")
+
+
+def gradient_fill(alpha: Image.Image, params: dict) -> Image.Image:
+    """The gradient filling `alpha`'s shape (RGBA, alpha scaled by fill_opacity)."""
+    import numpy as np
+
+    from app.layer_styles import _gradient_overlay_layer
+
+    start = tuple(params.get("fill_color", (255, 255, 255)))[:3]
+    end = tuple(params.get("fill_color2", (0, 0, 0)))[:3]
+    opacity = max(0.0, min(1.0, params.get("fill_opacity", 1.0)))
+    if params.get("fill_style") != "Radial gradient":
+        return _gradient_overlay_layer(alpha, start, end, params.get("gradient_angle", 0.0), opacity)
+    width, height = alpha.size
+    x0, y0, x1, y1 = alpha.getbbox() or (0, 0, width, height)
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    radius = max(1.0, math.hypot(x1 - x0, y1 - y0) / 2.0)
+    position = np.clip(np.hypot(xx - (x0 + x1) / 2.0, yy - (y0 + y1) / 2.0) / radius, 0.0, 1.0)[..., None]
+    rgb = np.asarray(start, np.float32) * (1 - position) + np.asarray(end, np.float32) * position
+    a = np.asarray(alpha, np.float32) * opacity
+    return Image.fromarray(np.dstack([rgb, a]).round().astype(np.uint8), mode="RGBA")
+
+
+def _with_gradient(render, canvas_size: tuple[int, int], params: dict) -> Image.Image:
+    """Render `params` with its gradient fill: the shape's filled silhouette drives gradient_fill(),
+    and the outline (when on) is drawn on top, as a solid fill would have it."""
+    silhouette = render(canvas_size, {**params, "fill_style": "Solid", "fill_enabled": True, "fill_color": (255, 255, 255),
+                                      "fill_opacity": 1.0, "stroke_enabled": False})
+    image = gradient_fill(silhouette.getchannel("A"), params)
+    if params.get("stroke_enabled", False):
+        image = Image.alpha_composite(image, render(canvas_size, {**params, "fill_style": "Solid", "fill_enabled": False}))
+    return image
 
 
 def _rotate_point(point: tuple[float, float], center: tuple[float, float], angle_deg: float) -> tuple[float, float]:
@@ -74,6 +110,9 @@ def render_shape_layer(canvas_size: tuple[int, int], params: dict) -> Image.Imag
         as a fraction of the outer one
       - line_thickness (Line only): a Line has no separate fill/stroke, just one paint color/width
     """
+    if (params.get("fill_style", "Solid") != "Solid" and params.get("fill_enabled", True)
+            and params.get("shape_type", "Rectangle") != "Line"):
+        return _with_gradient(render_shape_layer, canvas_size, params)
     width, height = canvas_size
     image = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
@@ -183,6 +222,8 @@ def render_path_layer(canvas_size: tuple[int, int], params: dict) -> Image.Image
         return image
 
     closed = bool(params.get("closed", False))
+    if closed and params.get("fill_enabled", False) and params.get("fill_style", "Solid") != "Solid":
+        return _with_gradient(render_path_layer, canvas_size, params)
     outline = path_outline_points(points, canvas_size, closed)
 
     stroke_enabled = params.get("stroke_enabled", True)

@@ -91,6 +91,7 @@ def layer_dict_to_image(layer: dict, canvas_size: tuple[int, int], scale: float 
         shape_params = {
             **layer,
             "fill_color": hex_to_rgba(layer.get("fill_color", "#FFFFFF"))[:3],
+            "fill_color2": hex_to_rgba(layer.get("fill_color2", "#000000"))[:3],
             "stroke_color": hex_to_rgba(layer.get("stroke_color", "#000000"))[:3],
             "stroke_width": max(1, round(layer.get("stroke_width", 4) * scale)),
             "line_thickness": max(1, round(layer.get("line_thickness", 6) * scale)),
@@ -100,6 +101,7 @@ def layer_dict_to_image(layer: dict, canvas_size: tuple[int, int], scale: float 
         path_params = {
             **layer,
             "fill_color": hex_to_rgba(layer.get("fill_color", "#FFFFFF"))[:3],
+            "fill_color2": hex_to_rgba(layer.get("fill_color2", "#000000"))[:3],
             "stroke_color": hex_to_rgba(layer.get("stroke_color", "#FFFFFF"))[:3],
             "stroke_width": max(1, round(layer.get("stroke_width", 3) * scale)),
         }
@@ -142,6 +144,103 @@ def render_adjustment_layer(layer: dict, layer_id: str) -> None:
         with columns[index % 2]:
             adjustments[name] = st.slider(t(label), low, high, float(adjustments.get(name, 0.0)), step,
                                           key=f"l-adj-{name}-{layer_id}", help=t(help_text) if help_text else None)
+
+
+def render_gradient_controls(layer: dict, key_prefix: str) -> None:
+    """Fill style (F27): Solid, or a Linear/Radial gradient from the Fill Color to a second colour."""
+    from app.vector_shapes import FILL_STYLES
+
+    current = layer.get("fill_style", "Solid")
+    layer["fill_style"] = st.selectbox(t("Fill style"), FILL_STYLES, index=FILL_STYLES.index(current) if current in FILL_STYLES else 0,
+                                       key=f"{key_prefix}-fstyle", format_func=t_option)
+    if layer["fill_style"] != "Solid":
+        grad1, grad2 = st.columns(2)
+        with grad1:
+            layer["fill_color2"] = st.color_picker(t("Gradient end color"), layer.get("fill_color2", "#000000"), key=f"{key_prefix}-fcolor2")
+        with grad2:
+            if layer["fill_style"] == "Linear gradient":
+                layer["gradient_angle"] = st.slider(t("Angle (°)"), -180, 180, int(layer.get("gradient_angle", 0)), key=f"{key_prefix}-gangle",
+                                                    help=t("0 runs left to right, 90 bottom to top."))
+
+
+# Position widgets per layer kind (align/distribute must move these too, F27).
+_POSITION_KEYS = {"text": ("l-fx-{}", "l-fy-{}"), "shape": ("l-shp-x-{}", "l-shp-y-{}"), "image": ("l-img-x-{}", "l-img-y-{}")}
+
+
+def layer_bounds(layer: dict, canvas_size: tuple[int, int]) -> tuple[float, float, float, float] | None:
+    """A layer's visible bounds in frame percent, measured from a small render without its styles."""
+    width, height = canvas_size
+    scale = min(1.0, 400 / max(width, height))
+    small = (max(1, round(width * scale)), max(1, round(height * scale)))
+    box = layer_dict_to_image({**layer, "styles": {}}, small, scale).getchannel("A").getbbox()
+    if box is None:
+        return None
+    return box[0] / small[0] * 100, box[1] / small[1] * 100, box[2] / small[0] * 100, box[3] / small[1] * 100
+
+
+def _apply_layer_moves(moves: dict) -> None:
+    from app.layer_align import move_layer
+
+    for layer in st.session_state.get("image_layers", []):
+        if layer["id"] in moves:
+            move_layer(layer, *moves[layer["id"]])
+            keys = _POSITION_KEYS.get(layer.get("kind"))
+            if keys:  # a callback runs before any widget exists this run: their keys may be set
+                st.session_state[keys[0].format(layer["id"])] = float(layer["x_pct"])
+                st.session_state[keys[1].format(layer["id"])] = float(layer["y_pct"])
+
+
+def _align_callback(mode: str) -> None:
+    from app.layer_align import alignment_moves
+
+    bounds = _selected_bounds()
+    target = (0.0, 0.0, 100.0, 100.0) if st.session_state.get("l-align-to", "Photo") == "Photo" else None
+    if bounds:
+        _apply_layer_moves(alignment_moves(bounds, mode, target))
+
+
+def _distribute_callback(axis: str) -> None:
+    from app.layer_align import distribution_moves
+
+    bounds = _selected_bounds()
+    if len(bounds) >= 3:
+        _apply_layer_moves(distribution_moves(bounds, axis))
+
+
+def _selected_bounds() -> dict:
+    canvas = st.session_state.get("_layer_canvas_size", (1000, 1000))
+    chosen = set(st.session_state.get("l-align-sel", []))
+    bounds = {}
+    for layer in st.session_state.get("image_layers", []):
+        if layer["id"] in chosen:
+            box = layer_bounds(layer, canvas)
+            if box is not None:
+                bounds[layer["id"]] = box
+    return bounds
+
+
+def align_section(layers: list[dict]) -> None:
+    """📐 Align & distribute (F27): the chosen layers' edges or centres onto the photo's or each other's."""
+    from app.layer_align import movable
+
+    candidates = {layer["id"]: layer["name"] for layer in layers if movable(layer)}
+    with st.expander(t("📐 Align & distribute"), expanded=False, key="sec-l-align"):
+        if not candidates:
+            st.caption(t("Text, Shape, Pen and placed Image layers can be aligned; add one first."))
+            return
+        st.session_state["l-align-sel"] = [key for key in st.session_state.get("l-align-sel", []) if key in candidates]
+        st.multiselect(t("Layers"), list(candidates), key="l-align-sel", format_func=lambda key: candidates.get(key, key))
+        st.radio(t("Align to"), ["Photo", "Selection"], horizontal=True, key="l-align-to", format_func=t_option,
+                 help=t("Photo: the edges and centre of the frame. Selection: the chosen layers' combined bounds."))
+        labels = {"left": "⇤ Left", "center": "↔ Center", "right": "⇥ Right", "top": "⤒ Top", "middle": "↕ Middle", "bottom": "⤓ Bottom"}
+        for row in (("left", "center", "right"), ("top", "middle", "bottom")):
+            for column, mode in zip(st.columns(3), row):
+                column.button(t(labels[mode]), key=f"l-align-{mode}", use_container_width=True, on_click=_align_callback, args=(mode,))
+        dist_h, dist_v = st.columns(2)
+        dist_h.button(t("Distribute horizontally"), key="l-dist-h", use_container_width=True, on_click=_distribute_callback,
+                      args=("horizontal",), help=t("Equal gaps between three or more layers; the outer two stay."))
+        dist_v.button(t("Distribute vertically"), key="l-dist-v", use_container_width=True, on_click=_distribute_callback,
+                      args=("vertical",))
 
 
 def render_layer_styles(layer: dict, layer_id: str) -> None:
@@ -532,6 +631,8 @@ def render_layer_stack(source: Image.Image) -> str | None:
         st.caption(t("No layers yet — add one above."))
     else:
         st.caption(t("Listed bottom-to-top: the last layer here sits on top, same as the composite order."))
+        st.session_state["_layer_canvas_size"] = tuple(source.size)
+        align_section(layers)
 
     blend_mode_choices = list(BLEND_MODE_LABELS)
     align_choices = ["left", "center", "right"]
@@ -621,6 +722,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                                 layer["fill_color"] = st.color_picker(t("Fill Color"), layer.get("fill_color", "#FFFFFF"), key=f"l-shp-fcolor-{layer_id}")
                             with shp_fill2:
                                 layer["fill_opacity"] = st.slider(t("Fill Opacity"), 0.0, 1.0, float(layer.get("fill_opacity", 1.0)), 0.01, key=f"l-shp-fop-{layer_id}")
+                            render_gradient_controls(layer, f"l-shp-{layer_id}")
                         layer["stroke_enabled"] = st.checkbox(t("Outline"), layer.get("stroke_enabled", False), key=f"l-shp-sen-{layer_id}")
                         if layer["stroke_enabled"]:
                             shp_stroke1, shp_stroke2 = st.columns(2)
@@ -635,6 +737,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                     shape_preview_params = {
                         **layer,
                         "fill_color": hex_to_rgba(layer.get("fill_color", "#FFFFFF"))[:3],
+                        "fill_color2": hex_to_rgba(layer.get("fill_color2", "#000000"))[:3],
                         "stroke_color": hex_to_rgba(layer.get("stroke_color", "#000000"))[:3],
                     }
                     if tab_visible():
@@ -651,6 +754,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                                 layer["fill_color"] = st.color_picker(t("Fill Color"), layer.get("fill_color", "#FFFFFF"), key=f"l-path-fcolor-{layer_id}")
                             with path_fill2:
                                 layer["fill_opacity"] = st.slider(t("Fill Opacity"), 0.0, 1.0, float(layer.get("fill_opacity", 1.0)), 0.01, key=f"l-path-fop-{layer_id}")
+                            render_gradient_controls(layer, f"l-path-{layer_id}")
                     layer["stroke_enabled"] = st.checkbox(t("Stroke"), layer.get("stroke_enabled", True), key=f"l-path-sen-{layer_id}")
                     if layer["stroke_enabled"]:
                         path_stroke1, path_stroke2 = st.columns(2)

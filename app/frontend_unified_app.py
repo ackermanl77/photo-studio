@@ -245,6 +245,7 @@ with st.container(key="workspace-split"):
         with tabs["⬇ Export"]:
             export_panel.export_multiple_section(ctx)
             export_panel.layered_psd_section(ctx)
+            export_panel.svg_section(ctx)
             st.divider()
             export_panel.project_file_section(ctx)
 

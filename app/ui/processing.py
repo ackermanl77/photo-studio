@@ -264,6 +264,25 @@ def render_layered_psd(
     return write_psd(composite, [PsdLayer("Background", background.convert("RGBA")), *psd_layers])
 
 
+def render_layers_svg(
+    content: bytes, filename: str, options: dict, mask_source: Image.Image,
+    local_signature: str | None, removal_signature: str | None, own_signatures: list[str] | None,
+    layers: list[dict], frame: tuple[int, int], painted: dict | None, include_photo: bool,
+) -> bytes:
+    """SVG producer (F27): the Layers stack as vectors (app.svg_export), cropped like the photo, over
+    the full-resolution edit without the layers when `include_photo`. Download thread: no st.*."""
+    from app.pipeline import crop_rect
+    from app.svg_export import layers_to_svg
+
+    background = None
+    if include_photo:
+        local, removal, extra = _producer_masks(mask_source, local_signature, removal_signature, own_signatures, painted)
+        png = backend_client.export_via_backend(content, filename, {**options, "ai_upscale": False}, {"format": "PNG", "metadata": "none"},
+                                                local, None, removal, **extra)
+        background = Image.open(io.BytesIO(png))
+    return layers_to_svg(layers, tuple(frame), crop_rect(tuple(frame), options), background).encode("utf-8")
+
+
 def render_full_resolution_image(
     content: bytes, filename: str, options: dict, mask_source: Image.Image,
     local_signature: str | None, removal_signature: str | None, layers_signature: str | None,

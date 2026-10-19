@@ -24,7 +24,7 @@ from app.pipeline import check_upscale_output, expected_output_size
 from app.professional_tools import EXPORT_PROFILES, WATERMARK_POSITIONS
 from app.reliability import image_digest
 from app.ui.layers import font_select, layers_payload
-from app.ui.processing import encode_rendered_export, render_full_resolution_export, render_layered_psd
+from app.ui.processing import encode_rendered_export, render_full_resolution_export, render_layered_psd, render_layers_svg
 from app.ui.project_io import PROJECT_MAX_BYTES, estimated_project_bytes, project_archive
 from app.ui.selections import combined_mask_png, local_masks_payload
 from app.ui.state import build_recipe, request_rerun, section_header
@@ -219,6 +219,22 @@ def layered_psd_section(ctx) -> None:
         key="exp-psd-btn",
         help=None if layers else t("No layers yet: the PSD holds the edited photo as a single Background layer."),
     )
+
+
+def svg_section(ctx) -> None:
+    """⬇ SVG (F27): the Layers tab's Shape, Pen, Text and Image layers as vectors, optionally over the photo."""
+    st.markdown(t("**SVG (vector layers)**"))
+    layers = json.loads(json.dumps(st.session_state.get("image_layers", [])))
+    st.caption(t("Shapes, Pen paths and text stay editable vectors in Illustrator, Inkscape, Figma or a browser. "
+                 "Layer styles and adjustment layers aren't part of an SVG."))
+    include_photo = st.checkbox(t("Include the photo underneath"), value=True, key="exp-svg-photo")
+    producer = functools.partial(
+        render_layers_svg, ctx.upload_bytes, ctx.upload_name, _full_options(ctx), ctx.mask_source,
+        ctx.mask_signature if ctx.shared_mask_layers else None, ctx.removal_signature if ctx.removal_active else None,
+        ctx.own_signatures, layers, tuple(ctx.full_canvas), session_painted_masks(), include_photo,
+    )
+    st.download_button(t("⬇ Download SVG"), data=producer, file_name=f"{Path(ctx.upload_name).stem}.svg", mime="image/svg+xml",
+                       key="exp-svg-btn", disabled=not layers and not include_photo)
 
 
 def project_file_section(ctx) -> None:
