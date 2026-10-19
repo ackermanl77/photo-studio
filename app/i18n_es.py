@@ -354,8 +354,8 @@ ES = {
     "180° clockwise": "180° en sentido horario",
     "270° clockwise": "270° en sentido horario",
     "Bit depth": "Profundidad de bits",
-    "16-bit (PNG/TIFF only) keeps smooth skies and gradients free of banding for further editing or print. Renders at full resolution when you click Save.":
-        "16 bits (solo PNG/TIFF) mantiene cielos y degradados suaves sin bandas para seguir editando o imprimir. Se renderiza a resolución completa al hacer clic en Guardar.",
+    "16-bit (PNG/TIFF only) keeps smooth skies and gradients free of banding for further editing or print. Renders at full resolution when you click Save. EXR (half float) and PFM (32-bit float) are always floating point, in linear light, for compositing and HDR tools.":
+        "16 bits (solo PNG/TIFF) mantiene cielos y degradados suaves sin bandas para seguir editando o imprimir. Se renderiza a resolución completa al hacer clic en Guardar. EXR (media precisión) y PFM (32 bits) son siempre de coma flotante, en luz lineal, para composición y herramientas HDR.",
     "Use GPU for export resize/sharpen": "Usar la GPU para redimensionar/enfocar al exportar",
     "Color space": "Espacio de color",
     "sRGB suits the web and most screens. Display P3 is the wider space of current phones, Macs and many monitors: the colors look the same in a color-managed viewer, with more room for later edits.": "sRGB sirve para la web y la mayoría de las pantallas. Display P3 es el espacio más amplio de los teléfonos y Mac actuales y de muchos monitores: los colores se ven iguales en un visor con gestión de color, con más margen para editar después.",

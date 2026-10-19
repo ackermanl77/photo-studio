@@ -21,7 +21,7 @@ from app.config import (
     backend_token,
 )
 from app.edit_schema import parse_options
-from app.export import encode_export
+from app.export import FLOAT_FORMATS, encode_export
 from app.image_processor import PhotoProcessor
 from app.layer_workspace import layers_from_json
 from app.observability import ProcessingAudit, configure_logging, get_logger, log_audit
@@ -199,7 +199,8 @@ def process_image(image_file, options: dict, removal_mask=None, local_mask=None,
     decoded at full precision and the pipeline runs in high-precision mode (B4, app.high_bit).
     """
     options = parse_options(options)
-    if (options.get("export") or {}).get("bit_depth") == 16:
+    export_request = options.get("export") or {}
+    if export_request.get("bit_depth") == 16 or export_request.get("format") in FLOAT_FORMATS:
         options["bit_depth"] = 16
     # A Display P3 export renders in a Display P3 working space (B14), from the original file.
     if (options.get("export") or {}).get("color_space") == "Display P3":

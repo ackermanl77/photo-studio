@@ -485,7 +485,9 @@ Always visible above/below the preview, on every tab:
 - **🏷️ Watermark** (⬇ Export tab) — optional text stamped only on exported files.
 - **Export Format / Quality / Save** (under the canvas) — choose JPEG, PNG, WEBP, TIFF or AVIF (Quality applies to
   JPEG/WEBP/AVIF; AVIF is about half the size of a JPEG at the same quality and keeps transparency), then download
-  the edited result.
+  the edited result. **EXR** (OpenEXR, half float) and **PFM** (32-bit float) are floating-point files for
+  compositing, 3D and HDR tools: always rendered at full precision, in linear light (the sRGB/P3 curve undone), and
+  with no EXIF; an EXR records its primaries (sRGB or Display P3).
 - **📦 Export Multiple Sizes** (⬇ Export tab) — check any combination of the named export profiles (Web, Social,
   Print, Archive; Web and Social carry no EXIF, and **Remove GPS location** strips the location from
   Print/Archive too) and click **Prepare ZIP**, then **⬇️ Download ZIP** — gets you the current photo
@@ -580,7 +582,7 @@ python -m app --input photo.jpg --output clean.jpg --remove-mask object-mask.png
 - Saved looks: `--recipe preset.json` (a custom preset, or an exported presets file with
   `--recipe-name`); `--options options.json` takes a raw pipeline options object.
 - Output: `--quality 1-100` (JPEG/WEBP/AVIF), `--metadata all|camera|none`, `--remove-gps`,
-  `--bit-depth 16` (PNG/TIFF), `--gpu-export` (CUDA resize/sharpen when the GPU pack's torch is
+  `--bit-depth 16` (PNG/TIFF; an `.exr`/`.pfm` output is always float, linear light), `--gpu-export` (CUDA resize/sharpen when the GPU pack's torch is
   available), `--ai-upscale 2|4` (needs the GPU pack).
 
 `python -m app --help` lists every option with its range.
