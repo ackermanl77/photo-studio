@@ -7,6 +7,22 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-19 -- Adjustment layers (F25)
+
+- **Model:** `WorkspaceLayer.adjustments` (`is_adjustment`). The wire format carries
+  `"adjustments"` (cleaned by `edit_schema.clean_adjustment_set`: the per-selection keys
+  exposure_ev/contrast/saturation/temperature/tint/clarity, clamped).
+- **Pipeline:** the Layers step composites pending pixel layers, then applies each visible adjustment
+  layer through `apply_masked_adjustments()` with its layer mask (or the whole frame) scaled by its
+  opacity. It therefore changes the photo and the layers under it, never the ones above.
+- **UI:**
+  - Layers tab: a new "Adjustment" type (Add Adjustment Layer) with six sliders in 🎨 Content.
+  - Layer masks come from ⚙️ Settings (F13); blend mode is disabled and styles don't apply.
+  - Saved in projects like the other parametric layers.
+  - Layered PSD export leaves it out as a layer; its effect is in the composite.
+- Tests: `tests/test_adjustment_layers.py` (below vs above, mask, opacity, visibility, the wire format,
+  the payload builder, the Layers tab under AppTest).
+
 ## 2026-10-19 -- Creative filters (F26)
 
 - **`app/creative_filters.py`:** classical (OpenCV/NumPy), on float RGB, so the 16-bit path keeps

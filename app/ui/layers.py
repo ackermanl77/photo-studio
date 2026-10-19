@@ -71,6 +71,9 @@ def layer_dict_to_image(layer: dict, canvas_size: tuple[int, int], scale: float 
     normal opacity/blend-mode compositing on the resulting WorkspaceLayer runs on top of whatever
     the styles produce, unmodified.
     """
+    if layer.get("kind") == "adjustment":
+        # No pixels of its own (F25): the pipeline applies its adjustment set to what's below it.
+        return Image.new("RGBA", tuple(canvas_size), (0, 0, 0, 0))
     if layer.get("kind") == "text":
         # font_size_pct: % of the canvas's short edge (F5) -- the same look on a 2 MP or 45 MP
         # photo and on a preview proxy. Older layers stored pixels (font_size).
@@ -117,6 +120,28 @@ def layer_dict_to_image(layer: dict, canvas_size: tuple[int, int], scale: float 
     if styles and any(styles.get(f"{prefix}_enabled") for prefix in _STYLE_EFFECT_PREFIXES):
         content = apply_layer_styles(content, resolved_layer_styles(scaled_styles(styles, scale)))
     return content
+
+
+# An adjustment layer's controls (F25): (key, label, minimum, maximum, step, help).
+ADJUSTMENT_LAYER_FIELDS = {
+    "exposure_ev": ("Exposure (EV)", -5.0, 5.0, 0.05, "In stops: +1 doubles the light."),
+    "contrast": ("Contrast", -100.0, 100.0, 1.0, None),
+    "saturation": ("Saturation", -100.0, 100.0, 1.0, None),
+    "temperature": ("Temperature (Cool/Warm)", -100.0, 100.0, 1.0, None),
+    "tint": ("Tint (Green/Magenta)", -100.0, 100.0, 1.0, None),
+    "clarity": ("Clarity", -100.0, 100.0, 1.0, None),
+}
+
+
+def render_adjustment_layer(layer: dict, layer_id: str) -> None:
+    """An adjustment layer's set (F25): applied to everything below it, through its layer mask."""
+    adjustments = layer.setdefault("adjustments", {})
+    st.caption(t("Changes everything below this layer. Limit it with a layer mask in ⚙️ Settings."))
+    columns = st.columns(2)
+    for index, (name, (label, low, high, step, help_text)) in enumerate(ADJUSTMENT_LAYER_FIELDS.items()):
+        with columns[index % 2]:
+            adjustments[name] = st.slider(t(label), low, high, float(adjustments.get(name, 0.0)), step,
+                                          key=f"l-adj-{name}-{layer_id}", help=t(help_text) if help_text else None)
 
 
 def render_layer_styles(layer: dict, layer_id: str) -> None:
@@ -368,9 +393,19 @@ def render_layer_stack(source: Image.Image) -> str | None:
         layer.setdefault("kind", "image")  # backfill for layers added before Text layers existed
 
     with st.expander(t("➕ Add a layer"), expanded=not layers):
-        new_layer_kind = st.radio(t("Layer type"), ["Image", "Text", "Shape", "Pen", "PSD"], horizontal=True, key="l-new-kind", format_func=t_option)
+        new_layer_kind = st.radio(t("Layer type"), ["Image", "Text", "Shape", "Pen", "PSD", "Adjustment"], horizontal=True, key="l-new-kind", format_func=t_option)
         if new_layer_kind == "PSD":
             import_psd_layers(layers)
+        elif new_layer_kind == "Adjustment":
+            st.caption(t("An adjustment layer changes everything below it in the stack -- the photo and the layers under it -- "
+                         "and can be limited with a layer mask (⚙️ Settings) and faded with its opacity."))
+            if st.button(t("Add Adjustment Layer"), key="l-add-adjustment-btn"):
+                layers.append({
+                    "id": uuid.uuid4().hex, "kind": "adjustment", "name": f"Adjustment {len(layers) + 1}",
+                    "adjustments": {name: 0.0 for name in ADJUSTMENT_LAYER_FIELDS},
+                    "opacity": 1.0, "blend_mode": "normal", "visible": True,
+                })
+                request_rerun()
         elif new_layer_kind == "Text":
             if st.button(t("Add Text Layer"), key="l-add-text-btn"):
                 layers.append(
@@ -503,13 +538,16 @@ def render_layer_stack(source: Image.Image) -> str | None:
     for idx, layer in enumerate(layers):
         layer_id = layer["id"]
         status_icon = "✅" if layer["visible"] else "⬜"
-        kind_label = {"text": "Text", "shape": layer.get("shape_type", "Shape"), "path": "Path"}.get(layer["kind"], BLEND_MODE_LABELS[layer["blend_mode"]])
+        kind_label = {"text": "Text", "shape": layer.get("shape_type", "Shape"), "path": "Path", "adjustment": "Adjustment"}.get(
+            layer["kind"], BLEND_MODE_LABELS[layer["blend_mode"]])
         with st.expander(t("{0} {1} — {2}").format(t(status_icon), t(layer['name']), t(kind_label)), expanded=False):
             # Sub-tabs inside the expander (allowed, unlike a nested expander). Every sub-tab body
             # still runs on every rerun, so the usual widget rules apply unchanged.
             tab_content, tab_styles, tab_settings = st.tabs([t("🎨 Content"), t("✨ Styles"), t("⚙️ Settings")])
             with tab_content:
-                if layer["kind"] == "text":
+                if layer["kind"] == "adjustment":
+                    render_adjustment_layer(layer, layer_id)
+                elif layer["kind"] == "text":
                     layer["text"] = st.text_area(t("Text"), layer.get("text", "Text"), key=f"l-text-{layer_id}")
                     layer["font"] = font_select(t("Font"), layer.get("font", ""), key=f"l-font-{layer_id}")
                     text_col1, text_col2 = st.columns(2)
@@ -635,7 +673,10 @@ def render_layer_stack(source: Image.Image) -> str | None:
                         thumb = Image.open(io.BytesIO(base64.b64decode(layer["image_b64"])))
                         st.image(preview_image(thumb, (160, 160)))
             with tab_styles:
-                render_layer_styles(layer, layer_id)
+                if layer["kind"] == "adjustment":
+                    st.caption(t("Layer styles need pixels: an adjustment layer has none."))
+                else:
+                    render_layer_styles(layer, layer_id)
             with tab_settings:
                 layer["name"] = st.text_input(t("Name"), layer["name"], key=f"l-name-{layer_id}")
                 layer["visible"] = st.checkbox(t("Visible"), layer["visible"], key=f"l-vis-{layer_id}")
@@ -643,6 +684,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                 layer["blend_mode"] = st.selectbox(
                     t("Blend Mode"), blend_mode_choices, format_func=t_format(lambda mode: BLEND_MODE_LABELS[mode]),
                     index=blend_mode_choices.index(layer["blend_mode"]), key=f"l-blend-{layer_id}",
+                    disabled=layer["kind"] == "adjustment",
                 )
                 render_layer_mask_controls(layer, layer_id)
                 # Every mutation below (reorder/duplicate/remove) is followed by `break`, not just
@@ -724,8 +766,11 @@ def build_layers_payload(signature: str, canvas_size: tuple[int, int], scale: fl
     layers = json.loads(signature)
     workspace_layers = [
         WorkspaceLayer(
-            layer["name"], layer_dict_to_image(layer, tuple(canvas_size), scale), layer["opacity"], layer["blend_mode"], layer["visible"],
+            layer["name"],
+            Image.new("RGBA", (1, 1), (0, 0, 0, 0)) if layer.get("kind") == "adjustment" else layer_dict_to_image(layer, tuple(canvas_size), scale),
+            layer["opacity"], layer["blend_mode"], layer["visible"],
             _layer_mask(layer, canvas_size, mask_builder),
+            dict(layer.get("adjustments") or {}) if layer.get("kind") == "adjustment" else None,
         )
         for layer in layers
     ]

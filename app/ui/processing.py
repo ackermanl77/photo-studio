@@ -248,6 +248,8 @@ def render_layered_psd(
     psd_layers = []
     rect = crop_rect(tuple(layers_canvas), options) if layers_canvas else None
     for layer in layers_from_json(layers_bytes) if layers_bytes else []:
+        if layer.is_adjustment:
+            continue  # no pixels: its effect is in the composite only (a PSD adjustment layer isn't written)
         image = layer.image.convert("RGBA")
         if layers_canvas and image.size != tuple(layers_canvas):
             image = image.resize(tuple(layers_canvas), Image.Resampling.LANCZOS)

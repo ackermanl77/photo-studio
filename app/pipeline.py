@@ -318,12 +318,40 @@ def run_pipeline(
     if removal is not None:
         processor.remove_objects(removal, radius=max(1.0, options.get("removal_radius", 3.0) * scale), method=options.get("removal_method", "Fill"))
 
-    # Layers -- bottom-to-top, each composited onto the working image in turn.
+    # Layers -- bottom-to-top, each composited onto the working image in turn. An adjustment layer
+    # (F25) applies its adjustment set to everything composited so far, through its mask and opacity.
     if layers:
-        workspace = LayerWorkspace(processor.image)
+        pending: list = []
+
+        def flush_pixel_layers() -> None:
+            if pending:
+                workspace = LayerWorkspace(processor.image)
+                for pixel_layer in pending:
+                    workspace.add(pixel_layer)
+                processor.image = workspace.composite().convert("RGB")
+                pending.clear()
+
         for layer in layers:
-            workspace.add(layer)
-        processor.image = workspace.composite().convert("RGB")
+            if not layer.is_adjustment:
+                pending.append(layer)
+                continue
+            flush_pixel_layers()
+            if not layer.visible or layer.opacity <= 0:
+                continue
+            coverage = _fit(layer.mask, processor.image.size) if layer.mask is not None else Image.new("L", processor.image.size, 255)
+            if layer.opacity < 1.0:
+                coverage = coverage.point(lambda value, k=layer.opacity: int(round(value * k)))
+            adjustment = layer.adjustments
+            processor.apply_masked_adjustments(
+                coverage,
+                exposure_ev=adjustment["exposure_ev"],
+                contrast=1.0 + adjustment["contrast"] / 100.0,
+                saturation=max(0.0, 1.0 + adjustment["saturation"] / 100.0),
+                temperature=adjustment["temperature"],
+                tint=adjustment["tint"],
+                clarity=adjustment["clarity"],
+            )
+        flush_pixel_layers()
 
     checkpoint()
     # Masks

@@ -241,7 +241,7 @@ Build a stack of any number of layers — images, text, vector shapes, and freef
 with its own opacity, blend mode, and optional effects, composited on the processing backend when
 the image renders.
 
-**Adding a layer** — "➕ Add a layer" offers five types:
+**Adding a layer** — "➕ Add a layer" offers six types:
 
 | Type | What you get |
 |---|---|
@@ -249,6 +249,7 @@ the image renders.
 | **Text** | Type content, then pick a **Font** (any font installed on this computer, or one you added under **🔤 Fonts**; "Automatic" is the default) and set font size (a % of the photo's short edge, so it looks the same at any resolution), color, alignment (left/center/right), and position (as a % of the photo, placing the text block's own center). |
 | **Shape** | A vector Rectangle, Ellipse, Line, Polygon, or Star — position, size, and rotation, plus its own fill color/opacity and outline color/width. Polygon and Star also get a Sides/Points count; Star gets an Inner Radius controlling how sharp its points are. |
 | **Pen** | Click points directly on the photo below to trace a freeform path, then **➕ Add Path Layer**. See [The Pen Tool](#the-pen-tool) below. |
+| **Adjustment** | An adjustment layer: Exposure, Contrast, Saturation, Temperature, Tint and Clarity applied to *everything below it* in the stack (the photo and the layers under it, not those above). Limit it to part of the photo with a layer mask (⚙️ Settings → a selection from the Masks tab) and fade it with its opacity; it has no pixels, so no blend mode or layer styles. In a layered PSD export it isn't a separate layer (its effect is in the composite). |
 | **PSD** | Upload a Photoshop file: each layer becomes an Image layer, with its name, opacity, blend mode and visibility, placed where it was in the document and stretched to the photo's frame. Layers inside a hidden group arrive hidden. Masks, clipping masks and fill opacity are applied to the pixels. **Skip the bottom layer** (on by default) leaves out the photo itself. Text, shapes and smart objects arrive rasterized, as Photoshop stored them. Adjustment layers, layer effects (shadows, glows, strokes) and vector masks aren't imported. Reads RGB and Grayscale PSDs at 8 or 16 bits, not PSB or CMYK. A PSD can also be opened as the photo itself, which opens its composite image. |
 
 **The layer stack** — each layer's own expander (click its name to open it) splits into three
