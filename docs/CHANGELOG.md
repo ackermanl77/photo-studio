@@ -7,6 +7,29 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-19 -- Creative filters (F26)
+
+- **`app/creative_filters.py`:** classical (OpenCV/NumPy), on float RGB, so the 16-bit path keeps
+  its precision.
+  - **Lens blur:** an anti-aliased disc kernel in linear light, radius up to 3 % of the short edge,
+    with Whole photo / Center / Tilt-shift focus masks.
+  - **Motion blur:** a sub-pixel line kernel, up to 5 % of the long edge, at an angle.
+  - **Bloom:** linear-light highlights above a threshold, Gaussian-blurred at 3 % of the short edge,
+    screened on top.
+  - **Halftone:** cells up to 6 % of the short edge, dot radius from the cell's darkness, 1 px soft
+    edge, grey or per-channel screens.
+  - **Glitch:** an R/B channel split plus seeded slice shifts, so it is deterministic.
+  - **Speed:** big kernels run on a copy reduced to a ~12 px radius and scaled back, about 1.5 s
+    each at 24 MP.
+- **Wiring:** nine registry controls in the Effects section (`effects_lens_blur`, `_focus`,
+  `effects_motion_blur`, `_angle`, `effects_bloom`, `_threshold`, `effects_halftone`, `_mode`,
+  `effects_glitch`). The pipeline runs them in the Effects step, after the post-crop vignette and
+  before the grain (`PhotoProcessor.apply_creative_filters`). Spanish strings added; the widget keys
+  are pinned.
+- Tests: `tests/test_creative_filters.py` (disc vs streak shapes, focus masks, bloom only above its
+  threshold, halftone ink/paper, a deterministic glitch, resolution independence, both pipeline
+  paths).
+
 ## 2026-10-19 -- More layer styles (F28) and a duplicate finder (F29)
 
 - **F28, three new styles in `app/layer_styles.py`:** each is clipped to the layer's own pixels,

@@ -646,6 +646,20 @@ class PhotoProcessor:
         self.image = correct_vignette(self.image, amount, midpoint)
         return self
 
+    def apply_creative_filters(self, options: dict) -> "PhotoProcessor":
+        """Lens/motion blur, bloom, halftone, glitch (F26, app.creative_filters) on whichever data is real."""
+        from app.creative_filters import apply_creative_filters, has_creative_filters
+
+        if not has_creative_filters(options):
+            return self
+        if self.hdr is not None:
+            return self._set_hdr(apply_creative_filters(self.hdr, options))
+        info = dict(self.image.info)
+        array = np.asarray(self.image.convert("RGB"), dtype=np.float32) / 255.0
+        self.image = Image.fromarray((apply_creative_filters(array, options) * 255.0 + 0.5).astype(np.uint8), mode="RGB")
+        self.image.info = info
+        return self
+
     def apply_film_grain(self, amount: float = 0.0) -> "PhotoProcessor":
         if self.hdr is not None:
             if not amount:
