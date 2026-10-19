@@ -128,6 +128,16 @@ LOCAL_ADJUSTMENT_SPECS = {
 }
 MAX_LOCAL_ADJUSTMENTS = 32
 
+
+def clean_adjustment_set(value) -> dict:
+    """An adjustment layer's set (F25): the per-selection keys, clamped; anything else dropped."""
+    value = value if isinstance(value, dict) else {}
+    out = {}
+    for name, spec in LOCAL_ADJUSTMENT_SPECS.items():
+        raw = value.get(name, 0)
+        out[name] = float(min(max(raw, spec.minimum), spec.maximum)) if _is_number(raw) else 0.0
+    return out
+
 DETAIL_STAGE_OPTION_KEYS = tuple(key for key, spec in OPTION_SPECS.items() if spec.stage == "detail")
 
 

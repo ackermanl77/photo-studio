@@ -951,4 +951,10 @@ ES = {
     'Black & white': 'Blanco y negro',
     'Glitch': 'Glitch',
     'Digital glitch: color channels split sideways and slices of the photo shifted.': 'Glitch digital: los canales de color se separan de lado y franjas de la foto se desplazan.',
+    'Adjustment': 'Ajuste',
+    'An adjustment layer changes everything below it in the stack -- the photo and the layers under it -- and can be limited with a layer mask (⚙️ Settings) and faded with its opacity.': 'Una capa de ajuste cambia todo lo que hay debajo en la pila (la foto y las capas inferiores); se puede limitar con una máscara de capa (⚙️ Ajustes) y atenuar con su opacidad.',
+    'Add Adjustment Layer': 'Agregar capa de ajuste',
+    'Layer styles need pixels: an adjustment layer has none.': 'Los estilos de capa necesitan píxeles: una capa de ajuste no tiene.',
+    'Changes everything below this layer. Limit it with a layer mask in ⚙️ Settings.': 'Cambia todo lo que hay debajo de esta capa. Limítala con una máscara de capa en ⚙️ Ajustes.',
+    'In stops: +1 doubles the light.': 'En pasos: +1 duplica la luz.',
 }

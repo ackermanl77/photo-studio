@@ -79,6 +79,14 @@ class WorkspaceLayer:
     blend_mode: str = "normal"
     visible: bool = True
     mask: Image.Image | None = None
+    # An adjustment layer (F25): no pixels of its own; this adjustment set (the per-selection set,
+    # app.edit_schema.LOCAL_ADJUSTMENT_SPECS) is applied to everything below it in the stack,
+    # through `mask` and `opacity`. None = an ordinary pixel layer.
+    adjustments: dict | None = None
+
+    @property
+    def is_adjustment(self) -> bool:
+        return self.adjustments is not None
 
 
 def _layer_to_dict(layer: WorkspaceLayer) -> dict:
@@ -89,7 +97,7 @@ def _layer_to_dict(layer: WorkspaceLayer) -> dict:
         mask_buffer = io.BytesIO()
         layer.mask.save(mask_buffer, format="PNG")
         mask = base64.b64encode(mask_buffer.getvalue()).decode("ascii")
-    return {
+    data = {
         "name": layer.name,
         "image": base64.b64encode(image_buffer.getvalue()).decode("ascii"),
         "opacity": layer.opacity,
@@ -97,12 +105,21 @@ def _layer_to_dict(layer: WorkspaceLayer) -> dict:
         "visible": layer.visible,
         "mask": mask,
     }
+    if layer.adjustments is not None:
+        data["adjustments"] = dict(layer.adjustments)
+    return data
 
 
 def _layer_from_dict(data: dict) -> WorkspaceLayer:
     image = Image.open(io.BytesIO(base64.b64decode(data["image"]))).convert("RGBA")
     mask = Image.open(io.BytesIO(base64.b64decode(data["mask"]))).convert("L") if data.get("mask") else None
-    return WorkspaceLayer(data["name"], image, data.get("opacity", 1.0), data.get("blend_mode", "normal"), data.get("visible", True), mask)
+    adjustments = data.get("adjustments")
+    if adjustments is not None:
+        from app.edit_schema import clean_adjustment_set
+
+        adjustments = clean_adjustment_set(adjustments)
+    return WorkspaceLayer(data["name"], image, data.get("opacity", 1.0), data.get("blend_mode", "normal"), data.get("visible", True), mask,
+                          adjustments)
 
 
 def layers_to_json(layers: list[WorkspaceLayer]) -> str:
