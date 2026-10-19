@@ -24,8 +24,16 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 - **UI:** Masks/Repair → ➕ Add a selection → **AI Mask** (Subject / Person / Sky, with a download note
   before the first model mask). Spanish strings added.
 - **Tests:** `tests/test_ai_masks.py` covers the Sky masks, Subject/Person from stand-in class
-  probabilities, the painted format, the backend route and the Masks tab under AppTest. The real model
-  wasn't run: its weights haven't been downloaded.
+  probabilities, the painted format, the backend route and the Masks tab under AppTest.
+- **Real model run (2026-10-19):** the 42 MB weights downloaded in about 1 s and the model ran on the
+  RTX 5080 (CUDA). On `tests/assets/portrait_public_domain.jpg`:
+  - **Person and Subject:** both cleanly outlined the sitter (hair, beard, shoulders, suit; 58 % of
+    the frame).
+  - **Timing:** about 4 s for the first mask (model load), then 0.01 s; 2.5 s through `POST /ai_mask`
+    in a fresh process.
+  - **Known limit of the classical Sky mask:** it also takes a plain, smooth, light grey studio
+    backdrop touching the top edge (patchily). Nothing tells an overcast sky from a grey wall without a
+    model.
 
 ## 2026-10-19 -- Adjustment layers (F25)
 
