@@ -7,6 +7,26 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-19 -- AI masks (F16)
+
+- **`app/ai_masks.py`:**
+  - **Subject / Person:** torchvision DeepLabV3-MobileNetV3-Large (Pascal VOC), softmax at a
+    520 px short edge. Subject = 1 - background; Person = class 15.
+    - **Runtime:** GPU when CUDA is available, optional through the GPU pack.
+    - **Weights:** 42 MB, downloaded by torchvision on the first mask and not bundled.
+    - `weights_cached()` checks torch's hub cache without importing torch.
+  - **Sky:** classical. Bright, low-texture blue / white / sunset pixels connected to the top edge,
+    closed and softened.
+  - **Output:** `mask_to_painted_b64()` produces the paint editor's format, so an AI mask is an
+    ordinary Painted selection.
+- **Backend:** `POST /ai_mask` (token-checked like `/process`, pixel limit) does the inference, so the
+  Streamlit process never imports torch. `backend_client.ai_mask_via_backend()` calls it.
+- **UI:** Masks/Repair → ➕ Add a selection → **AI Mask** (Subject / Person / Sky, with a download note
+  before the first model mask). Spanish strings added.
+- **Tests:** `tests/test_ai_masks.py` covers the Sky masks, Subject/Person from stand-in class
+  probabilities, the painted format, the backend route and the Masks tab under AppTest. The real model
+  wasn't run: its weights haven't been downloaded.
+
 ## 2026-10-19 -- Adjustment layers (F25)
 
 - **Model:** `WorkspaceLayer.adjustments` (`is_adjustment`). The wire format carries

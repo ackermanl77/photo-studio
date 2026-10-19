@@ -19,6 +19,7 @@ import uuid
 import streamlit as st
 from PIL import Image
 
+from app import backend_client
 from app.advanced_masks import (
     COMBINE_MODES, WAND_SAMPLE_SIZES, MaskLayer, MaskStack, color_mask, gradient_mask, luminance_mask, magic_wand_mask,
     radial_mask, soften_mask,
@@ -30,6 +31,8 @@ from app.ui_editors import _paint_editor_html, _wand_picker_html
 from app.i18n import t, t_format, t_option
 
 SELECTION_KINDS = ["Luminance", "Color", "Horizontal gradient", "Vertical gradient", "Radial", "Painted", "Magic Wand"]
+# Offered in "Add a selection"; an AI mask (F16) is stored as an ordinary Painted selection.
+NEW_SELECTION_KINDS = [*SELECTION_KINDS, "AI Mask"]
 
 
 def decode_painted_mask(mask_b64: str) -> Image.Image:
@@ -59,6 +62,37 @@ def build_mask_image(source: Image.Image, kind: str, params: dict, painted: dict
     return gradient_mask(source.size, "horizontal" if "Horizontal" in kind else "vertical")
 
 
+def add_ai_mask_selection(layers: list, key_prefix: str, source: Image.Image) -> None:
+    """➕ Add a selection → AI Mask (F16, app.ai_masks): Subject/Person (DeepLabV3, through the GPU
+    pack, run by the backend) or Sky (classical), added as a Painted selection."""
+    from app import ai_masks
+
+    model_ready = ai_masks.ai_masks_installed()
+    kind = st.radio(t("Select"), ai_masks.AI_MASK_KINDS, horizontal=True, key=f"{key_prefix}-ai-kind", format_func=t_option)
+    if kind in ai_masks.MODEL_KINDS and not model_ready:
+        st.caption(t("Subject and Person masks need the optional GPU pack (PyTorch). Sky works without it."))
+    elif kind in ai_masks.MODEL_KINDS and not ai_masks.weights_cached():
+        st.caption(t("The first Subject or Person mask downloads its model ({0}) once.").format(ai_masks.WEIGHTS_DOWNLOAD))
+    else:
+        st.caption(t("Subject finds people, animals and objects; Person only people; Sky the sky connected to the top of the frame."))
+    if st.button(t("🤖 Create AI mask"), key=f"{key_prefix}-ai-btn", disabled=kind in ai_masks.MODEL_KINDS and not model_ready):
+        buffer = io.BytesIO()
+        preview_image(source, (1600, 1600)).save(buffer, format="PNG")
+        try:
+            with st.spinner(t("Finding the {0}…").format(t(kind).lower())):
+                mask = Image.open(io.BytesIO(backend_client.ai_mask_via_backend(buffer.getvalue(), kind))).convert("L")
+        except RuntimeError as error:
+            st.error(t("⚠️ {0}").format(t(str(error))))
+            return
+        if mask.getextrema()[1] < 32:
+            st.warning(t("No {0} found in this photo.").format(t(kind).lower()))
+            return
+        from app.painted_masks import intern_painted_mask
+
+        layers.append(_new_selection(f"{kind} {len(layers) + 1}", "Painted", {"mask_ref": intern_painted_mask(ai_masks.mask_to_painted_b64(mask))}))
+        request_rerun()
+
+
 def _new_selection(name: str, kind: str, params: dict, soften: int = 0, invert: bool = False) -> dict:
     return {"id": uuid.uuid4().hex, "name": name, "kind": kind, "params": params, "soften": soften, "invert": invert, "opacity": 1.0, "enabled": True}
 
@@ -77,8 +111,10 @@ def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image,
         layer.setdefault("id", uuid.uuid4().hex)  # selections saved before ids existed
 
     with st.expander(t("➕ Add a selection"), expanded=not layers):
-        new_kind = st.selectbox(t("Selection Type"), SELECTION_KINDS, key=f"{key_prefix}-new-kind", format_func=t_option)
-        if new_kind == "Magic Wand":
+        new_kind = st.selectbox(t("Selection Type"), NEW_SELECTION_KINDS, key=f"{key_prefix}-new-kind", format_func=t_option)
+        if new_kind == "AI Mask":
+            add_ai_mask_selection(layers, key_prefix, source)
+        elif new_kind == "Magic Wand":
             new_tolerance = st.slider(t("Tolerance"), 1, 150, 40, key=f"{key_prefix}-wand-tol")
             new_contiguous = st.checkbox(t("Contiguous (connected region only)"), value=True, key=f"{key_prefix}-wand-contig")
             new_sample = st.selectbox(

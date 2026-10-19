@@ -267,6 +267,32 @@ def health():
     return jsonify({"status": "ok", "service": "photo-processing-backend", "auth": bool(backend_token())})
 
 
+@app.post("/ai_mask")
+def ai_mask():
+    """AI masks (F16, app.ai_masks): the uploaded image's Subject/Person/Sky mask as a grayscale PNG.
+    Inference runs here, not in the Streamlit process (torch stays out of it, as for AI Upscale)."""
+    from app.ai_masks import AI_MASK_KINDS, MODEL_KINDS, ai_masks_installed, make_ai_mask
+
+    kind = request.form.get("kind", "")
+    if kind not in AI_MASK_KINDS:
+        return jsonify({"error": f"kind must be one of {', '.join(AI_MASK_KINDS)}"}), 400
+    if kind in MODEL_KINDS and not ai_masks_installed():
+        return jsonify({"error": "Subject and Person masks need the GPU pack (PyTorch)."}), 400
+    image_file = request.files.get("image")
+    if image_file is None:
+        return jsonify({"error": "No image uploaded"}), 400
+    try:
+        image = Image.open(BytesIO(image_file.read()))
+        check_pixel_count(*image.size)
+        mask = make_ai_mask(image.convert("RGB"), kind)
+    except CLIENT_ERRORS as error:
+        return jsonify({"error": str(error)}), 400
+    buffer = BytesIO()
+    mask.save(buffer, format="PNG")
+    buffer.seek(0)
+    return send_file(buffer, mimetype="image/png")
+
+
 @app.post("/process")
 def process():
     try:

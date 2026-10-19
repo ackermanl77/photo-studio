@@ -210,6 +210,24 @@ def _post_process(
     return response
 
 
+def ai_mask_via_backend(image_bytes: bytes, kind: str, timeout: float = 600) -> bytes:
+    """POST /ai_mask (F16): the Subject/Person/Sky mask of `image_bytes` as grayscale PNG bytes. The
+    first Subject/Person mask may download the model's weights, hence the generous timeout."""
+    headers = {TOKEN_HEADER: backend_token()} if backend_token() else {}
+    try:
+        response = requests.post(f"{BACKEND_URL}/ai_mask", data={"kind": kind}, files={"image": ("image.png", image_bytes)},
+                                 headers=headers, timeout=timeout)
+    except requests.RequestException as error:
+        raise RuntimeError(f"Could not reach the local processing backend: {error}") from error
+    if not response.ok:
+        try:
+            message = response.json().get("error", response.text)
+        except ValueError:
+            message = response.text
+        raise RuntimeError(message)
+    return response.content
+
+
 def export_via_backend(
     image_bytes: bytes,
     filename: str,
