@@ -7,6 +7,26 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-18 -- Liquify (F23)
+
+- **`app/liquify.py`:** a parametric mesh-warp brush.
+  - **Strokes** are `{tool, size, strength, points}`. The tools are push, bloat, pinch, twirl_cw and
+    twirl_ccw. Points are fractions of the frame; size is a fraction of the short edge.
+  - **Replay:** strokes are replayed stamp by stamp into an inverse displacement field on a 512 px grid,
+    so a proxy and the full-resolution render warp alike. Each stamp is composed onto the field
+    (`D'(x) = f(x) - x + D(f(x))`), so later strokes move already-warped pixels.
+  - **Output:** the field is scaled up and applied once with `cv2.remap` (bilinear, reflected edges, in
+    row chunks), for 8-bit images and the 16-bit path's float arrays.
+- **Pipeline:** applied last in `apply_geometry()` through the new `liquify` option (stage 1). Crop,
+  Masks and Repair therefore draw on the warped frame.
+- **Recipe:** the recipe list key `liquify_strokes` (Undo/Redo, projects), sanitized, never synced to
+  other photos.
+- **UI:** ⛶ Geometry → 🌀 Liquify has tool, size and strength widgets and a new static editor
+  (`static/editors/liquify.html/.js`, the hidden-text_area commit). Arrow keys plus Space work as a
+  keyboard brush. There are Undo-last-stroke and Clear buttons, and the Spanish strings are added.
+- Tests: `tests/test_liquify.py` (tool directions, composition, resolution independence, float path,
+  validation, the pipeline, the editor's JS under Node, the Geometry tab under AppTest).
+
 ## 2026-10-18 -- EXR and PFM export (F24)
 
 - `app/float_export.py` writes both formats in NumPy + zlib, since OpenCV 5's wheel has no EXR encoder:

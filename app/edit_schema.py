@@ -90,6 +90,8 @@ _OTHER_OPTION_SPECS: dict[str, OptionSpec] = {
     # One adjustment set per selection that has its own (B8) -- paired, in order, with the masks in
     # /process's "local_masks" file. See LOCAL_ADJUSTMENT_SPECS.
     "local_adjustments": OptionSpec("local_adjustments", nullable=True),
+    # Liquify (F23): parametric warp strokes (app.liquify), applied last in the Geometry step.
+    "liquify": OptionSpec("liquify", nullable=True, stage="detail"),
     # Crop
     "aspect": OptionSpec("aspect", nullable=True),
     "crop_box": OptionSpec("crop_box", nullable=True),
@@ -227,6 +229,15 @@ def _check_value(key: str, spec: OptionSpec, value):
     if kind == "aspect":
         parse_aspect(value)
         return value
+    if kind == "liquify":
+        from app.liquify import MAX_STROKES, clean_strokes
+
+        if not isinstance(value, list) or len(value) > MAX_STROKES:
+            raise OptionsError(f"liquify must be a list of at most {MAX_STROKES} strokes")
+        strokes = clean_strokes(value)
+        if len(strokes) != len(value):
+            raise OptionsError('liquify strokes must be {"tool", "size", "strength", "points": [[x, y], ...]}')
+        return strokes or None
     if kind == "export":
         from app.export import validate_export_settings
 
@@ -278,7 +289,7 @@ RECIPE_CONTROLS: dict[str, RecipeControl] = {
 
 # Recipe entries that aren't single widgets -- lists of per-selection/per-layer dicts, validated
 # structurally by sanitize_recipe() rather than clamped.
-RECIPE_LIST_KEYS = ("mask_layers", "removal_mask_layers", "curve_extra_points", "layers")
+RECIPE_LIST_KEYS = ("mask_layers", "removal_mask_layers", "curve_extra_points", "layers", "liquify_strokes")
 SELECTION_KINDS = ("Luminance", "Color", "Horizontal gradient", "Vertical gradient", "Radial", "Painted", "Magic Wand")
 
 
@@ -369,6 +380,10 @@ def sanitize_recipe(recipe) -> dict:
             ]
         elif key == "layers":
             clean[key] = [layer for layer in value if isinstance(layer, dict)] if isinstance(value, list) else []
+        elif key == "liquify_strokes":
+            from app.liquify import clean_strokes
+
+            clean[key] = clean_strokes(value)
     return clean
 
 

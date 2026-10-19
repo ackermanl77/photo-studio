@@ -172,6 +172,8 @@ with st.container(key="workspace-split"):
             geometry.lens_section(ctx)
             geometry.compute_geometry(ctx)
             st.divider()
+            geometry.liquify_section(ctx)
+            st.divider()
             geometry.crop_section(ctx)
 
         enter("☼ Basic")

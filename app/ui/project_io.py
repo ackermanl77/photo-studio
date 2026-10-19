@@ -106,7 +106,7 @@ def open_project_bytes(content: bytes) -> None:
     # before that control existed, or a hand-trimmed one) is reset to its default, rather than
     # silently keeping whatever the previous photo's edit had there.
     pending_recipe = {
-        **RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": [],
+        **RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": [], "liquify_strokes": [],
         **migrate_legacy_keys(loaded_project.recipe),  # before the merge, so old keys aren't shadowed by new defaults
     }
     pending_recipe["layers"] = layers_from_project(loaded_project)

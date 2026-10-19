@@ -1,4 +1,4 @@
-"""Geometry tab: Rotate & Straighten, Lens Corrections, Crop.
+"""Geometry tab: Rotate & Straighten, Lens Corrections, Liquify, Crop.
 
 The pipeline applies rotation/flip, Lens, straighten and constrain-crop first and the crop last
 (app.pipeline); compute_geometry() builds the same geometry locally so Crop and the Masks/Repair
@@ -10,15 +10,15 @@ import json
 
 import streamlit as st
 
-from app import geometry, lens_lookup
+from app import geometry, lens_lookup, liquify
 from app.controls import CONTROLS_BY_KEY, section_keys
 from app.lens_corrections import LENS_PROFILES
 from app.professional_tools import draw_guides_and_grid, grid_line_fractions, preview_image
 from app.ui.processing import lens_corrected_source
 from app.ui.state import consume_new_commit, request_rerun, section_header, section_reset_button, show_component
 from app.ui.widgets import render_control
-from app.ui_editors import _crop_editor_html
-from app.i18n import t
+from app.ui_editors import _crop_editor_html, _liquify_editor_html
+from app.i18n import t, t_format
 
 GEOMETRY_KEYS = (*section_keys("geometry"), *(key for key in section_keys("lens") if CONTROLS_BY_KEY[key].option))
 
@@ -90,6 +90,10 @@ def lens_section(ctx) -> None:
 def compute_geometry(ctx) -> None:
     """The frame Crop/Masks/Repair work against (after rotate_section and lens_section ran)."""
     ctx.geometry_options = {key: ctx.values[key] for key in GEOMETRY_KEYS}
+    # Liquify strokes (F23) are drawn on the geometry frame and applied last in the same step.
+    strokes = st.session_state.setdefault("liquify_strokes", [])
+    if strokes:
+        ctx.geometry_options["liquify"] = list(strokes)
     geometry_json = json.dumps(ctx.geometry_options, sort_keys=True)
     ctx.mask_source = lens_corrected_source(ctx.source_digest, ctx.source, geometry_json)
     # Cache key for everything built against mask_source: the photo plus the geometry that warped it.
@@ -101,6 +105,43 @@ def compute_geometry(ctx) -> None:
         st.session_state["_pending_restore"] = {"straighten": detected_angle}
         st.toast(t("Straighten set to {0:+.2f}°").format(detected_angle) if detected_angle else t("No dominant lines found to level"), icon="📐")
         request_rerun()
+
+
+def liquify_section(ctx) -> None:
+    """Liquify (F23): a mesh-warp brush. Strokes are parametric (app.liquify) -- kept in
+    st.session_state["liquify_strokes"], part of the recipe (Undo/Redo, projects) but never synced
+    to other photos -- and drawn on the geometry frame, already showing the strokes so far."""
+    strokes = st.session_state.setdefault("liquify_strokes", [])
+    section_header("🌀 Liquify", extra_modified=bool(strokes))
+    tool_col, size_col, strength_col = st.columns([1.3, 1, 1])
+    tool = tool_col.selectbox(t("Tool"), liquify.TOOLS, key="liq-tool", format_func=t_format(lambda name: liquify.TOOL_LABELS[name]))
+    size = size_col.slider(t("Brush size (%)"), 1, 50, 10, key="liq-size", help=t("The brush radius, as a percentage of the photo's short edge."))
+    strength = strength_col.slider(t("Strength"), 5, 100, 50, key="liq-strength")
+    mask_source = ctx.mask_source
+
+    def build_editor():
+        return _liquify_editor_html(preview_image(mask_source, (480, 480)), "liquify-editor", size / 100.0, liquify.MAX_POINTS)
+
+    show_component(build_editor)
+    with st.container(key="liquify-editor-hidden"):
+        pending = st.text_area(t("Liquify stroke"), key="liquify-editor-data", label_visibility="collapsed")
+    if consume_new_commit(pending, "liquify-editor-committed"):
+        try:
+            points = json.loads(pending)["points"]
+        except (json.JSONDecodeError, TypeError, KeyError):
+            points = None
+        stroke = liquify.clean_stroke({"tool": tool, "size": size / 100.0, "strength": strength / 100.0, "points": points})
+        if stroke is not None and len(strokes) < liquify.MAX_STROKES:
+            strokes.append(stroke)
+            request_rerun()
+    undo_col, clear_col = st.columns(2)
+    if undo_col.button(t("↶ Undo last stroke"), key="liq-undo-btn", disabled=not strokes, use_container_width=True):
+        strokes.pop()
+        request_rerun()
+    if clear_col.button(t("✖ Clear Liquify"), key="liq-clear-btn", disabled=not strokes, use_container_width=True):
+        strokes.clear()
+        request_rerun()
+    st.caption(t("{0} stroke(s). Liquify belongs to this photo: it isn't synced to other photos.").format(len(strokes)))
 
 
 def _numeric_crop_changed() -> None:
