@@ -7,6 +7,30 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-19 -- More layer styles (F28) and a duplicate finder (F29)
+
+- **F28, three new styles in `app/layer_styles.py`:** each is clipped to the layer's own pixels,
+  and they stack in Photoshop's order (back to front: Drop Shadow, Outer Glow, Stroke, the content,
+  Gradient Overlay, Color Overlay, Inner Shadow, Bevel & Emboss).
+  - **Inner Shadow:** the area outside the silhouette, offset and blurred, seen inside it.
+  - **Gradient Overlay:** linear, across the layer's own bounds, at an angle (0 = left to right,
+    90 = bottom to top).
+  - **Bevel & Emboss (inner):** the blurred alpha is used as a height map with Sobel slopes lit from
+    an angle. Slopes are normalised by the blurred edge's peak gradient, so depth 1 means a face
+    turned fully to the light. Highlight and shadow colours are configurable.
+  - **Wiring:** the Styles sub-tab has controls for all three, scaled for proxies, with Spanish
+    strings. Layered PSD export rasterizes them like the others.
+- **F29, `app/duplicates.py`:**
+  - **Fingerprint:** a 64-bit dHash of the culling preview, cached in the catalog (`phash` /
+    `hash_mtime` columns, `get_hash`/`set_hash`) and recomputed only for changed files.
+  - **Grouping:** transitive, by Hamming distance (2/6/12 bits for exact / near / similar), with
+    vectorised popcounts.
+  - **Keeper:** the best focus score among the copies at ≥ 90 % of the group's largest resolution,
+    because a downsized copy measures sharper per pixel.
+  - **UI:** Library Catalog → 🔁 Find duplicates, with thumbnails, the keeper marked, and rejecting
+    per group or for every group.
+- Tests: `tests/test_layer_styles_more.py`, `tests/test_duplicates.py`.
+
 ## 2026-10-18 -- Layered PSD import and export (F22)
 
 - `app/psd.py`, in NumPy + zlib rather than psd-tools: psd-tools' compositing extra needs

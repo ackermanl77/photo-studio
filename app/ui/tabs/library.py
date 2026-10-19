@@ -276,6 +276,60 @@ def compare_section(catalog: PhotoCatalog, rec: list, cursor: int) -> None:
         request_rerun()
 
 
+def duplicates_section(catalog: PhotoCatalog, rec: list) -> None:
+    """🔁 Find duplicates (F29): near-identical photos grouped by perceptual hash, the sharpest kept."""
+    from app.duplicates import STRICTNESS, catalog_hashes, find_duplicate_groups
+
+    with st.expander(t("🔁 Find duplicates"), expanded=False, key="sec-lib-duplicates"):
+        st.caption(t("Groups copies and near-identical frames of the catalogued photos (re-saved, resized, burst shots). "
+                     "The sharpest of each group is suggested to keep; the others can be rejected in one click."))
+        strictness = st.select_slider(t("Match"), list(STRICTNESS), value="Near duplicates", key="lib-dup-strictness",
+                                      format_func=t_option)
+        if st.button(t("Find duplicates"), key="lib-dup-btn", disabled=len(rec) < 2):
+            bar = st.progress(0.0)
+            entries = catalog_hashes(catalog, [entry["path"] for entry in rec],
+                                     progress=lambda index, total: bar.progress(index / total if total else 1.0))
+            groups = find_duplicate_groups(entries, STRICTNESS[strictness])
+            st.session_state["_lib_dup_groups"] = [{"paths": g.paths, "keep": g.keep, "distances": g.distances} for g in groups]
+        groups = st.session_state.get("_lib_dup_groups")
+        if groups is None:
+            return
+        if not groups:
+            st.caption(t("No duplicates found."))
+            return
+        st.caption(t("{0} group(s), {1} photo(s) that could go.").format(len(groups), sum(len(g["paths"]) - 1 for g in groups)))
+        write_xmp = bool(st.session_state.get("lib-xmp-write"))
+
+        def reject(paths) -> None:
+            for path in paths:
+                entry = catalog.get(path)
+                if "rejected" not in entry["tags"]:
+                    save_rating(catalog, path, int(entry["rating"]), [*entry["tags"], "rejected"], write_xmp=write_xmp)
+
+        if st.button(t("🚫 Reject all but the sharpest, in every group"), key="lib-dup-reject-all"):
+            for group in groups:
+                reject([p for p in group["paths"] if p != group["keep"]])
+            st.toast(t("Rejected {0} photo(s)").format(sum(len(g["paths"]) - 1 for g in groups)), icon="🚫")
+        for index, group in enumerate(groups[:20]):
+            st.markdown(t("**Group {0}**").format(index + 1))
+            columns = st.columns(min(4, len(group["paths"])))
+            for position, path in enumerate(group["paths"][:4]):
+                entry = catalog.get(path)
+                keep = path == group["keep"]
+                label = (t("✅ Keep") if keep else t("{0} bit(s) apart").format(group["distances"].get(path, 0)))
+                with columns[position]:
+                    if tab_visible():
+                        try:
+                            st.image(str(thumbnail(path, user_data_dir() / "thumbs")), use_container_width=True)
+                        except (OSError, ValueError):
+                            pass
+                    st.caption(f"{Path(path).name} · {label}" + (f" · {score_caption(entry)}" if entry["focus"] is not None else "")
+                               + (f" · {t('rejected')}" if "rejected" in entry["tags"] else ""))
+            if st.button(t("🚫 Reject the others"), key=f"lib-dup-reject-{index}"):
+                reject([p for p in group["paths"] if p != group["keep"]])
+                request_rerun()
+
+
 # ---- HDR merge and panorama (F18) ----
 HDR_METHOD_LABELS = {"fusion": "Exposure fusion (natural, no exposure times needed)",
                      "debevec": "HDR merge + tone map (stronger; needs EXIF exposure times)"}
@@ -502,6 +556,7 @@ def library_section(ctx) -> None:
             components.html(static_text("library_shortcuts.html"), height=0)
             organise_section(catalog, current_path)
             compare_section(catalog, rec, cursor)
+            duplicates_section(catalog, rec)
     elif more_mode == "Batch Processor":
         # Every supported format, RAW included (app.raw_import.SUPPORTED_EXTENSIONS) -- this
         # used to accept only JPG/PNG.
