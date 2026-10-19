@@ -24,7 +24,10 @@ from importlib import metadata
 from pathlib import Path
 
 PACK_FORMAT = 1
-ALWAYS_PRUNE = {"opencv-python", "opencv-python-headless", "opencv-contrib-python"}
+# The GUI OpenCV basicsr pulls in, and facexlib's numba/llvmlite (~150 MB) with gfpgan/filterpy:
+# realesrgan's metadata requires them for its face-enhance script, but neither app.ai_upscale nor
+# RealESRGANer/RRDBNet import them (PhotoStudio.spec excludes the same names).
+ALWAYS_PRUNE = {"opencv-python", "opencv-python-headless", "opencv-contrib-python", "numba", "llvmlite", "facexlib", "gfpgan", "filterpy"}
 
 
 def normalize(name: str) -> str:

@@ -146,6 +146,7 @@ Pillow / NumPy / OpenCV / tifffile / optional rawpy / optional torch (GPU pack: 
 - `app/cli.py` (run as `python -m app`) — single-image/folder CLI over `run_pipeline()`, independent of the Flask backend.
 - `app/observability.py`, `app/diagnostics.py` — logging (see Architecture, "Logging"), audit records, health diagnostics (System Health, incl. AI Upscale / GPU pack).
 - `app/refine_preview.py` — refine-on-pause tracker for proxy previews.
+- `scripts/windows_resources.py` — the exe's version resource (from `app.__version__`, publisher "MELEJ"), manifest (UTF-8 active code page, PerMonitorV2) and the `.photoproject` document icon (`app/assets/photoproject.ico`, the exe's icon index 1), used by `PhotoStudio.spec` (K6/K7).
 
 ## Testing conventions
 

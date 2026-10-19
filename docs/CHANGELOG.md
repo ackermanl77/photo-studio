@@ -7,6 +7,25 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-18 -- Exe resources and a CPU-only base (K6/K7)
+
+- `scripts/windows_resources.py`, called by `PhotoStudio.spec`:
+  - **Version resource:** rendered from `app.__version__`, publisher "MELEJ" (the one publisher name
+    across the projects; the installer's `AppPublisher` too).
+  - **Manifest:** PyInstaller's default plus `activeCodePage` UTF-8 (narrow-API callers such as
+    `cv2.imread` open non-ASCII paths) and `dpiAwareness` PerMonitorV2.
+  - **Document icon:** `make_document_icon()` drew `app/assets/photoproject.ico`, embedded as the exe's
+    second icon group; `PhotoStudio.iss`'s `DefaultIcon` is now `PhotoStudio.exe,1`.
+- **numba/llvmlite (~150 MB):** they came only from `facexlib` (with `gfpgan`/`filterpy`), required by
+  realesrgan's metadata for its face-enhance script. Neither `app/` nor `RealESRGANer`/`RRDBNet` import
+  them (checked with an import blocker in the gpu build venv). The spec excludes them, and the GPU pack
+  prunes them (`ALWAYS_PRUNE`).
+- **`release\` rebuilt as the CPU base:** 1.1 GB instead of the stale 3.4 GB all-in-one GPU build, with
+  no torch and no numba/llvmlite. The self-test passes.
+- **Checked with REA `inspect_pe_resources`:** RT_VERSION (`MELEJ | Photo Studio | 0.2.0.0`), the new
+  manifest, and two icon groups (the app's 7 sizes, the document's 9).
+- Tests: `tests/test_windows_resources.py`.
+
 ## 2026-10-18 -- More of the 16-bit path in float (B4)
 
 - `app/icc_float.py`: matrix/TRC ICC profiles (rXYZ/gXYZ/bXYZ + curv/para TRCs, no A2B0) are
