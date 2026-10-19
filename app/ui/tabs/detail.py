@@ -30,4 +30,20 @@ def effects_section(ctx) -> None:
     with fx_g_col:
         st.markdown(t("**Film Grain**"))
         values["effects_grain_amount"] = render_control("effects_grain_amount")
+    st.markdown(t("**Creative Filters**"))
+    blur_col, motion_col = st.columns(2)
+    with blur_col:
+        values["effects_lens_blur"] = render_control("effects_lens_blur")
+        values["effects_lens_blur_focus"] = render_control("effects_lens_blur_focus")
+    with motion_col:
+        values["effects_motion_blur"] = render_control("effects_motion_blur")
+        values["effects_motion_angle"] = render_control("effects_motion_angle")
+    bloom_col, halftone_col = st.columns(2)
+    with bloom_col:
+        values["effects_bloom"] = render_control("effects_bloom")
+        values["effects_bloom_threshold"] = render_control("effects_bloom_threshold")
+    with halftone_col:
+        values["effects_halftone"] = render_control("effects_halftone")
+        values["effects_halftone_mode"] = render_control("effects_halftone_mode")
+    values["effects_glitch"] = render_control("effects_glitch")
     section_reset_button("effects", "Effects")

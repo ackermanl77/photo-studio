@@ -16,6 +16,10 @@ from tests.test_frontend_unified_app import _stub_backend  # noqa: F401  (autous
 # Saved state, presets, projects and the AppTest suite address widgets by these keys: they must
 # never change (the HSL keys, hsl-<band>-<h|s|l>, are checked by pattern below).
 PINNED_WIDGET_KEYS = {
+    # Creative filters (F26).
+    "effects_lens_blur": "fx-lens-blur", "effects_lens_blur_focus": "fx-lens-focus", "effects_motion_blur": "fx-motion-blur",
+    "effects_motion_angle": "fx-motion-angle", "effects_bloom": "fx-bloom", "effects_bloom_threshold": "fx-bloom-threshold",
+    "effects_halftone": "fx-halftone", "effects_halftone_mode": "fx-halftone-mode", "effects_glitch": "fx-glitch",
     "cg_balance": "cg-balance", "lut": "lut-name", "lut_amount": "lut-amount", "cg_highlights_hue": "cg-hi-hue",
     "cg_highlights_intensity": "cg-hi-int", "cg_midtones_hue": "cg-mid-hue",
     "cg_midtones_intensity": "cg-mid-int", "cg_shadows_hue": "cg-sh-hue",

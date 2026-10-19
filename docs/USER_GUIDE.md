@@ -209,6 +209,16 @@ tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color
     stacks their effect, which is expected).
   - **Film Grain** — adds a monochromatic noise texture; a fresh random pattern every edit/export
     (so repeated exports don't look identically grainy).
+  - **Creative Filters** — run on the cropped frame before the grain, in this order:
+    - **Lens Blur:** an out-of-focus blur with a round aperture, so highlights become soft discs.
+      **Keep sharp** chooses Whole photo, Center, or a Tilt-shift band (the miniature look).
+    - **Motion Blur** with its angle.
+    - **Bloom:** a glow around the brightest parts; **Bloom Threshold** sets how bright they must be.
+    - **Halftone:** printed dots sized by the tones, black & white or one screen per colour.
+    - **Glitch:** colour channels split and slices shifted. It is the same glitch every time, so the
+      preview matches the export.
+    - Sizes follow the photo, so the preview and the full-resolution export look alike, and the
+      blurs work in linear light.
 
 ## 8. Repair — object removal (◉ Local → 🩹 Repair)
 

@@ -379,6 +379,11 @@ def run_pipeline(
 
     # Effects -- creative finishing on the final (cropped) frame.
     processor.apply_post_crop_vignette(options.get("effects_vignette_amount", 0.0), options.get("effects_vignette_midpoint", 50.0))
+    # Creative filters (F26) before the grain, so the grain sits on top of them.
+    processor.apply_creative_filters({key: options.get(key) for key in (
+        "effects_lens_blur", "effects_lens_blur_focus", "effects_motion_blur", "effects_motion_angle",
+        "effects_bloom", "effects_bloom_threshold", "effects_halftone", "effects_halftone_mode", "effects_glitch",
+    ) if options.get(key) is not None})
     if options.get("effects_grain_amount"):
         processor.apply_film_grain(options["effects_grain_amount"])
 
