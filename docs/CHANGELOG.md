@@ -7,6 +7,23 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-18 -- EXR and PFM export (F24)
+
+- `app/float_export.py` writes both formats in NumPy + zlib, since OpenCV 5's wheel has no EXR encoder:
+  - **EXR:** a single-part scanline OpenEXR 2 file with HALF B/G/R channels and ZIP compression (16-line
+    blocks, byte split + delta predictor; a block that doesn't shrink is stored raw). sRGB or Display P3
+    primaries go in `chromaticities`.
+  - **PFM:** little-endian, rows bottom-up.
+- **Linear light:** both formats undo the sRGB/P3 transfer curve of the 16-bit path's float pixels.
+- **New export formats "EXR"/"PFM"** (`FLOAT_FORMATS`):
+  - Choosing one forces `bit_depth` 16, so the backend renders in high precision; the UI sends 16 too.
+  - The CLI renders `.exr`/`.pfm` outputs in high precision.
+  - No EXIF.
+- **Checked by:**
+  - FFmpeg's own EXR decoder, which reads ZIP and raw-block files to within half precision (max error 7e-4);
+  - OpenCV's PFM decoder;
+  - `tests/test_float_export.py`, which includes a minimal EXR reader.
+
 ## 2026-10-18 -- Exe resources and a CPU-only base (K6/K7)
 
 - `scripts/windows_resources.py`, called by `PhotoStudio.spec`:

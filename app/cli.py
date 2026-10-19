@@ -220,6 +220,8 @@ def main() -> None:
         return
     if not args.output:
         raise SystemExit("--output is required when using --input")
+    if Path(args.output).suffix.lower() in (".exr", ".pfm"):
+        options["bit_depth"] = 16  # F24: a float file is rendered from the high-precision path
 
     image = decode_source(Path(args.input).read_bytes(), Path(args.input).name, high_bit=options.get("bit_depth") == 16,
                           working_space=options.get("working_space", "sRGB"))

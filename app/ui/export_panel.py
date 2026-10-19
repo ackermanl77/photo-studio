@@ -18,7 +18,7 @@ from PIL import Image
 from app import ai_upscale, backend_client
 from app.batch_release import export_multiple
 from app.color_profiles import COLOR_SPACES
-from app.export import DEFAULT_NAME_TEMPLATE, EXPORT_FORMATS, HIGH_BIT_FORMATS, LOSSY_FORMATS, METADATA_POLICIES, METADATA_POLICY_LABELS, OUTPUT_SHARPENING, ExportPresetStore, cached_export, render_export_name
+from app.export import DEFAULT_NAME_TEMPLATE, EXPORT_FORMATS, FLOAT_FORMATS, HIGH_BIT_FORMATS, LOSSY_FORMATS, METADATA_POLICIES, METADATA_POLICY_LABELS, OUTPUT_SHARPENING, ExportPresetStore, cached_export, render_export_name
 from app.painted_masks import inline_painted_masks, session_painted_masks
 from app.pipeline import check_upscale_output, expected_output_size
 from app.professional_tools import EXPORT_PROFILES, WATERMARK_POSITIONS
@@ -82,7 +82,7 @@ def export_settings_section(ctx) -> None:
         settings["bit_depth"] = st.selectbox(
             t("Bit depth"), [8, 16], key="exp-bit-depth", format_func=t_format(lambda bits: f"{bits}-bit"),
             disabled=st.session_state.get("exp-fmt", "JPEG") not in HIGH_BIT_FORMATS,
-            help=t("16-bit (PNG/TIFF only) keeps smooth skies and gradients free of banding for further editing or print. Renders at full resolution when you click Save."),
+            help=t("16-bit (PNG/TIFF only) keeps smooth skies and gradients free of banding for further editing or print. Renders at full resolution when you click Save. EXR (half float) and PFM (32-bit float) are always floating point, in linear light, for compositing and HDR tools."),
         )
         settings["color_space"] = st.selectbox(
             t("Color space"), list(COLOR_SPACES), key="exp-color-space", format_func=t_option,
@@ -238,7 +238,8 @@ def save_footer(ctx) -> None:
             "format": out_format, "quality": out_quality, "long_edge": settings["long_edge"], "sharpen": settings["sharpen"],
             "metadata": settings["metadata"], "remove_gps": settings["remove_gps"],
             "watermark": watermark if watermark["text"].strip() else None,
-            "bit_depth": settings["bit_depth"] if out_format in HIGH_BIT_FORMATS else 8,
+            # EXR/PFM (F24) are always float, rendered from the high-precision path.
+            "bit_depth": 16 if out_format in FLOAT_FORMATS else settings["bit_depth"] if out_format in HIGH_BIT_FORMATS else 8,
             "gpu_export": settings["gpu_export"],
             "color_space": settings["color_space"],
         }

@@ -21,6 +21,11 @@ image without them is widened from its 8 bits. A 16-bit PNG carries ICC and EXIF
 chunks); a 16-bit TIFF carries ICC and the IFD0 text tags (camera make/model, date, artist,
 copyright, software) but not the EXIF sub-IFD (exposure details, GPS) -- tifffile can't write it.
 
+Float formats (F24, app.float_export): "EXR" (OpenEXR, half floats, ZIP) and "PFM" hold linear-light
+RGB from the same float pixels; choosing one always renders in high precision (bit_depth is forced to
+16), and neither carries EXIF -- an EXR records its primaries in the chromaticities attribute instead
+of an ICC profile.
+
 Color space (settings["color_space"]): "sRGB" (the working space; the file keeps the image's own
 profile) or "Display P3", which converts the finished pixels into P3 and embeds a Display P3 profile
 (app.color_profiles) -- last, after resize, sharpening and the watermark, at 8 or 16 bits alike.
@@ -48,6 +53,8 @@ EXPORT_FORMATS = {
     "PNG": (".png", "image/png"),
     "WEBP": (".webp", "image/webp"),
     "TIFF": (".tif", "image/tiff"),
+    "EXR": (".exr", "image/x-exr"),
+    "PFM": (".pfm", "image/x-portable-floatmap"),
 }
 # AVIF (F19): about half the size of a JPEG at the same quality, with alpha, EXIF and the ICC
 # profile; offered when this Pillow has the codec (it does in the pinned build).
@@ -78,8 +85,10 @@ DEFAULT_EXPORT_SETTINGS = {
     "gpu_export": False,
     "color_space": "sRGB",
 }
-# Formats that can hold 16 bits per channel.
+# Formats that can hold 16 bits per channel (the user picks 8 or 16).
 HIGH_BIT_FORMATS = ("PNG", "TIFF")
+# Floating-point formats (F24): always rendered from the high-precision path, written linear.
+FLOAT_FORMATS = ("EXR", "PFM")
 
 _ORIENTATION = 0x0112
 _EXIF_IFD = 0x8769
@@ -125,7 +134,9 @@ def validate_export_settings(settings) -> dict:
         raise ValueError("export bit_depth must be 8 or 16")
     if clean["color_space"] not in COLOR_SPACES:
         raise ValueError(f"export color_space must be one of {', '.join(COLOR_SPACES)}")
-    if clean["bit_depth"] == 16 and clean["format"] not in HIGH_BIT_FORMATS:
+    if clean["format"] in FLOAT_FORMATS:
+        clean["bit_depth"] = 16
+    elif clean["bit_depth"] == 16 and clean["format"] not in HIGH_BIT_FORMATS:
         raise ValueError(f"16-bit export needs {' or '.join(HIGH_BIT_FORMATS)}, not {clean['format']}")
     watermark = clean["watermark"]
     if watermark is not None:
@@ -435,6 +446,13 @@ def _encode_16bit(image: Image.Image, settings: dict, exif: bytes | None, icc: b
     size = (array16.shape[1], array16.shape[0])
     exif_out = prepare_exif(exif, size, settings["metadata"], settings["remove_gps"])
     format_name = settings["format"]
+    if format_name in FLOAT_FORMATS:
+        from app.float_export import encode_exr, encode_pfm, srgb_to_linear
+
+        linear = srgb_to_linear(array)
+        content = encode_exr(linear, settings["color_space"]) if format_name == "EXR" else encode_pfm(linear)
+        extension, mime = EXPORT_FORMATS[format_name]
+        return content, extension, mime
     content = _png16(array16, exif_out, icc) if format_name == "PNG" else _tiff16(array16, exif_out, icc)
     extension, mime = EXPORT_FORMATS[format_name]
     return content, extension, mime
@@ -541,11 +559,12 @@ def format_for_path(path: str | Path) -> str:
 
 def write_export(image: Image.Image, output_path: str | Path, settings: dict | None = None) -> Path:
     """encode_export() straight to a file whose format follows its extension (CLI and batch). A
-    16-bit request applies where the format can hold it (PNG/TIFF); a JPEG/WEBP output stays 8-bit."""
+    16-bit request applies where the format can hold it (PNG/TIFF); a JPEG/WEBP output stays 8-bit, and
+    an EXR/PFM output is always float."""
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     settings = {**(settings or {}), "format": format_for_path(output)}
-    if settings["format"] not in HIGH_BIT_FORMATS:
+    if settings["format"] not in HIGH_BIT_FORMATS + FLOAT_FORMATS:
         settings.pop("bit_depth", None)
     content, _extension, _mime = encode_export(image, settings)
     output.write_bytes(content)
