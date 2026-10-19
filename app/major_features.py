@@ -229,7 +229,9 @@ class PhotoCatalog:
             # added to older catalogs in place.
             for column, declaration in (("label", "TEXT DEFAULT ''"), ("focus", "REAL DEFAULT -1"),
                                         ("highlights", "REAL DEFAULT -1"), ("shadows", "REAL DEFAULT -1"),
-                                        ("scored_mtime", "REAL DEFAULT 0")):
+                                        ("scored_mtime", "REAL DEFAULT 0"),
+                                        # Perceptual hash for the duplicate finder (F29), hex; "" = not hashed.
+                                        ("phash", "TEXT DEFAULT ''"), ("hash_mtime", "REAL DEFAULT 0")):
                 if column not in columns:
                     connection.execute(f"ALTER TABLE photos ADD COLUMN {column} {declaration}")
             # Library organisation (F21): collections, saved searches and virtual copies.
@@ -320,6 +322,19 @@ class PhotoCatalog:
                 "UPDATE photos SET focus = ?, highlights = ?, shadows = ?, scored_mtime = ? WHERE path = ?",
                 (float(scores["focus"]), float(scores["highlights"]), float(scores["shadows"]), float(mtime), str(path)),
             )
+
+    def get_hash(self, path: str | Path) -> tuple[int | None, float]:
+        """(perceptual hash, the file's mtime when it was hashed) -- (None, 0) when not hashed (F29)."""
+        with self._connect() as connection:
+            row = connection.execute("SELECT phash, hash_mtime FROM photos WHERE path = ?", (str(path),)).fetchone()
+        if row is None or not row[0]:
+            return None, 0.0
+        return int(row[0], 16), float(row[1])
+
+    def set_hash(self, path: str | Path, value: int, mtime: float) -> None:
+        self.ensure(path)
+        with self._connect() as connection:
+            connection.execute("UPDATE photos SET phash = ?, hash_mtime = ? WHERE path = ?", (f"{value:016x}", float(mtime), str(path)))
 
     def search(self, text: str = "", minimum_rating: int = 0, label: str | None = None, sort: str = "rating",
                collection: str | None = None) -> list[dict[str, object]]:

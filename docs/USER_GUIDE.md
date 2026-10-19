@@ -247,8 +247,9 @@ sub-tabs:
 - **🎨 Content** — the kind-specific fields (Text's content/font/color/position, Shape's
   type/size/rotation/fill/outline, the Pen editor, or an Image layer's thumbnail), plus a live
   preview for Text/Shape/Pen layers.
-- **✨ Styles** — **Layer Styles**: Drop Shadow, Outer Glow, Stroke, and Color Overlay, any
-  combination, on *any* layer type. Each is independent of the others (widening the Stroke doesn't
+- **✨ Styles** — **Layer Styles**: Drop Shadow, Outer Glow, Stroke, Color Overlay, Gradient
+  Overlay (two colours at an angle), Inner Shadow and Bevel & Emboss (a raised edge lit from the
+  **Light angle**, 120° = upper left), any combination, on *any* layer type. Each is independent of the others (widening the Stroke doesn't
   change where the Glow falls, for example) and computed from that layer's own shape, so they only
   show up where the layer actually has transparent edges — a photo used as a full-canvas background
   layer has no "outside its own shape" for a shadow or glow to occupy, the same way Photoshop's own
@@ -399,6 +400,14 @@ Four modes, selected via the radio buttons at the top of the tab.
   - **Two-up compare** — shows the current photo beside another (**Compare with**, the next one by
     default), larger, with their focus and clipping scores, a **⭐ +1** and a **🚫 Reject** button
     under each, and **⇄ Make the right one current**, for choosing between near-duplicates.
+  - **🔁 Find duplicates** — groups the catalogued photos that are copies or near-identical
+    frames: re-saved, resized, re-compressed or burst shots.
+    - **Match** chooses how close they must be: exact copies, near duplicates or similar shots.
+    - **Keeper:** each group marks the one to keep, the sharpest by focus score among its
+      full-resolution copies.
+    - **Rejecting:** **🚫 Reject the others** works per group, and there is a button for every group at once.
+    - **Speed:** photos are compared by a small perceptual fingerprint, stored in the catalog, so only
+      new or changed files are read again.
   - **Keyboard shortcuts** (work whenever this panel is visible and you're not typing in a text
     field): **1–5** to rate, **0** to clear the rating, **X** to toggle reject, **6–9** for the
     Red/Yellow/Green/Blue label, **←/→** to move Prev/Next.

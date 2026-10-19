@@ -28,8 +28,9 @@ from app.vector_shapes import SHAPE_TYPES, render_path_layer, render_shape_layer
 from app.i18n import t, t_format, t_option
 
 
-_STYLE_EFFECT_PREFIXES = ("drop_shadow", "outer_glow", "stroke", "color_overlay")
-_STYLE_COLOR_KEYS = ("drop_shadow_color", "outer_glow_color", "stroke_color", "color_overlay_color")
+_STYLE_EFFECT_PREFIXES = ("drop_shadow", "outer_glow", "stroke", "color_overlay", "inner_shadow", "bevel", "gradient_overlay")
+_STYLE_COLOR_KEYS = ("drop_shadow_color", "outer_glow_color", "stroke_color", "color_overlay_color", "inner_shadow_color",
+                     "bevel_highlight", "bevel_shadow", "gradient_overlay_start", "gradient_overlay_end")
 
 
 def resolved_layer_styles(styles: dict) -> dict:
@@ -48,7 +49,8 @@ def scaled_styles(styles: dict, scale: float) -> dict:
     if scale == 1.0:
         return styles
     scaled = dict(styles)
-    for key in ("drop_shadow_offset_x", "drop_shadow_offset_y", "drop_shadow_blur", "outer_glow_blur", "stroke_width"):
+    for key in ("drop_shadow_offset_x", "drop_shadow_offset_y", "drop_shadow_blur", "outer_glow_blur", "stroke_width",
+                "inner_shadow_offset_x", "inner_shadow_offset_y", "inner_shadow_blur", "bevel_size"):
         if key in scaled:
             scaled[key] = scaled[key] * scale
     return scaled
@@ -179,6 +181,56 @@ def render_layer_styles(layer: dict, layer_id: str) -> None:
             styles["color_overlay_color"] = st.color_picker(t("Color"), styles.get("color_overlay_color", "#FF0000"), key=f"l-co-col-{layer_id}")
         with c2:
             styles["color_overlay_opacity"] = st.slider(t("Overlay Opacity"), 0.0, 1.0, float(styles.get("color_overlay_opacity", 0.6)), 0.01, key=f"l-co-op-{layer_id}", help=t("How strongly the color tints the layer -- 0 has no effect, 1 fully replaces its color."))
+
+    # F28: Inner Shadow, Bevel & Emboss, Gradient Overlay.
+    styles["gradient_overlay_enabled"] = st.checkbox(
+        t("Gradient Overlay"), styles.get("gradient_overlay_enabled", False), key=f"l-go-en-{layer_id}",
+        help=t("Fills this layer's visible pixels with a linear gradient between two colors."),
+    )
+    if styles["gradient_overlay_enabled"]:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            styles["gradient_overlay_start"] = st.color_picker(t("From"), styles.get("gradient_overlay_start", "#000000"), key=f"l-go-c1-{layer_id}")
+        with c2:
+            styles["gradient_overlay_end"] = st.color_picker(t("To"), styles.get("gradient_overlay_end", "#FFFFFF"), key=f"l-go-c2-{layer_id}")
+        with c3:
+            styles["gradient_overlay_angle"] = st.slider(t("Angle (°)"), -180, 180, int(styles.get("gradient_overlay_angle", 90)), key=f"l-go-an-{layer_id}", help=t("0 runs left to right, 90 bottom to top."))
+        with c4:
+            styles["gradient_overlay_opacity"] = st.slider(t("Gradient Opacity"), 0.0, 1.0, float(styles.get("gradient_overlay_opacity", 1.0)), 0.01, key=f"l-go-op-{layer_id}")
+
+    styles["inner_shadow_enabled"] = st.checkbox(
+        t("Inner Shadow"), styles.get("inner_shadow_enabled", False), key=f"l-is-en-{layer_id}",
+        help=t("A shadow cast inward from this layer's edge, as if it were cut into the surface."),
+    )
+    if styles["inner_shadow_enabled"]:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            styles["inner_shadow_offset_x"] = st.slider(t("Offset X"), -50, 50, int(styles.get("inner_shadow_offset_x", 5)), key=f"l-is-ox-{layer_id}")
+        with c2:
+            styles["inner_shadow_offset_y"] = st.slider(t("Offset Y"), -50, 50, int(styles.get("inner_shadow_offset_y", 5)), key=f"l-is-oy-{layer_id}")
+        with c3:
+            styles["inner_shadow_blur"] = st.slider(t("Blur"), 0, 40, int(styles.get("inner_shadow_blur", 5)), key=f"l-is-bl-{layer_id}")
+        with c4:
+            styles["inner_shadow_color"] = st.color_picker(t("Color"), styles.get("inner_shadow_color", "#000000"), key=f"l-is-col-{layer_id}")
+        styles["inner_shadow_opacity"] = st.slider(t("Shadow Opacity"), 0.0, 1.0, float(styles.get("inner_shadow_opacity", 0.75)), 0.01, key=f"l-is-op-{layer_id}")
+
+    styles["bevel_enabled"] = st.checkbox(
+        t("Bevel & Emboss"), styles.get("bevel_enabled", False), key=f"l-bv-en-{layer_id}",
+        help=t("Makes this layer look raised: light and shadow along its edges, as if lit from one side."),
+    )
+    if styles["bevel_enabled"]:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            styles["bevel_size"] = st.slider(t("Size"), 1, 40, int(styles.get("bevel_size", 6)), key=f"l-bv-sz-{layer_id}", help=t("How wide the rounded edge is, in pixels."))
+        with c2:
+            styles["bevel_angle"] = st.slider(t("Light angle (°)"), -180, 180, int(styles.get("bevel_angle", 120)), key=f"l-bv-an-{layer_id}", help=t("Where the light comes from: 120 is the upper left."))
+        with c3:
+            styles["bevel_depth"] = st.slider(t("Depth"), 0.0, 1.0, float(styles.get("bevel_depth", 0.75)), 0.01, key=f"l-bv-dp-{layer_id}")
+        c4, c5 = st.columns(2)
+        with c4:
+            styles["bevel_highlight"] = st.color_picker(t("Highlight"), styles.get("bevel_highlight", "#FFFFFF"), key=f"l-bv-hi-{layer_id}")
+        with c5:
+            styles["bevel_shadow"] = st.color_picker(t("Shadow"), styles.get("bevel_shadow", "#000000"), key=f"l-bv-sh-{layer_id}")
 
 
 def font_select(label: str, current: str, key: str) -> str:
