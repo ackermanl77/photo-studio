@@ -1,0 +1,5 @@
+# Binary fixtures and icons: nodes without meaning in the code graph
+tests/golden/
+tests/assets/
+app/assets/
+*.ico

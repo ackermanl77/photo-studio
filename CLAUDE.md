@@ -163,3 +163,14 @@ Pillow / NumPy / OpenCV / tifffile / optional rawpy / optional torch (GPU pack: 
 - `tests/conftest.py` also blanks `PHOTO_BACKEND_TOKEN` per test, so a token set by a spawning test can't leak into the Flask test client.
 - `tests/test_frontend_unified_app.py` drives the real app through Streamlit's `AppTest` harness (`streamlit.testing.v1.AppTest`), simulating uploads via `file_uploader.set_value()` — this is the regression net for the "every tab runs on every rerun" and "state must survive an unrelated tab's rerun" bug class described above. It also provides `open_tab()`, `ui_source()` (the entry script plus every `app/ui` module, for source checks) and the backend stub other AppTest files import. `tests/test_ui_structure.py` covers the registry, the split, fragments, the modified marks and painted-mask interning.
 - `AppTest` is headless (no real DOM/JS) and always reruns the whole script (no fragment-only runs), so anything living inside a `components.html()` iframe — drag interactions on the curve/paint editors, the Library Catalog's keyboard shortcuts — and fragment-scoped reruns cannot be exercised by it. Those are verified by driving the hidden commit field directly (the same wiring a real interaction ultimately depends on), the editors' JS under Node (`tests/js_fake_dom.js`), plus live manual verification.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.
