@@ -231,7 +231,7 @@ Build a stack of any number of layers — images, text, vector shapes, and freef
 with its own opacity, blend mode, and optional effects, composited on the processing backend when
 the image renders.
 
-**Adding a layer** — "➕ Add a layer" offers four types:
+**Adding a layer** — "➕ Add a layer" offers five types:
 
 | Type | What you get |
 |---|---|
@@ -239,6 +239,7 @@ the image renders.
 | **Text** | Type content, then pick a **Font** (any font installed on this computer, or one you added under **🔤 Fonts**; "Automatic" is the default) and set font size (a % of the photo's short edge, so it looks the same at any resolution), color, alignment (left/center/right), and position (as a % of the photo, placing the text block's own center). |
 | **Shape** | A vector Rectangle, Ellipse, Line, Polygon, or Star — position, size, and rotation, plus its own fill color/opacity and outline color/width. Polygon and Star also get a Sides/Points count; Star gets an Inner Radius controlling how sharp its points are. |
 | **Pen** | Click points directly on the photo below to trace a freeform path, then **➕ Add Path Layer**. See [The Pen Tool](#the-pen-tool) below. |
+| **PSD** | Upload a Photoshop file: each layer becomes an Image layer, with its name, opacity, blend mode and visibility, placed where it was in the document and stretched to the photo's frame. Layers inside a hidden group arrive hidden. Masks, clipping masks and fill opacity are applied to the pixels. **Skip the bottom layer** (on by default) leaves out the photo itself. Text, shapes and smart objects arrive rasterized, as Photoshop stored them. Adjustment layers, layer effects (shadows, glows, strokes) and vector masks aren't imported. Reads RGB and Grayscale PSDs at 8 or 16 bits, not PSB or CMYK. A PSD can also be opened as the photo itself, which opens its composite image. |
 
 **The layer stack** — each layer's own expander (click its name to open it) splits into three
 sub-tabs:
@@ -514,6 +515,14 @@ Always visible above/below the preview, on every tab:
   at several sizes/formats in one click, instead of downloading each one separately. This is
   different from the Batch Processor (below): this is *one photo, several output variants*; Batch
   is *one recipe, many photos*.
+- **⬇ Download layered PSD** (⬇ Export tab) — a Photoshop file for further work in Photoshop, GIMP,
+  Krita or Affinity.
+  - **Background:** the full-resolution edit without the Layers stack.
+  - **One layer per Layers-tab layer:** rasterized with its Layer Styles and layer mask, cropped like
+    the photo, keeping its name, opacity, blend mode and visibility.
+  - **Composite:** the edit with the layers.
+  - **Differences from the preview:** Masks, Portrait and Effects (vignette/grain) apply to the Background only. In the
+    editor they also apply on top of the layers.
 
 ---
 

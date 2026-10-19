@@ -244,6 +244,57 @@ def render_pen_path_editor(source: Image.Image, key_prefix: str, points: list[di
     return points, closed
 
 
+MAX_PSD_LAYERS = 64
+
+
+def psd_layer_dicts(content: bytes, skip_bottom: bool) -> tuple[list[dict], int]:
+    """A PSD's raster layers (app.psd, bottom first) as Image layer dicts for the Layers stack, each
+    placed on the document's canvas and stretched to the photo's frame, plus how many layers had no
+    pixels to import. `skip_bottom` leaves out the lowest layer -- usually the photo itself."""
+    from app.psd import read_psd
+
+    document = read_psd(content)
+    psd_layers = document.layers[1:] if skip_bottom else document.layers
+    dicts = []
+    for psd_layer in psd_layers[:MAX_PSD_LAYERS]:
+        buffer = io.BytesIO()
+        psd_layer.on_canvas((document.width, document.height)).save(buffer, format="PNG")
+        dicts.append({
+            "id": uuid.uuid4().hex, "kind": "image", "name": psd_layer.name[:80] or "Layer",
+            "image_b64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+            "x_pct": 50.0, "y_pct": 50.0, "scale_pct": 100.0, "rotation_deg": 0.0, "stretch": True,
+            "opacity": round(psd_layer.opacity, 3), "blend_mode": psd_layer.blend_mode, "visible": psd_layer.visible,
+        })
+    return dicts, document.skipped
+
+
+def import_psd_layers(layers: list[dict]) -> None:
+    """➕ Add a layer → PSD (F22): every raster layer of a Photoshop file, once per uploaded file."""
+    st.caption(t("Adds each layer of a Photoshop (.psd) file as an Image layer, with its name, opacity, blend mode and visibility. "
+                 "Text, shapes and smart objects arrive rasterized; adjustment layers, layer effects and vector masks aren't imported."))
+    skip_bottom = st.checkbox(t("Skip the bottom layer (the photo itself)"), value=True, key="l-psd-skip-bottom")
+    psd_file = st.file_uploader(t("Photoshop file"), type=["psd"], key="l-new-psd")
+    if psd_file is None:
+        return
+    file_id = getattr(psd_file, "file_id", psd_file.name)
+    if st.session_state.get("l-last-added-psd-id") == file_id:
+        return
+    st.session_state["l-last-added-psd-id"] = file_id
+    from app.psd import PsdError
+
+    try:
+        new_layers, skipped = psd_layer_dicts(psd_file.getvalue(), skip_bottom)
+    except PsdError as error:
+        st.error(t("⚠️ {0}").format(t(str(error))))
+        return
+    layers.extend(new_layers)
+    message = t("Added {0} layer(s) from {1}.").format(len(new_layers), psd_file.name)
+    if skipped:
+        message += " " + t("{0} layer(s) without pixels (adjustments, empty layers) were skipped.").format(skipped)
+    st.session_state["_psd_import_message"] = message
+    request_rerun()
+
+
 def render_layer_stack(source: Image.Image) -> str | None:
     """Layers tab: any number of stacked Image or Text layers, each with its own name/visibility/
     opacity/blend mode, reorderable and duplicable -- the same "add, then list/edit/remove" shape
@@ -265,8 +316,10 @@ def render_layer_stack(source: Image.Image) -> str | None:
         layer.setdefault("kind", "image")  # backfill for layers added before Text layers existed
 
     with st.expander(t("➕ Add a layer"), expanded=not layers):
-        new_layer_kind = st.radio(t("Layer type"), ["Image", "Text", "Shape", "Pen"], horizontal=True, key="l-new-kind", format_func=t_option)
-        if new_layer_kind == "Text":
+        new_layer_kind = st.radio(t("Layer type"), ["Image", "Text", "Shape", "Pen", "PSD"], horizontal=True, key="l-new-kind", format_func=t_option)
+        if new_layer_kind == "PSD":
+            import_psd_layers(layers)
+        elif new_layer_kind == "Text":
             if st.button(t("Add Text Layer"), key="l-add-text-btn"):
                 layers.append(
                     {
@@ -385,6 +438,9 @@ def render_layer_stack(source: Image.Image) -> str | None:
                         )
                         request_rerun()
 
+    psd_message = st.session_state.pop("_psd_import_message", None)
+    if psd_message:
+        st.success(psd_message)
     if not layers:
         st.caption(t("No layers yet — add one above."))
     else:

@@ -17,6 +17,7 @@ import io
 import json
 
 import cv2
+import numpy as np
 import streamlit as st
 from PIL import Image
 
@@ -221,6 +222,44 @@ def render_full_resolution_export(
         content, filename, options, settings, local,
         _producer_layers(mask_source, layers_signature, layers_canvas, painted), removal, **extra,
     )
+
+
+def render_layered_psd(
+    content: bytes, filename: str, options: dict, mask_source: Image.Image,
+    local_signature: str | None, removal_signature: str | None, layers_signature: str | None,
+    own_signatures: list[str] | None = None, layers_canvas: tuple[int, int] | None = None, painted: dict | None = None,
+) -> bytes:
+    """Layered PSD producer (F22): the full-resolution edit *without* the Layers stack as the
+    Background, then every layer rasterized at the full frame (styles and layer masks applied),
+    cropped like the photo, as its own PSD layer with its name, opacity, blend mode and visibility.
+    The composite is the edit with the layers. Runs on the download thread (no st.* calls)."""
+    from app.layer_workspace import layers_from_json
+    from app.pipeline import crop_rect
+    from app.psd import PsdLayer, write_psd
+
+    local, removal, extra = _producer_masks(mask_source, local_signature, removal_signature, own_signatures, painted)
+    options = {**options, "ai_upscale": False}
+    png = {"format": "PNG", "metadata": "none"}
+    background = Image.open(io.BytesIO(backend_client.export_via_backend(content, filename, options, png, local, None, removal, **extra))).convert("RGB")
+    layers_bytes = _producer_layers(mask_source, layers_signature, layers_canvas, painted)
+    composite = background
+    if layers_bytes:
+        composite = Image.open(io.BytesIO(backend_client.export_via_backend(content, filename, options, png, local, layers_bytes, removal, **extra))).convert("RGB")
+    psd_layers = []
+    rect = crop_rect(tuple(layers_canvas), options) if layers_canvas else None
+    for layer in layers_from_json(layers_bytes) if layers_bytes else []:
+        image = layer.image.convert("RGBA")
+        if layers_canvas and image.size != tuple(layers_canvas):
+            image = image.resize(tuple(layers_canvas), Image.Resampling.LANCZOS)
+        if layer.mask is not None:
+            alpha = np.asarray(image.getchannel("A"), dtype=np.uint16) * np.asarray(layer.mask.convert("L").resize(image.size), dtype=np.uint16) // 255
+            image.putalpha(Image.fromarray(alpha.astype(np.uint8)))
+        if rect:
+            image = image.crop(rect)
+        if image.size != background.size:
+            image = image.resize(background.size, Image.Resampling.LANCZOS)
+        psd_layers.append(PsdLayer(layer.name, image, 0, 0, layer.opacity, layer.blend_mode, layer.visible))
+    return write_psd(composite, [PsdLayer("Background", background.convert("RGBA")), *psd_layers])
 
 
 def render_full_resolution_image(
