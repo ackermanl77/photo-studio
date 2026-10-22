@@ -73,6 +73,19 @@ def _wait(predicate, timeout: float, what: str, interval: float = 0.25):
     raise AssertionError(f"timed out waiting for {what} (last: {last!r})")
 
 
+def _kill_listener(port: int) -> None:
+    """Stop whatever listens on `port`: the frontend starts its backend detached, so killing the
+    Streamlit process tree leaves it running (and it then rejects the next run's token)."""
+    if sys.platform == "win32":
+        out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True).stdout
+        pids = {line.split()[-1] for line in out.splitlines()
+                if f"127.0.0.1:{port} " in line and "LISTENING" in line}
+        for pid in pids:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", pid], capture_output=True)
+    else:
+        subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True)
+
+
 def _kill_tree(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
@@ -132,8 +145,9 @@ def page(tmp_path_factory):
         pytest.skip("no Chrome/Edge found")
     pytest.importorskip("websockets.sync.client")
     data_dir = tmp_path_factory.mktemp("browser-data")
-    app_port, debug_port = _free_port(), _free_port()
-    env = dict(os.environ, PHOTO_STUDIO_DATA_DIR=str(data_dir), PHOTO_BACKEND_TOKEN="")
+    app_port, debug_port, backend_port = _free_port(), _free_port(), _free_port()
+    env = dict(os.environ, PHOTO_STUDIO_DATA_DIR=str(data_dir), PHOTO_BACKEND_TOKEN="",
+               PHOTO_BACKEND_PORT=str(backend_port))
     app = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", "app/frontend_unified_app.py", "--server.headless", "true",
          "--server.port", str(app_port), "--browser.gatherUsageStats", "false"],
@@ -162,6 +176,7 @@ def page(tmp_path_factory):
             devtools.close()
         _kill_tree(chrome)
         _kill_tree(app)
+        _kill_listener(backend_port)
         shutil.rmtree(profile, ignore_errors=True)
 
 

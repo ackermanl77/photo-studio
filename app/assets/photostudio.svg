@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Photo Studio: a camera aperture with an edit slider across it (orange tile). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff8a2a"/>
+      <stop offset="1" stop-color="#e8590c"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
+  <circle cx="128" cy="112" r="70" fill="#ffffff"/>
+  <circle cx="128" cy="112" r="54" fill="#2b2f3a"/>
+  <!-- iris: a hexagonal opening, each blade edge sweeping from a corner to the rim -->
+  <g stroke="#5b6274" stroke-width="5" stroke-linecap="round">
+    <path d="M152 112 L170 77"/>
+    <path d="M140 132.8 L179 130"/>
+    <path d="M116 132.8 L137 165"/>
+    <path d="M104 112 L86 147"/>
+    <path d="M116 91.2 L77 94"/>
+    <path d="M140 91.2 L119 59"/>
+  </g>
+  <path d="M152 112 L140 132.8 L116 132.8 L104 112 L116 91.2 L140 91.2 Z" fill="#ffd23c"/>
+  <!-- the edit slider -->
+  <rect x="44" y="198" width="168" height="14" rx="7" fill="#ffffff" opacity="0.55"/>
+  <rect x="44" y="198" width="104" height="14" rx="7" fill="#ffffff"/>
+  <circle cx="148" cy="205" r="19" fill="#ffffff"/>
+  <circle cx="148" cy="205" r="9" fill="#e8590c"/>
+</svg>

@@ -42,6 +42,25 @@ def _backend_is_healthy() -> bool:
         return False
 
 
+def _backend_accepts_our_token() -> bool:
+    """A healthy backend can still belong to another session (another frontend's, or one left behind):
+    /health is open, but every other route answers 401 to a different token. An empty /ai_mask is
+    rejected by the token check before the route runs, so 401 = not ours, anything else = ours."""
+    headers = {TOKEN_HEADER: backend_token()} if backend_token() else {}
+    try:
+        return requests.post(f"{BACKEND_URL}/ai_mask", headers=headers, timeout=_HEALTH_CHECK_TIMEOUT).status_code != 401
+    except requests.RequestException:
+        return False
+
+
+def _free_port() -> int:
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind((BACKEND_HOST, 0))
+        return sock.getsockname()[1]
+
+
 def _backend_command() -> list[str]:
     """How to start the backend from this process: the packaged exe's own `--backend-child` mode in
     a frozen build (there is no `python -m` there), `python -m app.backend` otherwise."""
@@ -70,9 +89,17 @@ def ensure_backend_running() -> None:
     The child gets a per-launch token (app.config.TOKEN_ENV) unless this process already has one
     (the desktop launcher passes its own), and its output goes to logs/backend-standalone.log under
     the user data folder instead of being discarded -- the cause of a crash used to be lost.
+
+    A backend that is healthy but rejects this process's token (another session's, or one an
+    earlier run left behind) is left alone: this process starts its own on a free port instead.
     """
+    global BACKEND_URL
     if _backend_is_healthy():
-        return
+        if _backend_accepts_our_token():
+            return
+        port = _free_port()
+        os.environ["PHOTO_BACKEND_PORT"] = str(port)
+        BACKEND_URL = f"http://{BACKEND_HOST}:{port}"
 
     if not backend_token():
         os.environ[TOKEN_ENV] = secrets.token_urlsafe(32)

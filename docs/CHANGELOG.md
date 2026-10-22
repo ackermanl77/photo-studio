@@ -7,6 +7,21 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-22 -- UI fixes from the UI/frontend REA analysis (UI1, UI2, UI9)
+
+- **Canvas header (UI1):** Undo / Redo / Reset / History were squeezed into one row with the view
+  controls, so the buttons shrank to ~30 px and Streamlit's native shortcut hints printed over them.
+  They now have their own row with labels ("↶ Undo", "↷ Redo", "↺ Reset", "📌 History"); the Undo/Redo
+  `<kbd>` hints are hidden by `theme.css` (the tooltips name the shortcuts). Widget keys unchanged.
+- **Open bar (UI2):** once a photo is open, the uploader, sample button, language and project opener
+  fold into one collapsed expander (`sec-open-bar`), so the canvas starts near the top. The widgets
+  still render every run; the project opener isn't a nested expander there.
+- **Backend recovery (UI9):** a backend that answers `/health` but rejects this process's token (an
+  orphan from an earlier run) made every edit fail with "Missing or invalid backend token".
+  `ensure_backend_running()` now probes the token (an empty `/ai_mask` is a 401 before the route
+  runs) and starts its own backend on a free port. `tests/test_browser_smoke.py` gives the app its
+  own backend port and stops that backend at teardown (the frontend starts it detached).
+
 ## 2026-10-22 -- Real-browser smoke test
 
 - `tests/test_browser_smoke.py` (opt-in, `PHOTO_BROWSER_TESTS=1`): starts the real Streamlit app and

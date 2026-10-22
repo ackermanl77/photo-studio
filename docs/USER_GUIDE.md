@@ -33,6 +33,10 @@ English and Español. The choice is remembered for the next launch. Presets, pro
 don't depend on the language, so a file saved in one opens the same in the other. Streamlit's own
 uploader text ("Drag and drop", "Browse files") stays in English.
 
+Once a photo is open, the uploader, the project opener and the language choice fold into one
+line at the top, **📂 Open another photo or project · 🌐 Language**, so the photo gets the room;
+expand it to open something else.
+
 **Opening a saved project:** expand "📁 Open a saved project (.photoproject)" above the uploader to
 reopen a `.photoproject` file you saved earlier (see [Projects](#projects) below).
 
@@ -506,8 +510,8 @@ report.
 Always visible above/below the preview, on every tab:
 
 - **↶ Undo** / **↷ Redo** — step backward/forward through your edit history (the last 200 steps).
-  Also available via **Ctrl+Z** (undo) and **Ctrl+Shift+Z** (redo).
-- **📌 History & Snapshots** — the **History** list shows the last 30 steps, newest first, each named
+  Also available via **Ctrl+Z** (undo) and **Ctrl+Shift+Z** (redo); the tooltips name the shortcuts.
+- **📌 History** (History & Snapshots) — the **History** list shows the last 30 steps, newest first, each named
   after what it changed ("Exposure (EV) 0.3", "Masks", "Contrast, Clarity"); click one to jump
   there, exactly as if you pressed Undo/Redo until it (the later steps stay until you make a new
   edit). **Named Snapshots** bookmark the current look under a name.
