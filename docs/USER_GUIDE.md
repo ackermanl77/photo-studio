@@ -44,9 +44,12 @@ reopen a `.photoproject` file you saved earlier (see [Projects](#projects) below
 
 ## 2. The Workspace
 
-The screen is split in two:
+Like Photoshop, the window belongs to the photo:
 
-- **Left/Tool panel** — nine tabs, grouped by how you work:
+- **Sidebar (left)** — the app name, **📂 Open another photo or project · 🌐 Language**, and the
+  tools in nine tabs, grouped by how you work. Drag the sidebar's right edge to make it wider, or
+  click **«** at its top to hide it and give the photo the whole window (the **»** button at the
+  top left brings it back):
 
   | Tab | What's in it |
   |---|---|
@@ -63,11 +66,11 @@ The screen is split in two:
   Every section shows **● modified** next to its title (or a ● in its expander's title) as soon as
   one of its controls differs from the default, so you can see at a glance where a photo has been
   edited; most sections also have their own **↺ Reset** button.
-- **Right/Canvas** — the live preview, with Undo/Redo/Reset, zoom, Split View, a histogram, a
-  clipping warning, and the Save button always available above and below it, regardless of which
-  tool tab is open.
+- **The page** — the photo, fitted to the window, with two rows of controls above it (Undo,
+  Redo, Reset, History; zoom, 1:1, Before/After, Grid, Split View, Original) and the histogram, a
+  clipping warning and the Save button below it, whichever tool tab is open.
 
-On a narrow window the canvas moves above the tool panel so you always see the photo first.
+On a narrow window (a phone) the sidebar starts hidden and opens over the photo.
 
 Every control updates the same live preview — there's no separate "apply" step. Changing a slider
 sends the edit to the local processing backend and the canvas updates in place.

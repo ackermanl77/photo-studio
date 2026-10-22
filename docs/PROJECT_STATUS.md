@@ -183,11 +183,13 @@ it means checking, in a real browser (`streamlit run app/frontend_unified_app.py
 too), the rules in `app/ui/static/theme.css` marked "Streamlit DOM" and the behaviours the app relies
 on:
 
-1. The default header/footer stay hidden and the page padding is unchanged.
+1. The default footer stays hidden, the header is transparent and takes no clicks, and the page
+   padding is unchanged; collapsing the tools sidebar leaves its expand button
+   (`[data-testid="stExpandSidebarButton"]`, inside the header's toolbar) visible and working.
 2. The nine tool tabs wrap onto a second row instead of scrolling (`[data-testid="stTab(s)"]`).
-3. At a window under 900 px the canvas column moves above the tools
-   (`.st-key-workspace-split > stLayoutWrapper > stHorizontalBlock > stColumn`), and rows nested
-   inside the canvas column (the header bar, the Save row) do not reorder.
+3. The tools sidebar is at least 420 px wide while open (`[data-testid="stSidebar"][aria-expanded="true"]`),
+   can be dragged wider and collapsed, and the photo is capped to the window's height
+   (`.st-key-canvas-stage [data-testid="stImage"] img`).
 4. The editors' hidden commit text_areas stay invisible (`.st-key-*-hidden`, `[class*="-paint-hidden"]`)
    and a commit still lands: drag the curve, paint and add a selection, drag the crop box, click the
    white-balance picker, add Pen points, drag-pan at 200 %.

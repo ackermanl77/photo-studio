@@ -43,7 +43,7 @@ def curve_section(ctx) -> None:
                 if tab_open(tab):
                     preview_points = [(x, st.session_state.get(CONTROLS_BY_KEY[key].widget_key, CONTROLS_BY_KEY[key].default)) for x, key in zip(CURVE_X, keys)]
                     extra = st.session_state["curve_extra_points"] if prefix == "curve" else None
-                    show_component(lambda: (_curve_editor_html(preview_points, curve_bounds, extra, keys=keys, color=color), 270))
+                    show_component(lambda: (_curve_editor_html(preview_points, curve_bounds, extra, keys=keys, color=color), 300))
                 with st.container(key="curve-points" if prefix == "curve" else f"curve-points-{prefix}"):
                     for key in keys:
                         values[key] = render_control(key)
