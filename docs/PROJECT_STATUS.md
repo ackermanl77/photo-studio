@@ -27,9 +27,11 @@ only Streamlit entry point) composes the panels in `app/ui/` (`tabs/`, `canvas.p
 control-backed option specs and the stage split). Through `app/backend_client.py` the frontend sends
 the source (or a 2048 px proxy for a photo whose long edge exceeds 2560 px) plus mask, per-mask and
 layer payloads to `/process`. The step order lives only in
-`app/pipeline.py::run_pipeline()`: ICC -> sRGB, Geometry (rotate/flip, Lens, straighten, constrain
-crop -- `app/geometry.py`), Tone (+ preset), Color, Detail | Repair, Layers, Masks (shared mask, then
-per-selection adjustment sets), Portrait, Crop, Effects, AI Upscale. The backend, the CLI and both
+`app/pipeline.py::run_pipeline()`: ICC -> sRGB (or Display P3 for a P3 export), Geometry
+(rotate/flip, Lens, straighten, constrain crop, Liquify -- `app/geometry.py`), Tone (+ preset), Color,
+Detail | Repair, Layers (incl. adjustment layers), Masks (shared mask, then per-selection adjustment
+sets), Portrait, Relight, Crop, Background, Effects (creative filters, vignette, grain), AI Upscale; a
+Background "Remove" becomes the result's alpha channel last. The backend, the CLI and both
 batch paths call it; options are validated by `app/edit_schema.py::parse_options()`.
 
 The frontend caches the two halves separately (`app.ui.processing.cached_process_through_detail()` /
@@ -69,6 +71,7 @@ Earlier development iterations used additional per-feature Streamlit entry point
 `app/backend.py` (Flask; served by waitress when installed) binds to `127.0.0.1` (`PHOTO_BACKEND_HOST`/`PHOTO_BACKEND_PORT`, default port 8502; the desktop launcher picks free ports per launch) and, whenever `PHOTO_BACKEND_TOKEN` is set (always under `app/desktop.py`, and for a backend the frontend starts itself), answers every request except `/health` with 401 unless it carries that token in `X-Photo-Token`:
 
 - `GET /health` -- status.
+- `POST /ai_mask` -- an AI Subject/Person mask (`app/ai_masks.py`, needs the GPU pack) or the classical Sky mask for the uploaded image, returned as a grayscale PNG; the frontend adds it as a Painted selection.
 - `POST /process` -- multipart: the source `image`, optional mask / per-selection / layer payloads, and an `options` JSON field validated by `app/edit_schema.py::parse_options()` (unknown keys are rejected). The response is JSON + multipart; Stage 1 results come back with an `X-Photo-Stage-Handle` that Stage 2 sends instead of the image (410 when it has expired). A superseded interactive request ends with 409; every response carries an `X-Request-ID`.
 
 Limits (environment variables, read at start-up by `app/config.py`): `PHOTO_MAX_UPLOAD_BYTES` (default 50 MB), `PHOTO_MAX_IMAGE_PIXELS` (50,000,000), `PHOTO_MAX_UPSCALE_OUTPUT_PIXELS` (200,000,000, the AI Upscale result), `PHOTO_STAGE_CACHE_ENTRIES` (4 Stage 1 handles), `PHOTO_MAX_HEAVY_JOBS` (2 concurrent Non-Local Means / dehaze steps). Per-user files (settings, presets, catalog, logs, an optional GPU pack) live in `%LOCALAPPDATA%\PhotoStudio` on Windows, `~/.photo-studio` elsewhere (`app.config.user_data_dir()`; `PHOTO_STUDIO_DATA_DIR` overrides).
@@ -126,10 +129,14 @@ before relying on a pass count (`-m "not slow"` skips the AppTest-driven tests; 
 python -m pytest -m perf` runs the 24 MP budgets). CI (`.github/workflows/ci.yml`) runs the same on
 Windows and Ubuntu with Python 3.12 and 3.14, plus a `raw-decode` job with `requirements-raw.txt`.
 
-Last run 2026-10-07 on Windows 11 / Python 3.14.7 with the dev `.venv`'s packages: `compileall` clean;
-`pytest -q -n auto` **716 passed, 12 skipped** in 15 s (706 before the P3 leftovers, 639/11 on 2026-10-03). The 12 skips are by
+Last run 2026-10-22 on Windows 11 / Python 3.14 with the dev `.venv`'s packages: `compileall` clean;
+`pytest -q -n auto` **1777 passed, 13 skipped** in about 27 s (716/12 on 2026-10-07, 639/11 on 2026-10-03). The 13 skips are by
 design: nine photo-specific or UI-only controls in `tests/test_parity_golden.py`, the two opt-in
-`PHOTO_PERF_TESTS` budgets, and the no-file-manager fallback of "Open logs folder" (Windows always has one). That venv has CUDA torch 2.14 and Real-ESRGAN, so the GPU-export and
+`PHOTO_PERF_TESTS` budgets, the opt-in real-browser smoke test (`PHOTO_BROWSER_TESTS=1`, see below), and the no-file-manager fallback of "Open logs folder" (Windows always has one).
+
+`tests/test_browser_smoke.py` (opt-in) starts the real app and a headless Chrome/Edge over the DevTools
+protocol and checks refine-on-pause, a real mouse drag on the tone curve committing through the hidden
+field, and a keyboard-moved slider re-rendering the canvas. It passed three runs in a row on 2026-10-22. That venv has CUDA torch 2.14 and Real-ESRGAN, so the GPU-export and
 AI Upscale tests ran; without torch the ones that need it skip (CI).
 
 Release checks last run on 2026-10-01 (Windows 11, RTX 5080): `build_release.ps1` built both profiles
@@ -210,7 +217,7 @@ The fix history, newest first, is in [`docs/CHANGELOG.md`](CHANGELOG.md).
   thread; a newer edit supersedes it on the backend's "refine" lane). Until that lands, Non-Local
   Means denoise is not rescaled for the proxy: judge it at 100 % (1:1) or after the pause. The
   refine's polling fragment and its swap-in are covered by unit tests and AppTest with the job run
-  inline; the real thread + `run_every` polling in a browser needs a manual check.
+  inline, and the real thread + `run_every` polling by the opt-in browser smoke test.
 - The interactive preview and the default export stay 8-bit. A 16-bit PNG/TIFF export (Export
   settings > Bit depth, CLI `--bit-depth 16`, API `bit_depth`/`export.bit_depth`) runs the pipeline
   in float32 (`app/high_bit.py`, PhotoProcessor's high-precision mode) from a full-precision decode
