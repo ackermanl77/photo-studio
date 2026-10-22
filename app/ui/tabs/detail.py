@@ -47,3 +47,36 @@ def effects_section(ctx) -> None:
         values["effects_halftone_mode"] = render_control("effects_halftone_mode")
     values["effects_glitch"] = render_control("effects_glitch")
     section_reset_button("effects", "Effects")
+    relight_section(ctx)
+    background_section(ctx)
+
+
+def relight_section(ctx) -> None:
+    """F32: one movable light over a classical (shape-from-shading) normal map (app.relight)."""
+    section_header("💡 Relight", "relight")
+    st.caption(t("Adds a light from a new direction: slopes facing it brighten, the others darken. Brighter parts of the photo are read as nearer, so it suits portraits, products and landscapes better than flat graphics."))
+    values = ctx.values
+    values["relight_amount"] = render_control("relight_amount")
+    inactive = values["relight_amount"] == 0
+    dir_col, height_col = st.columns(2)
+    values["relight_azimuth"] = render_control("relight_azimuth", dir_col, disabled=inactive)
+    values["relight_elevation"] = render_control("relight_elevation", height_col, disabled=inactive)
+    ambient_col, warmth_col = st.columns(2)
+    values["relight_ambient"] = render_control("relight_ambient", ambient_col, disabled=inactive)
+    values["relight_warmth"] = render_control("relight_warmth", warmth_col, disabled=inactive)
+    section_reset_button("relight", "Relight")
+
+
+def background_section(ctx) -> None:
+    """F31: one step to blur, remove or recolour the background (app.background)."""
+    section_header("Background", "background")
+    values = ctx.values
+    mode_col, subject_col = st.columns(2)
+    values["background_mode"] = render_control("background_mode", mode_col)
+    values["background_subject"] = render_control("background_subject", subject_col, disabled=values["background_mode"] == "None")
+    amount_col, color_col = st.columns(2)
+    values["background_amount"] = render_control("background_amount", amount_col, disabled=values["background_mode"] != "Blur")
+    values["background_color"] = render_control("background_color", color_col, disabled=values["background_mode"] != "Color")
+    if values["background_mode"] == "Remove":
+        st.caption(t("The background becomes transparent: export as PNG or TIFF to keep it (JPEG and WebP exports have no transparency)."))
+    section_reset_button("background", "Background")

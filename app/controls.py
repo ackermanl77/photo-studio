@@ -55,7 +55,7 @@ class Control:
     key: str  # recipe key
     widget_key: str | None  # session_state key of its widget (None: kept in session_state by an editor)
     label: str
-    kind: str  # "int", "float", "bool", "choice", "lut" (a LUT library name, app.lut; "" = none)
+    kind: str  # "int", "float", "bool", "choice", "lut" (a LUT library name, app.lut; "" = none), "color" ("#RRGGBB")
     default: object
     minimum: float | None = None
     maximum: float | None = None
@@ -81,7 +81,7 @@ class Control:
     def widget_type(self) -> str:
         if self.widget:
             return self.widget
-        return {"bool": "checkbox", "choice": "selectbox", "lut": "selectbox"}.get(self.kind, "slider")
+        return {"bool": "checkbox", "choice": "selectbox", "lut": "selectbox", "color": "color_picker"}.get(self.kind, "slider")
 
     def to_option(self, value):
         return TRANSFORMS[self.transform](value) if self.transform else value
@@ -111,6 +111,8 @@ _D = "detail"
 CONTROLS: tuple[Control, ...] = (
     # --- Tone -------------------------------------------------------------------------------------
     _choice("preset", "tone-preset", "Preset Look", ("None", *sorted(PRESETS)), "None", section="tone", option=True, stage=_D, option_nullable=True),
+    _slider("preset_amount", "tone-preset-amount", "Preset intensity", 0, 100, 100, section="tone", option=True, stage=_D,
+            help="How much of the preset look to apply: 100 is the look as designed, lower blends it with the photo."),
     _slider("exposure_ev", "t-ev", "Exposure (EV)", -5.0, 5.0, 0.0, step=0.05, section="tone", option=True, stage=_D,
             help="In stops of light: +1 doubles the light, -1 halves it. Bright highlights roll off smoothly instead of clipping."),
     _slider("contrast_amount", "t-contrast", "Contrast", -100, 100, section="tone", option="contrast", stage=_D, transform="amount", option_domain=(0, 10),
@@ -188,6 +190,26 @@ CONTROLS: tuple[Control, ...] = (
             section="effects", option=True),
     _slider("effects_glitch", "fx-glitch", "Glitch", 0, 100, section="effects", option=True,
             help="Digital glitch: color channels split sideways and slices of the photo shifted."),
+    # --- Relight (F32, app.relight): one movable light over a shape-from-shading normal map ----------
+    _slider("relight_amount", "rl-amount", "Relight", 0, 100, section="relight", option=True,
+            help="How strongly the new light reshapes the photo's lighting. 0 leaves it as shot."),
+    _slider("relight_azimuth", "rl-azimuth", "Light direction (°)", -180, 180, 135, section="relight", option=True,
+            help="Where the light comes from: 0 the right, 90 the top, 180 the left, -90 the bottom."),
+    _slider("relight_elevation", "rl-elevation", "Light height (°)", 0, 90, 35, section="relight", option=True,
+            help="Low grazes the photo from the side (long shading); 90 shines straight from the camera."),
+    _slider("relight_ambient", "rl-ambient", "Ambient light", 0, 100, 40, section="relight", option=True,
+            help="How much light reaches the side facing away from the light -- higher keeps shadows open."),
+    _slider("relight_warmth", "rl-warmth", "Light warmth", -100, 100, section="relight", option=True,
+            help="Tints the new light: negative cooler (blue), positive warmer (orange)."),
+    # --- Background (F31, app.background): the subject kept, the rest blurred/removed/filled ---------
+    _choice("background_mode", "bg-mode", "Background", ("None", "Blur", "Remove", "Color"), "None", section="background", option=True,
+            help="Blur keeps the subject sharp and blurs the rest; Remove makes the background transparent (export as PNG or TIFF); Color fills it with one colour."),
+    _choice("background_subject", "bg-subject", "Subject", ("Subject", "Person"), "Subject", section="background", option=True,
+            help="What to keep. Without the optional GPU pack, both use a classical cut-out that works best on one subject in the middle of the frame."),
+    _slider("background_amount", "bg-amount", "Background blur", 0, 100, 60, section="background", option=True,
+            help="How out of focus the background gets with Blur."),
+    Control("background_color", "bg-color", "Background colour", "color", "#FFFFFF", section="background", option="background_color",
+            help="The colour that replaces the background with Color."),
     # --- Portrait ---------------------------------------------------------------------------------
     _slider("portrait_smoothing", "port-sm", "Skin Smoothing", 0.0, 1.0, 0.0, step=0.01, section="portrait", option=True,
             help="0 leaves skin untouched. Increase to smooth detected skin tones."),

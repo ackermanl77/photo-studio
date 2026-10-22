@@ -164,6 +164,25 @@ def auto_enhance_recipe(image: Image.Image) -> dict:
     }
 
 
+def scale_auto_enhance(recipe: dict, amount: float) -> dict:
+    """auto_enhance_recipe()'s settings at `amount` percent (F30, like Photos' intensity slider):
+    every change is scaled toward "no change" -- exposure, temperature/tint and vibrance
+    proportionally, the black/white points toward 0/255 -- and denoise is kept only from 50 % up.
+    100 returns the recipe unchanged; 0 resets what a previous Auto Enhance set."""
+    strength = min(1.0, max(0.0, float(amount) / 100.0))
+    if strength >= 1.0:
+        return dict(recipe)
+    scaled = dict(recipe)
+    scaled["exposure_ev"] = round(round(recipe["exposure_ev"] * strength / 0.05) * 0.05, 2)
+    black = int(round(recipe["curve_black"] * strength))
+    white = int(round(255 - (255 - recipe["curve_white"]) * strength))
+    scaled.update(curve_black=black, curve_white=white, curve_enabled=bool(recipe["curve_enabled"]) and (black > 2 or white < 253))
+    for key in ("temperature", "tint", "vibrance"):
+        scaled[key] = int(round(recipe[key] * strength))
+    scaled["denoise"] = recipe["denoise"] if strength >= 0.5 else 0
+    return scaled
+
+
 class PhotoProcessor:
     # Multiplier for the few pixel-unit radii below (texture blur, sharpen, dehaze patch), which
     # are tuned for a full-resolution photo. app.pipeline sets it to the preview scale when
@@ -657,6 +676,16 @@ class PhotoProcessor:
         info = dict(self.image.info)
         array = np.asarray(self.image.convert("RGB"), dtype=np.float32) / 255.0
         self.image = Image.fromarray((apply_creative_filters(array, options) * 255.0 + 0.5).astype(np.uint8), mode="RGB")
+        self.image.info = info
+        return self
+
+    def apply_float_step(self, step) -> "PhotoProcessor":
+        """`step` (float RGB 0..1 -> float RGB 0..1) on whichever data is real (F31's Background)."""
+        if self.hdr is not None:
+            return self._set_hdr(step(self.hdr))
+        info = dict(self.image.info)
+        array = np.asarray(self.image.convert("RGB"), dtype=np.float32) / 255.0
+        self.image = Image.fromarray(np.clip(np.rint(step(array) * 255.0), 0, 255).astype(np.uint8), mode="RGB")
         self.image.info = info
         return self
 

@@ -38,11 +38,14 @@ PINNED_WIDGET_KEYS = {
     "lens_vignette_amount": "lens-vignette-amt", "lens_vignette_midpoint": "lens-vignette-mid",
     "mask_target_contrast_amount": "m-tcontrast", "mask_target_exposure_ev": "m-tev",
     "mask_target_saturation_amount": "m-tsaturation", "portrait_smoothing": "port-sm", "portrait_faces_only": "port-faces",
-    "preset": "tone-preset", "removal_radius": "rm-radius", "rotate": "geo-rotate",
+    "preset": "tone-preset", "preset_amount": "tone-preset-amount", "removal_radius": "rm-radius", "rotate": "geo-rotate",
     "saturation_amount": "c-saturation", "shadows": "t-shad", "sharpen": "d-sharp",
     "straighten": "geo-straighten", "temperature": "c-temp", "texture": "d-text", "tint": "c-tint",
     "vibrance": "c-vib", "whites": "t-whites", "blacks": "t-blacks", "black_white": "bw-enabled", "removal_method": "rm-method",
     **{f"curve_{c}_{point}": f"c-{c}-p{i}" for c in "rgb" for i, point in enumerate(("black", "shadows", "mid", "highlights", "white"))},
+    "relight_amount": "rl-amount", "relight_azimuth": "rl-azimuth", "relight_elevation": "rl-elevation",
+    "relight_ambient": "rl-ambient", "relight_warmth": "rl-warmth", "background_mode": "bg-mode",
+    "background_subject": "bg-subject", "background_amount": "bg-amount", "background_color": "bg-color",
     **{f"bw_{band}": f"bw-{band}" for band in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta")},
 }
 
