@@ -1,171 +1,66 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code in this repository. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+(how the app is put together, and why) and [docs/MODULE_MAP.md](docs/MODULE_MAP.md) (what each module does).
 
 ## What this is
 
-A CPU-first Python photo editor (no GPU dependency, deliberately avoids ML/neural dependencies — see "Known Issues" in `docs/PROJECT_STATUS.md` for why denoise/dehaze/lens-correction stay classical algorithms). Streamlit UI, Flask processing backend, optional PyInstaller Windows desktop packaging via pywebview. The optional exceptions both need PyTorch from the separate GPU pack: AI Upscale (Real-ESRGAN, `app/ai_upscale.py`) and the opt-in CUDA export resize/sharpen (`app/gpu_export.py`, which falls back to the CPU). The edit pipeline and file encoding always run on the CPU.
+A CPU-first Python photo editor: Streamlit UI (`app/frontend_unified_app.py` + `app/ui/`), Flask
+processing backend (`app/backend.py`), optional pywebview/PyInstaller desktop build. No ML in the edit
+pipeline; the only optional exceptions need PyTorch from the GPU pack: AI Upscale
+(`app/ai_upscale.py`), AI masks (`app/ai_masks.py`) and the opt-in CUDA export resize/sharpen
+(`app/gpu_export.py`, CPU fallback).
 
 ## Commands
 
 ```powershell
-# Install (requirements-dev.txt = requirements.txt + pytest + pytest-xdist)
-python -m pip install -r requirements-dev.txt
-python -m pip install -r requirements-raw.txt -r requirements-desktop.txt   # optional: RAW import + lensfun lens lookup, desktop packaging
-
-# Run the app (only Streamlit entry point in the project)
-python -m streamlit run app/frontend_unified_app.py
-
-# Test (run this yourself before trusting a pass count -- historical docs report stale totals).
-# The local dev venv is .venv (never pip install into it ad hoc).
+python -m pip install -r requirements-dev.txt          # + requirements-raw.txt / -desktop.txt (optional)
+python -m streamlit run app/frontend_unified_app.py    # the only Streamlit entry point
 python -m compileall -q app
-python -m pytest -q
-python -m pytest -q -n auto                # parallel (pytest-xdist; the suite is xdist-safe)
-python -m pytest -q -m "not slow"          # skip the AppTest-driven frontend tests
-$env:PHOTO_PERF_TESTS="1"; python -m pytest -q -m perf          # opt-in 24 MP performance budgets
-$env:PHOTO_BROWSER_TESTS="1"; python -m pytest -q tests/test_browser_smoke.py   # opt-in real Chrome/Edge (CDP): refine-on-pause, a curve drag, a slider
+python -m pytest -q -n auto                            # run it yourself; docs report stale totals
+python -m pytest -q -m "not slow"                      # skip the AppTest frontend tests
+$env:PHOTO_PERF_TESTS="1"; python -m pytest -q -m perf
+$env:PHOTO_BROWSER_TESTS="1"; python -m pytest -q tests/test_browser_smoke.py
 $env:PHOTO_REGENERATE_GOLDEN="1"; python -m pytest -q tests/test_parity_golden.py   # after an intended algorithm change
-
-# Single test file / test
-python -m pytest -q tests/test_backend.py
-python -m pytest -q tests/test_backend.py::test_process_endpoint_applies_lens_corrections
-
-# CLI (single image or folder batch, no Streamlit); --options FILE takes a raw /process options JSON.
-# --bit-depth 16 writes a genuine 16-bit PNG/TIFF; --gpu-export opts into CUDA resize/sharpen (CPU fallback).
-python -m app --input photo.jpg --output out.jpg --exposure-ev 0.5 --contrast 1.05 --rotate 90
-
-# Desktop build (always lands in release\PhotoStudio.exe, overwritten each run; builds from a fresh build-venv\<profile>
-# pinned by constraints-<profile>.txt, runs PhotoStudio.exe --self-test afterwards).
-# -GpuPack also builds the optional GPU pack (release-gpu-pack\gpu-pack, PhotoStudio-<v>-GPU-pack.7z) and
-# self-tests the base exe with it; -BuildProfile gpu is the older all-in-one flavour. -Installer also runs Inno Setup
-# (installer\PhotoStudio.iss -> installer-output\PhotoStudio-Setup-<v>.exe; per-user or all-users install, the GPU
-# pack as an optional component when it was built). Other switches: -Python, -ReuseVenv, -SkipArchive,
-# -KeepBuildFiles, -Sign [-CertificateThumbprint <sha1>] (default $env:CODESIGN_THUMBPRINT; signs the exe and, with
-# -Installer, the installer + uninstaller through Inno's SignTool).
-.\scripts\build_release.ps1 -Version "0.1.0"
-.\scripts\build_release.ps1 -Version "0.1.0" -GpuPack -ExtraIndexUrl https://download.pytorch.org/whl/cu130
+python -m app --input photo.jpg --output out.jpg --exposure-ev 0.5                 # CLI over run_pipeline()
+.\scripts\build_release.ps1 -Version "0.1.0" [-GpuPack -ExtraIndexUrl ...] [-Installer] [-Sign]
 ```
 
-`.github/workflows/perf.yml` runs the 24 MP budgets weekly on Windows (and on demand). CI (`.github/workflows/ci.yml`) runs `compileall` + `pytest -q -n auto` on Windows and Ubuntu x Python 3.12/3.14 with `requirements-dev.txt` only, plus a `raw-decode` job (Windows, Python 3.14) that adds `requirements-raw.txt` and runs `tests/test_real_assets.py` on a generated DNG. `.github/workflows/webview2-age.yml` runs monthly and opens an issue when the pinned WebView2 Fixed Version runtime in `build_release.ps1` is older than 90 days. Tests must skip cleanly without rawpy/pywebview/torch. `requirements-desktop.txt` (pywebview/PyInstaller) is build-only. Pushing a tag like `v0.1.0` (or a manual `workflow_dispatch`, whose `gpu_pack` input also builds the GPU pack as an artifact) runs `.github/workflows/release.yml`, which first runs the whole CI workflow (`needs: test`), then builds the same way `build_release.ps1` does on a `windows-latest` runner. `constraints-cpu.txt`/`constraints-gpu.txt` pin every transitive version for builds; regenerate them deliberately when raising a bound in `requirements.txt`. `requirements-gpu.txt` = `requirements.txt` + `requirements-gpu-pack.txt` (the pack's own list).
+The dev venv is `.venv` (never pip install into it ad hoc). CI and release workflows: see
+docs/ARCHITECTURE.md ("CI and releases") and docs/PROJECT_STATUS.md ("Verification", "Release").
 
-## Architecture
+## Rules most changes need
 
-```
-Streamlit frontend (app/frontend_unified_app.py composing the app/ui/ package)
-        |  HTTP (multipart POST /process, JSON options)
-        v
-Flask processing backend (app/backend.py, 127.0.0.1:8502 -- a per-launch port/token under app/desktop.py)
-        |
-        v
-PhotoProcessor + feature modules (app/image_processor.py + app/*.py)
-        |
-        v
-Pillow / NumPy / OpenCV / tifffile / optional rawpy / optional torch (GPU pack: AI Upscale, opt-in CUDA export resize/sharpen)
-```
-
-**The frontend never edits images in-process.** `app/frontend_unified_app.py` is the *only* Streamlit entry point (a ~240-line script: page setup, opening the photo, placing the panels; earlier per-feature frontends no longer exist; `app/__pycache__/` may still hold stale `.pyc` files of removed modules such as `edit_stack`, `cached_processing`, `performance`, `release_preflight` -- ignore them). The panels live in the `app/ui/` package (F14): `app/ui/tabs/<tab>.py` section functions, `canvas.py`, `export_panel.py`, `selections.py`, `layers.py`, `processing.py`, `project_io.py`, `state.py`, `widgets.py`, `theme.py`. Each run builds an `app.ui.context.EditorContext`; the panels record widget values into `ctx.values` (recipe key -> value) plus composite pieces (HSL bands, crop box, selection signatures, layers), and `app.ui.processing.build_options()` turns them into the `options` dict. `app.backend_client.process_via_backend()` sends the source image (plus combined mask/layer overlay bytes when present) to `/process`; the JSON+multipart response becomes the canvas/export image. `PhotoProcessor` is still used directly and locally for three things that must not go over the network round trip: decoding the uploaded file (including RAW), building mask geometry against the un-edited source, and face detection for the Portrait caption. Modules in `app/ui/` reach patchable collaborators through their module (`backend_client.process_via_backend`, `portrait_tools.detect_faces`, `geometry.estimate_straighten_angle`, `export_module.encode_export`, `ai_upscale.ai_upscale_installed`) -- tests monkeypatch those, and an imported module keeps its own references across reruns.
-
-**One control registry: `app/controls.py::CONTROLS` (F15).** Every recipe control is one `Control(...)`: recipe key, widget session_state key, label, kind, range, step, default, help, section, the `/process` option it sets (`option`, `stage`, `transform`, an optional wider `option_domain`) or the composite option it feeds (`composite`: curve, hsl_bands, aspect, crop_box), and `photo_specific` framing. From it derive: the widgets (`app.ui.widgets.render_control(key)`), `RECIPE_WIDGET_KEYS`, `app.edit_schema.RECIPE_CONTROLS` (sanitizer ranges/defaults) and the control-backed `OPTION_SPECS` entries (validation + stage, hence `DETAIL_STAGE_OPTION_KEYS`), `controls_to_options()` (used by both the live editor and `app.recipe_options.recipe_to_options()`), `RECIPE_KEYS_NOT_IN_OPTIONS`, the per-section reset buttons and the "modified" marks. To add a control: declare it in `CONTROLS`, render it with `render_control()` in a section function and record its value in `ctx.values`; `tests/test_p1_improvements.py::test_recipe_controls_match_the_real_widgets` checks every rendered widget against the registry, `tests/test_parity_golden.py` that it reaches the pipeline. Options no single control maps to (CLI-only knobs, composites, request control) stay in `edit_schema._OTHER_OPTION_SPECS`. **Widget keys are saved state** (Undo/Redo, presets, projects, AppTest selectors): never rename one -- `tests/test_ui_structure.py` pins them.
-
-**Pipeline order lives in exactly one place: `app/pipeline.py::run_pipeline()`** — ICC-normalize to sRGB (whenever an embedded profile exists) → Geometry (`app/geometry.py::apply_geometry()`: rotate/flip, Lens, straighten, constrain crop, Liquify) → Tone (+ preset) → Color → Detail | Repair → Layers → Masks (the shared mask, then each per-selection adjustment set from `local_masks`/`local_adjustments`) → Portrait → Relight → Crop → Background → Effects → AI Upscale (a Background "Remove" becomes the result's alpha channel last). `run_pipeline()` takes a `should_cancel` callable it polls between steps (the backend's "latest wins": a superseded request ends with `PipelineCancelled` → 409). `app/backend.py::process_image()`, `app/cli.py` (single image and `--input-dir`), `app/batch.py` and `app/batch_release.py::process_files()` all call it; never re-implement the steps elsewhere. Options are validated by `app/edit_schema.py::parse_options()` (`OPTION_SPECS` — a registry control's option is generated from its `Control`; any other new option goes in `_OTHER_OPTION_SPECS` with its stage, or the backend rejects it as unknown; `tests/test_parity_golden.py` fails if the pipeline never reads it). Recipes are version 2 (`RECIPE_VERSION`): Exposure is `exposure_ev` (stops, linear light) and Contrast/Saturation/mask targets are `*_amount` (-100..100); `sanitize_recipe()` and `migrate_recipe()` convert version-1 multiplier keys via `migrate_legacy_keys()`, while the API/CLI options keep the multipliers (`contrast = 1 + amount/100`, the registry's `"amount"` transform). The tab order is deliberately decoupled from the pipeline order.
-
-**The tool tabs are grouped by workflow (F9):** `☼ Basic` (Auto Enhance, Preset Look, Tone, Color incl. the white-balance picker, Presence = Texture/Clarity/Dehaze), `🎨 Curves & Color` (tone curve, HSL mixer, color grading, soft proof), `🔬 Detail` (noise reduction, sharpening), `⛶ Geometry` (rotate/straighten, Lens, Crop), `◉ Local` (sub-tabs `◉ Masks`, `🩹 Repair`, `◌ Portrait`), `◈ Layers`, `✨ Effects`, `⬇ Export` (export settings and presets, watermark, AI Upscale, export multiple sizes, Save Project), `✦ Presets & Library` (sub-tabs `✦ Presets`, `☰ Library & Batch`). `TOOL_TABS`/`LOCAL_TABS`/`LIBRARY_TABS` in the entry script are the `tool-tab`/`local-tab`/`library-tab` widget values. The script renders the Geometry tab first (Crop, Masks/Repair and the white-balance picker draw against its frame), the Export tab's settings before the edit and its Export-multiple/Save-Project part after it. Every section header shows "● modified" when one of its controls differs from its default (`app.ui.state.section_header()/section_label()`); section expanders carry the mark in their label and are keyed (`key="sec-..."`), so the label change doesn't collapse them.
-
-**Every tab's code runs on every Streamlit rerun**, regardless of which tab is visually selected — every widget is still instantiated each pass. The tabs (and the Local / Presets & Library sub-tabs) are `st.tabs(..., key=..., on_change="rerun")`, and *display-only* work in a hidden tab (editor iframes via `show_component(lambda: ...)`, preview thumbnails, face detection) is skipped through `app.ui.state.tab_visible()` (a thread-local the entry script sets per tab with `set_tab_visible(tab_open(tab) and tab_open(sub_tab))`) — never skip a widget that way. In AppTest, open a tab with `open_tab(at, "<tool tab>", "<sub tab>")` (tests/test_frontend_unified_app.py) before the run that needs it. This is why: (a) a mid-script `st.rerun()` before the last widget renders would garbage-collect not-yet-instantiated widgets' `session_state` (fixed generically via `request_rerun()`, consumed once at the true end of the script by `consume_rerun_request()`, after the canvas column); (b) any panel that conditionally skips rendering a widget loses that widget's state on the next rerun the same way — the HSL Color Mixer always renders all 8 bands (collapsed, keyed expanders), and the custom crop-ratio fields always render (disabled unless "Custom"). Streamlit 1.64's `persist_state=` was evaluated as a replacement and **not adopted**: under AppTest a hidden widget's persisted value was not restored when it reappeared and was dropped after an unrelated rerun.
-
-**Fragments (F1).** The canvas view (navigator, pan sliders, the image) and the scopes (histogram, waveform, clipping) run through `app.ui.state.run_fragment()`: a widget inside reruns only that fragment -- no tool panel, no pipeline -- and a fragment-only run never garbage-collects widgets outside it. Anything that changes what is rendered (zoom = preview resolution, Original/Split, the grid the Crop editor also reads) stays outside the fragments. Inside one, `request_rerun()` still works: the wrapper turns it into `st.rerun(scope="app")` when the body ends. Fragments need distinct function names in one container (the wrapper takes its body's name). AppTest always reruns the whole script, so fragment-only behaviour needs a browser check.
-
-**State mutation into/out of widgets goes through one convention**: normal control values live directly in widget `session_state` keys, but restoring a value *from outside* a widget (Undo/Redo, Reset, Load Project, Apply Preset, Auto Enhance, the curve editor's commit, lens-profile defaults) always writes into `st.session_state["_pending_restore"]` and calls `request_rerun()`; a block at the very top of the script (before any widget is instantiated) applies `_pending_restore` into each target widget's key via `app.ui.state.restore_recipe_to_state()`, which runs `app.edit_schema.sanitize_recipe()` first (clamps to each control's registry range) and interns painted masks. Never write directly into an already-instantiated widget's `session_state` key — Streamlit forbids it.
-
-**Painted masks are stored once (P5).** Inside a session a "Painted" selection's params hold `mask_ref` (a content hash); the PNG lives once in `st.session_state["_painted_masks"]` (`app/painted_masks.py`), so Undo snapshots and signatures stay small and identical paintings share an entry. Presets and projects are written with the masks inlined again (`inline_painted_masks()`), so files keep the old self-contained format; anything restored is interned (`intern_recipe_painted_masks()`). Work that runs on another thread (the Save button's producer, refine-on-pause) gets the table bound up front (`session_painted_masks()`).
-
-**`components.html()` custom editors** (the RGB curve, the on-canvas paint/brush/radial/gradient tool, the magic-wand/white-balance/zoom-navigator click picker, crop, Pen -- static components in `app/ui/static/editors/` (`<name>.html` with `{{field}}` slots + `<name>.js`, sharing `commit.js`), filled and inlined by `app/ui_editors.py`) commit their JS-side state back to Python via a hidden `st.text_area` + a synthetic Ctrl+Enter keydown/keyup, guarded by `app.ui.state.consume_new_commit()` — confirmed the only reliable cross-iframe commit mechanism in this Streamlit version. A native `<input>` value-setter trick to directly drive a real `st.slider` from JS does **not** reliably reach the server (only a real OS-level keypress or a button `.click()`/text_area Ctrl+Enter do) — route any new on-canvas editor through the hidden-text_area pattern. Each editor's markup starts with `app.ui.theme.editor_style()` (the `--ps-*` CSS variables) and uses `var(--ps-...)` for colours.
-
-**Styling (F12).** Colours are defined once in `app/ui/theme.py::THEME` and emitted as `--ps-*` CSS variables; the page stylesheet is the static file `app/ui/static/theme.css` (no colour literals, only `var(--ps-...)`), injected by `inject_page_style()`. Rules marked "Streamlit DOM" target Streamlit's `data-testid` markup; Streamlit is pinned `>=1.64,<2`, and every upgrade goes through the smoke checklist in `docs/PROJECT_STATUS.md` ("Streamlit upgrades"). The Library shortcut script is `app/ui/static/library_shortcuts.html`.
-
-**Interface language (English / Español).** Displayed text goes through `app.i18n.t()`: the source stays English, `t()` looks it up in the active language's catalog (`app/i18n_es.py`, English source -> Spanish) and returns it unchanged when there is no entry. Text with values is a template: `t("Saved {0}").format(t(name))`, and the catalog entry keeps the same `{0}` fields (`tests/test_i18n.py` checks). Only labels/help/messages are translated -- widget keys, option values and tab values stay English (choice widgets show them through `format_func=t_option`, or `t_format(existing)`), so recipes, presets and projects are language-independent. Registry controls are translated in `render_control()`, section titles in `section_header()/section_label()`. The language is the `ui-language` selector next to the uploader; the entry script calls `set_language()` before any text renders (a thread-local), and the choice is saved to `user_data_dir()/settings.json` (`PHOTO_STUDIO_LANGUAGE` overrides). Wrap every new user-visible string in `t()` and add its Spanish entry. The `components.html()` editors translate their text in Python with `app.ui_editors._tx()` (`t()` + HTML escaping) while building the markup. Not translated: Streamlit's own chrome (the uploader's "Drag and drop"/"Browse files").
-
-**Keyboard shortcuts** are native `st.button(..., shortcut=...)` (Undo Ctrl+Z, Redo Ctrl+Shift+Z, Save Ctrl+E, Z/B/G toggles whose `on_click` callbacks set widget state). Only the Library's rate/reject keys still use injected JS.
-
-**Backend caching is two-staged, not one call** (`app/ui/processing.py`): `cached_process_through_detail()` (Lens/Tone/Color/Detail options, `st.cache_data`) feeds `cached_process_from_repair_onward()` (everything else), so a rerun triggered by a control in only one stage doesn't force the other (more expensive, includes Non-Local Means denoise) stage to recompute. Stage 1 returns the backend's own PNG plus a handle (`X-Photo-Stage-Handle`); Stage 2 sends the handle and only re-uploads on a 410. `backend_client` tags interactive requests with the edit session (`bind_edit_session()`) and a generation; a `SupersededError` means the run is already obsolete. Every cache keys on a content digest (`source_digest()`, hashed once per upload) with the large bytes/images passed as underscore-prefixed (unhashed) arguments; the source is decoded once (`decoded_source`, `st.cache_resource` — read-only), and selection masks/layer payloads/face counts are cached too. Every `st.cache_data` has `max_entries` (a test scans `app/ui` for it). A photo whose long edge exceeds `PROXY_TRIGGER_LONG_EDGE` is previewed from a `PROXY_LONG_EDGE` proxy (`preview_scale` option; masks and layers are built at the proxy's post-geometry size, layer pixel sizes scaled); the 100 %+ zoom views and exports render at full resolution. Spatial radii in Clarity/Highlights-Shadows/grain/geometry are fractions of the image, so they need no scaling. The Save button's `data` is a callable (runs on a separate thread on click, no `st.*` there — bind inputs with `functools.partial`).
-
-**Mask/selection layers and image layers use stable UUIDs, not list indices, as widget keys** (`app.ui.selections.render_selection_stack()` for Masks/Repair; `app.ui.layers.render_layer_stack()` for the Layers tab, `st.session_state.image_layers`) — indexing by list position let removing or reordering one layer corrupt a later layer's widget state. Any per-item list widget with a Move Up/Down/Duplicate/Remove pattern must `break` out of its `enumerate()` loop immediately after mutating the underlying list (not just call `request_rerun()`) — otherwise the item that just got swapped/shifted into a later index gets rendered a second time in the same pass, under the same id, raising `StreamlitDuplicateElementKey`.
-
-**Masks/Repair/Crop preview operate against `lens_corrected_source()`** (`app/ui/processing.py`, called by `app.ui.tabs.geometry.compute_geometry()`), a cached `app.geometry.apply_geometry()` (rotate/flip, Lens, straighten, constrain crop) of the uploaded source — not the raw upload and not the fully backend-processed result — because the real backend applies the geometry before Masks/Repair/Crop.
-
-**`st.tabs()` nested inside `st.expander()` or another tab is allowed** (unlike nesting a second `st.expander()`, which Streamlit forbids — the reason `render_layer_styles()` uses checkboxes instead of its own expander). Each layer's own expander uses this to split into "🎨 Content" / "✨ Styles" / "⚙️ Settings" sub-tabs; every sub-tab's body still executes on every rerun, so the widget rules above apply unchanged.
-
-**Logging (R2).** No module configures logging on import. Modules log through `app.observability.get_logger("<component>")` ("photo-studio.<component>"); only entry points -- the backend's `serve()`, `app/desktop.py`'s `main()`, `app/cli.py`'s `main()` and the Streamlit script -- call `configure_logging("<component>")`, which writes rotating JSON to `user_data_dir()/logs/<component>.log`.
-
-## Module map
-
-- `app/controls.py` — `CONTROLS`, the control registry (see Architecture), plus `controls_to_options()`, `hsl_bands_from()`, `curve_fixed_points()`, `aspect_code_from()`, `ASPECT_RATIOS`. Streamlit-free.
-- `app/ui/` — the Streamlit UI split out of the entry script (see its `__init__` docstring): `state.py` (recipe capture/restore, `request_rerun`, `consume_new_commit`, tab visibility, `run_fragment`, section reset/"modified" helpers), `widgets.py` (`render_control`), `context.py` (`EditorContext`), `selections.py`, `layers.py`, `processing.py`, `project_io.py`, `theme.py` + `static/`, `canvas.py`, `export_panel.py`, `tabs/` (basic, color, detail, geometry, local, layers_tab, library).
-- `app/i18n.py` / `app/i18n_es.py` — interface language: `t()`, `t_option`, `t_format`, `set_language()`, the saved preference; the Spanish catalog.
-- `app/fonts.py` — fonts for Text layers and the watermark: `available_fonts()` (installed fonts plus uploads in `user_data_dir()/fonts`, by display name), `install_font()`, `load_font(name, size)` with the automatic-default fallback. Streamlit-free.
-- `app/image_processor.py` — `PhotoProcessor`: the core per-image object (load incl. RAW via `app/raw_import.py`, and every `apply_*` adjustment as a thin delegating wrapper into the feature modules below).
-- `app/professional_color.py` — HSL color mixer, color grading (split toning), vibrance, white-balance estimation, ICC sRGB normalization + gamut-warning soft proofing, clipping-warning overlay.
-- `app/icc_float.py` — float ICC conversion of matrix/TRC profiles to sRGB for the 16-bit path (`parse_matrix_trc()`, `to_srgb_float()`; None for LUT profiles, which keep LittleCMS on 8 bits).
-- `app/lens_corrections.py` — distortion, vignette, chromatic aberration, perspective/keystone; `LENS_PROFILES` starting points by lens category (not a calibrated per-lens-model database).
-- `app/advanced_masks.py` — `MaskStack`/`MaskLayer` (Luminance/Color/Gradient/Radial/Painted/Magic Wand selections, combined by add/subtract/intersect).
-- `app/painted_masks.py` — painted masks stored once per content (P5): intern/resolve/inline.
-- `app/dehaze.py` — classical Dark Channel Prior dehaze.
-- `app/lens_lookup.py` — Lens → "From the photo's lens": EXIF camera/lens/focal/aperture looked up in lensfun (optional `lensfunpy`, requirements-raw.txt) and the Lens sliders least-squares fitted to lensfun's correction fields.
-- `app/heal.py` — Repair's "Heal" method: best-matching nearby patch per spot, Poisson-blended (`cv2.seamlessClone`); falls back to inpaint at the border or for huge regions.
-- `app/liquify.py` — Liquify (F23): parametric strokes (`clean_strokes()`; tools push/bloat/pinch/twirl, points as frame fractions) replayed into a displacement field on a fixed `GRID_LONG_EDGE` grid, applied with `cv2.remap` as the last part of `apply_geometry()`. The strokes live in `st.session_state["liquify_strokes"]` (a recipe list key, photo-specific); the editor is `static/editors/liquify.*`.
-- `app/geometry.py` — `apply_geometry()` (orientation, lens warps, straighten, constrain crop, Liquify), `geometry_output_size()`, `estimate_straighten_angle()` (auto-level).
-- `app/ui_editors.py` — the on-canvas editors' builders (`_curve_editor_html`, `_paint_editor_html`, `_wand_picker_html`, `_crop_editor_html`, `_pen_editor_html`, `_before_after_html`, `_pan_viewer_html`), Streamlit-free: each fills its static `app/ui/static/editors/<name>.html`/`.js` (`_render()`: escaped `{{field}}` slots + one JSON `CONFIG`; a missing or unused slot raises). New editor text goes through `_tx()`/`t()` in the builder, never into the static files.
-- `app/lut.py` — 3D/1D `.cube` LUTs (F17): `parse_cube()`, `apply_lut()` (trilinear, chunked, float), the LUT library under `user_data_dir()/luts` (`import_lut()`, `list_luts()`, `load_lut()` by name -- options and recipes carry names, never paths). The `lut` registry control has its own kind `"lut"` (a selectbox over the library, validated as a safe name).
-- `app/color_profiles.py` — export color spaces: `COLOR_SPACES` (sRGB, Display P3), `convert_srgb_to_display_p3()` (linear-light matrix), `display_p3_icc_bytes()` (an ICC v4 profile generated in code), and the Display P3 *working space* of a P3 export (B14): `normalize_to_display_p3()`, `is_display_p3_icc()`; `run_pipeline()`'s `working_space` option, set by the backend from `export.color_space`, by the CLI and by `app/batch.py`.
-- `app/layer_workspace.py` — `LayerWorkspace`/`WorkspaceLayer` compositing (opacity, visibility, any number of stacked layers); `layers_to_json()`/`layers_from_json()` serialize a plain layer list (the `/process` wire format), sharing per-layer encode/decode helpers with `LayerWorkspace.to_json()`/`from_json()` (the `.photoproject` file format) so the two are never separate schemas. `render_text_layer()` rasterizes a Text layer's parametric fields on demand — a layer in `st.session_state.image_layers` is `"image"` (a stored upload), `"text"`, `"shape"`, or `"path"` (the latter two in `app/vector_shapes.py`), the last three rasterized fresh by `app.ui.layers.layer_dict_to_image()`. An `"adjustment"` layer (F25) has no pixels: it travels as `WorkspaceLayer.adjustments` and the pipeline's Layers step applies that set to everything composited below it, through its mask and opacity. An Image layer is placed with `render_image_layer()` (x/y/scale/rotation, aspect kept; legacy layers without `x_pct` keep stretching); Text size is `font_size_pct` of the short edge. Save Project stores the stack parametrically (`app.project_bundle.ProjectBundle.layer_stack` + one PNG entry per Image layer), so every kind stays editable.
-- `app/vector_shapes.py` — `render_shape_layer()`: parametric Rectangle/Ellipse/Line/Polygon/Star vector shapes (own fill + outline) via `PIL.ImageDraw`. `render_path_layer()`/`path_outline_points()`: a Pen tool path -- anchor points connected by cubic Bezier curves (each point's one handle used symmetrically as both its incoming and outgoing tangent; see "Known Issues" in `docs/PROJECT_STATUS.md`), sampled into a polyline since `PIL.ImageDraw` has no native curve primitive.
-- `app/svg_export.py` — SVG export of the Layers stack (F27): Shape/Path/Text as vector elements, Image layers embedded, gradients, opacity/visibility/blend, crop as the viewBox; `app.ui.processing.render_layers_svg()` (Export tab). `app/layer_align.py` — align/distribute moves on rendered bounds (`app.ui.layers.layer_bounds`), applied in button callbacks so the position sliders follow.
-- `app/layer_styles.py` — `apply_layer_styles()`: Drop Shadow/Outer Glow/Stroke/Color Overlay, stackable on any layer kind. Each effect is computed from the layer's original alpha silhouette independently (never chained through another effect's output), then composited in Photoshop's own back-to-front order.
-- `app/major_features.py` — `LayerStack` (the float-based compositing math: 26 Photoshop-matching blend modes, dispatched via `BLEND_MODE_LABELS`) and `PhotoCatalog` (SQLite-backed library: ratings/tags/colour labels/culling scores, search, collections, saved searches, virtual copies).
-- `app/professional_tools.py` — canvas-only display overlays (`apply_mask_overlay`, `draw_guides_and_grid`/`grid_line_fractions`/`GRID_PRESETS`), histogram/zoom/preview helpers (the one `preview_image`), `EXPORT_PROFILES`/`export_profile()`. None of these touch the pipeline.
-- `app/portrait_tools.py` — skin smoothing, face-detection caption.
-- `app/edit_history.py` — Undo/Redo recipe history (capped at 200 steps) and named snapshots.
-- `app/project_bundle.py` — Save/Load Project (`.photoproject` v2; layers as `layers/stack.json` + `layers/<id>.png`). `ProjectBundle.load()` still opens the original v1 format (the old writer is kept only as a test fixture, `tests/legacy_project.py`).
-- `app/reliability.py` — archive validation (`validate_project_archive()`: real decompressed-byte-count enforcement, path-traversal/drive-letter checks, manifest-reference checks) guarding the project format against a malicious `.photoproject` zip; image validation, request ids, digests.
-- `app/merge.py` — HDR merge (align + exposure fusion or Debevec + tone map) and panorama stitching (`cv2.Stitcher`, cropped to content), OpenCV only; the result is a 16-bit TIFF opened as the source (Library & Batch > HDR & Panorama). Streamlit-free.
-- `app/library.py` — folder scanning/indexing into the catalog (with culling scores), cached thumbnails, `save_rating()` (catalog + optional XMP sidecar; rating, tags, colour label).
-- `app/culling.py` — culling scores (F20): `score_image()` (focus 0-100, clipped highlights/shadows %), `score_file()` from a cheap preview, `is_likely_blurry()`.
-- `app/duplicates.py` — duplicate finder (F29): `dhash()` of the culling preview cached in the catalog (`PhotoCatalog.get_hash/set_hash`), `find_duplicate_groups()` (Hamming distance, transitive; keeper = sharpest among the full-resolution copies), Library Catalog → 🔁 Find duplicates.
-- `app/xmp_sidecar.py` — XMP sidecars: read/write `xmp:Rating` (-1 = rejected) and `dc:subject` keywords, keeping the rest of an existing sidecar.
-- `app/presets.py` (built-in named looks) / `app/custom_presets.py` (`PresetStore`, user-saved) / `app/preset_exchange.py` (JSON export/import).
-- `app/batch.py` / `app/batch_release.py` — folder batch processing, filename templates, ZIP delivery; `recipe_to_options()` in `app/recipe_options.py` converts a saved recipe into backend `options` shape for "sync settings across a batch." `export_multiple()` is a different axis (one photo, several `EXPORT_PROFILES` variants zipped together) — "Export As," not batch processing.
-- `app/backend.py` — Flask app, `/process` and `/health`; `serve()` is the backend process's entry point.
-- `app/backend_client.py` — HTTP client + on-demand backend auto-start (`ensure_backend_running()`, cached via `st.cache_resource`, cleared and retried once when the backend dies), backend token, session/generation headers, Stage 1 handles.
-- `app/desktop.py` — pywebview native window; picks free ports and a per-launch token, holds a single-instance mutex, starts the backend as a child process (waits for `/health`) before starting the Streamlit child, shows a native error box on failure, passes a file argument (`.photoproject`/photo) to the frontend via `PHOTO_STUDIO_OPEN_PATH`; points pywebview at a bundled WebView2 Runtime. `--self-test` reports modules, rawpy, face detection, AI Upscale and the GPU pack.
-- `app/gpu_pack.py` — the optional GPU pack (K5): finds a `gpu-pack` folder (`$PHOTO_STUDIO_GPU_PACK`, next to the exe, or in the user data folder) whose `gpu-pack.json` matches this Python, and appends its `site-packages` to `sys.path`; called lazily by `app.ai_upscale`'s probes. `scripts/gpu_pack_tools.py` is the build-side finishing step (prune what the base ships, write the manifest).
-- `app/ai_masks.py` — AI masks (F16): Subject/Person via torchvision DeepLabV3-MobileNetV3 (GPU pack; weights downloaded on first use, `weights_cached()` without importing torch), Sky classical (`sky_mask()`); run by the backend's `POST /ai_mask` (`backend_client.ai_mask_via_backend`), added as a Painted selection (`mask_to_painted_b64`).
-- `app/ai_upscale.py` — Real-ESRGAN AI Upscale (optional; torch imported lazily), `ai_upscale_installed()`/`ai_upscale_available()`/`ai_upscale_install_hint()`.
-- `app/gpu_export.py` — the opt-in CUDA resize/output sharpening for final exports (torch imported lazily, only when requested); `app.export.gpu_export_transform()` calls it and falls back to the CPU transform, with a logged warning, when CUDA is missing or fails. Used by the Export tab ("Use GPU for export resize/sharpen"), the Batch Processor ("Use GPU for profile resizing"), `export_multiple()` and the CLI's `--gpu-export`.
-- `app/psd.py` — layered PSD (F22), NumPy/zlib only: `read_psd()` (8/16-bit RGB/Grayscale; raw/RLE/ZIP channels; names incl. `luni`, opacity, blend keys <-> `BLEND_MODE_LABELS`, visibility incl. hidden groups, user masks, clipping, fill opacity; empty/adjustment layers skipped and counted; the composite) and `write_psd()` (8-bit RGB raster layers + composite). Used by `raw_import` (a PSD opens as its composite), the Layers tab's PSD import (`app.ui.layers.psd_layer_dicts()`) and `app.ui.processing.render_layered_psd()` (⬇ Export → layered PSD; layers cropped with `app.pipeline.crop_rect()`).
-- `app/float_export.py` — EXR/PFM export (F24): `encode_exr()` (scanline OpenEXR, HALF, ZIP, `chromaticities` for sRGB/Display P3; NumPy + zlib, OpenCV's wheel has no EXR encoder) and `encode_pfm()`, both linear light (`srgb_to_linear()`); `app.export.FLOAT_FORMATS` forces `bit_depth` 16.
-- `app/high_bit.py` — the 16-bit export path: `decode_high_bit()` (16-bit PNG/TIFF, RAW at 16 bits) and the float32 copy that rides on the image (`attach()`/`attached()`) while `PhotoProcessor` runs in its high-precision mode for `bit_depth == 16`; `encode_export()` writes a genuine 16-bit PNG/TIFF from it.
-- `app/creative_filters.py` — Effects → Creative Filters (F26): lens blur (disc, focus masks), motion blur, bloom, halftone, glitch on float RGB, sizes as frame fractions, run by `PhotoProcessor.apply_creative_filters()` in the Effects step before the grain.
-- `app/relight.py` — Relight (F32): a shape-from-shading normal map (`estimate_normals()`), one movable Lambertian light plus ambient and warmth (`relight()`), linear light, before Crop.
-- `app/background.py` — Background (F31): `subject_mask()` (the F16 AI model when installed, else `grabcut_subject_mask()`; cached by content), `apply_background()` Blur/Color; Remove is applied as alpha by `run_pipeline()`. `pipeline.ai_tools_for()` + the export setting `ai_tools` write F34's provenance XMP (IPTC DigitalSourceType, `xmpMM:History`) in `app.export.provenance_xmp()`.
-- `app/effects.py` — `apply_film_grain()` (✨ Effects; unseeded, generated on a fixed-size grid so preview and export look alike). The post-crop vignette is `PhotoProcessor.apply_post_crop_vignette()`.
-- `app/config.py` — `user_data_dir()` (`PHOTO_STUDIO_DATA_DIR`), `atomic_write_text()`, the backend host/port/token settings and the `PHOTO_*` limits (`PHOTO_MAX_UPLOAD_BYTES` 50 MB, `PHOTO_MAX_IMAGE_PIXELS` 50 MP, `PHOTO_MAX_UPSCALE_OUTPUT_PIXELS`, `PHOTO_STAGE_CACHE_ENTRIES`, `PHOTO_MAX_HEAVY_JOBS`).
-- `app/pipeline.py` — `run_pipeline()` (the step order), `decode_source()`, `expected_output_size()`, `check_upscale_output()`.
-- `app/edit_schema.py` — `OPTION_SPECS`/`parse_options()` (strict, for the pipeline) and `RECIPE_CONTROLS`/`sanitize_recipe()`/`migrate_recipe()` (lenient, for restoring into widgets); both derived from `app.controls` where a control exists.
-- `app/export.py` — `encode_export()` (the one metadata-aware writer: format/quality/resize/sharpen/watermark/EXIF policy/bit depth/GPU transform), `write_export()`, `cached_export()`, `render_export_name()` (file-name template), `ExportPresetStore`.
-- `app/raw_import.py` — decoding (RAW via rawpy, 16-bit grayscale scaled), `SUPPORTED_EXTENSIONS`/`uploader_types()` — the one accepted-format list.
-- `app/cli.py` (run as `python -m app`) — single-image/folder CLI over `run_pipeline()`, independent of the Flask backend.
-- `app/observability.py`, `app/diagnostics.py` — logging (see Architecture, "Logging"), audit records, health diagnostics (System Health, incl. AI Upscale / GPU pack).
-- `app/refine_preview.py` — refine-on-pause tracker for proxy previews.
-- `scripts/windows_resources.py` — the exe's version resource (from `app.__version__`, publisher "MELEJ"), manifest (UTF-8 active code page, PerMonitorV2) and the `.photoproject` document icon (`app/assets/photoproject.ico`, the exe's icon index 1), used by `PhotoStudio.spec` (K6/K7).
+- **The frontend never edits images in-process.** Edits go through `/process` to `app/backend.py`;
+  locally `PhotoProcessor` only decodes the upload, builds mask geometry and counts faces.
+- **One pipeline order**, in `app/pipeline.py::run_pipeline()`; the backend, CLI and batch paths all
+  call it. Never re-implement the steps elsewhere.
+- **One control registry**, `app/controls.py::CONTROLS`. To add a control: declare it there, render it
+  with `render_control()` in a section function, record it in `ctx.values`. Any other new `/process`
+  option goes in `edit_schema._OTHER_OPTION_SPECS` with its stage, or the backend rejects it.
+- **Widget keys are saved state** (Undo, presets, projects, tests): never rename one
+  (`tests/test_ui_structure.py` pins them).
+- **Every tab runs on every rerun.** Never skip rendering a widget (its state is lost); skip only
+  display work with `app.ui.state.tab_visible()`. Use `request_rerun()`, never a mid-script `st.rerun()`.
+- **Setting a widget from outside it** (Undo, Reset, presets, editor commits) goes through
+  `st.session_state["_pending_restore"]` + `request_rerun()`; never write an instantiated widget's key.
+- **On-canvas editors** (`components.html()`, static files in `app/ui/static/editors/`) commit through a
+  hidden `st.text_area` + `consume_new_commit()`; a JS-driven `st.slider` does not reach the server.
+- **List widgets** (masks, layers) use stable UUID keys, and `break` out of the loop right after a
+  Move/Duplicate/Remove.
+- **Every `st.cache_data` has `max_entries`**; large inputs are underscore-prefixed (unhashed) args.
+- **Text**: wrap user-visible strings in `app.i18n.t()` and add the Spanish entry in `app/i18n_es.py`;
+  keys, option values and tab values stay English. Colours only as `var(--ps-...)` from `app/ui/theme.py`.
+- **Logging**: modules use `app.observability.get_logger()`; only entry points call `configure_logging()`.
 
 ## Testing conventions
 
-- Every per-user file lives under `app.config.user_data_dir()` (`%LOCALAPPDATA%\PhotoStudio` on Windows; `PHOTO_STUDIO_DATA_DIR` overrides). `tests/conftest.py` points it at `<tmp_path>/.photo-studio` for every test (and a temp dir per test process), so the suite never writes real user files; it also closes any log handler a test's entry point opened.
-- The suite is xdist-safe (`python -m pytest -n auto`): per-test data folders, no fixed ports (a test that needs one binds port 0), no writes into the source tree.
-- Test images are generated (`tests/synthetic_assets.py`: photo-like images, 16-bit gradients, a real CFA DNG); the only binary fixtures are `tests/assets/portrait_public_domain.jpg` and the golden images in `tests/golden/`. Don't add third-party photos.
-- `tests/conftest.py` also blanks `PHOTO_BACKEND_TOKEN` per test, so a token set by a spawning test can't leak into the Flask test client.
-- `tests/test_frontend_unified_app.py` drives the real app through Streamlit's `AppTest` harness (`streamlit.testing.v1.AppTest`), simulating uploads via `file_uploader.set_value()` — this is the regression net for the "every tab runs on every rerun" and "state must survive an unrelated tab's rerun" bug class described above. It also provides `open_tab()`, `ui_source()` (the entry script plus every `app/ui` module, for source checks) and the backend stub other AppTest files import. `tests/test_ui_structure.py` covers the registry, the split, fragments, the modified marks and painted-mask interning.
-- `AppTest` is headless (no real DOM/JS) and always reruns the whole script (no fragment-only runs), so anything living inside a `components.html()` iframe — drag interactions on the curve/paint editors, the Library Catalog's keyboard shortcuts — and fragment-scoped reruns cannot be exercised by it. Those are verified by driving the hidden commit field directly (the same wiring a real interaction ultimately depends on), the editors' JS under Node (`tests/js_fake_dom.js`), plus live manual verification.
+- Per-user files live under `app.config.user_data_dir()`; `tests/conftest.py` points it at a temp folder
+  and blanks `PHOTO_BACKEND_TOKEN`. The suite is xdist-safe: no fixed ports, no writes to the source tree.
+- Test images are generated (`tests/synthetic_assets.py`); don't add third-party photos.
+- `tests/test_frontend_unified_app.py` drives the app with AppTest (`open_tab()` opens a tab first).
+  AppTest can't run iframe JS or fragment-only reruns: drive the hidden commit field, use the Node tests
+  (`tests/js_fake_dom.js`) or the browser smoke test.
 
 ## graphify
 
