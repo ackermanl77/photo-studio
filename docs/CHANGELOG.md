@@ -7,6 +7,26 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-22 -- Tools in a sidebar: the window is for the photo
+
+Measured against Photoshop 2026 (whose document area is about 54 % of its window): the photo took
+29 % of the window at 1440x900 and at 1920x1080, starting 332 px down and 668-887 px from the left,
+because the tools shared the page with it as a column. Now:
+
+- The tool tabs render in `st.sidebar` (open by default, at least 420 px while open, drag to widen,
+  collapse for the whole window); once a photo is open the brand and the open bar move there too.
+- Above the photo, two rows of controls instead of three (file + edit history, then the view), with
+  every widget key unchanged.
+- The photo is capped to the window's height (`canvas-stage` container), so a tall photo no longer
+  runs past the bottom of the screen.
+- Streamlit's header is now transparent and click-through instead of hidden, so the sidebar's
+  expand button keeps working after a collapse; the old narrow-window column-order rule is gone
+  (Streamlit overlays the sidebar on small screens).
+
+Result: the photo takes 49 % of the window at 1440x900 and 62 % at 1920x1080, starting 175 px down
+and 444 px from the left (all of the width when the sidebar is collapsed). The suite and the
+real-browser smoke test pass.
+
 ## 2026-10-22 -- UI fixes from the UI/frontend REA analysis (UI1, UI2, UI9)
 
 - **Canvas header (UI1):** Undo / Redo / Reset / History were squeezed into one row with the view

@@ -6,10 +6,40 @@
    Streamlit upgrade can change: re-check them with the upgrade smoke checklist in
    docs/PROJECT_STATUS.md ("Streamlit upgrades"). Streamlit is pinned to >=1.64,<2. */
 
-/* Streamlit DOM: hide the default header/footer so the app's own header sits at the top. */
-header[data-testid="stHeader"] { display: none !important; }
+/* Streamlit DOM: Streamlit's own header is invisible and takes no room, so the app's controls sit at
+   the top -- but its "expand sidebar" button stays usable: hiding the whole header also removed the
+   only way back after collapsing the tools sidebar. */
+header[data-testid="stHeader"] { background: transparent; height: 2.6rem; pointer-events: none; }
+header[data-testid="stHeader"] [data-testid="stToolbar"] { visibility: hidden; }
+header[data-testid="stHeader"] [data-testid="stExpandSidebarButton"] {
+    visibility: visible;
+    pointer-events: auto;
+    background: var(--ps-surface);
+    border: 1px solid var(--ps-border-soft);
+    border-radius: 8px;
+}
+[data-testid="stDecoration"] { display: none; }
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
+
+/* Streamlit DOM: the tools sidebar (Photoshop-style: the page is for the image). At least 420 px
+   while open so the tool tabs and editors have room; drag its edge to widen it, or collapse it. */
+[data-testid="stSidebar"][aria-expanded="true"] { min-width: 420px; }
+[data-testid="stSidebarHeader"] { height: 2.2rem; padding-top: 0.4rem; padding-bottom: 0; }
+[data-testid="stSidebarUserContent"] { padding-top: 0.2rem; }
+[data-testid="stSidebar"] .top-header { padding-bottom: 0.35rem; margin-bottom: 0.4rem; }
+[data-testid="stSidebar"] .brand-title { font-size: 1.2rem; }
+[data-testid="stSidebar"] .header-info { display: none; }
+
+/* Streamlit DOM: the photo fits the window's height as well as the page's width (a tall photo
+   otherwise ran past the bottom of the screen). */
+.st-key-canvas-stage [data-testid="stImage"] { align-items: center; }
+.st-key-canvas-stage [data-testid="stImage"] img {
+    max-height: calc(100vh - 200px);  /* the two control rows and Guides sit above it */
+    width: auto !important;
+    max-width: 100%;
+    object-fit: contain;
+}
 
 /* Streamlit DOM: page padding and a tight vertical rhythm. */
 .block-container {
@@ -119,16 +149,8 @@ footer { visibility: hidden; }
     row-gap: 0.2rem;
 }
 
-/* Streamlit DOM: on a narrow window the two-column workspace stacks; show the canvas first. Only
-   the one immediate child chain of the keyed "workspace-split" container is matched
-   (stVerticalBlock > stLayoutWrapper > stHorizontalBlock), so rows nested deeper keep their order. */
-@media (max-width: 900px) {
-    .st-key-workspace-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {
-        flex-wrap: wrap !important;
-    }
-    .st-key-workspace-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-of-type(1) { order: 2; }
-    .st-key-workspace-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-of-type(2) { order: 1; }
-}
+/* On a narrow window Streamlit shows the tools sidebar as an overlay over the canvas (its own
+   behaviour), so the photo comes first without a rule here. */
 
 /* Streamlit DOM (.st-key-<key> classes): the hidden text_areas the on-canvas editors commit
    through (app/ui_editors.py) -- plumbing, never shown. The substring selectors cover the

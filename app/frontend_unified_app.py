@@ -47,7 +47,7 @@ TOOL_TABS = ["☼ Basic", "🎨 Curves & Color", "🔬 Detail", "⛶ Geometry", 
 LOCAL_TABS = ["◉ Masks", "🩹 Repair", "◌ Portrait"]
 LIBRARY_TABS = ["✦ Presets", "☰ Library & Batch"]
 
-st.set_page_config(page_title="Photo Studio Pro", page_icon=str(APP_ICON_PNG), layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Photo Studio Pro", page_icon=str(APP_ICON_PNG), layout="wide", initial_sidebar_state="expanded")
 # The Streamlit process's own log (R2: modules never configure logging on import). Idempotent.
 configure_logging("frontend")
 inject_page_style()
@@ -57,8 +57,13 @@ inject_page_style()
 st.session_state.setdefault("ui-language", saved_language())
 set_language(st.session_state["ui-language"])
 
+# Once a photo is open, the tools live in the sidebar (Photoshop-style: the window is for the image),
+# and so do the brand and the open bar. Before that, the start screen uses the page itself.
+_upload_key = f"main-upload-{st.session_state.get('_main_upload_generation', 0)}"
+photo_open = bool(st.session_state.get(_upload_key)) or "restored_source_bytes" in st.session_state
+
 _app_icon = base64.b64encode(APP_ICON_SVG.read_bytes()).decode("ascii")
-st.markdown(f"""
+(st.sidebar if photo_open else st).markdown(f"""
 <div class="top-header">
     <div class="brand-title">
         <img class="brand-icon" src="data:image/svg+xml;base64,{_app_icon}" alt="">
@@ -79,14 +84,16 @@ if "_pending_restore" in st.session_state:
     restore_recipe_to_state(st.session_state.pop("_pending_restore"))
 
 # --- Open a photo ---------------------------------------------------------------------------------
-# Once a photo is open, the open row folds into one collapsed expander so the canvas starts near
-# the top (UI2). Its widgets still render every run (an expander's body always runs), so the
-# uploader and the language keep their state; the project opener can't be a nested expander there.
-_upload_key = f"main-upload-{st.session_state.get('_main_upload_generation', 0)}"
-photo_open = bool(st.session_state.get(_upload_key)) or "restored_source_bytes" in st.session_state
-open_bar = st.expander(t("📂 Open another photo or project · 🌐 Language"), expanded=False, key="sec-open-bar") if photo_open else st.container()
+# Once a photo is open, the open row folds into one collapsed expander at the top of the sidebar
+# (UI2). Its widgets still render every run (an expander's body always runs), so the uploader and the
+# language keep their state; the project opener can't be a nested expander there, and in the narrow
+# sidebar the three parts stack instead of sharing a row.
+open_bar = st.sidebar.expander(t("📂 Open another photo or project · 🌐 Language"), expanded=False, key="sec-open-bar") if photo_open else st.container()
 open_bar.__enter__()
-upload_col1, upload_col2, language_col = st.columns([2.5, 1, 0.55], gap="small")
+if photo_open:
+    upload_col1 = upload_col2 = language_col = st.container()
+else:
+    upload_col1, upload_col2, language_col = st.columns([2.5, 1, 0.55], gap="small")
 with language_col:
     st.selectbox(
         t("🌐 Language"), list(LANGUAGES), format_func=LANGUAGES.get, key="ui-language",
@@ -168,110 +175,110 @@ ctx = EditorContext(
     source_exif=source.getexif().tobytes() if len(source.getexif()) else None,
 )
 
-# --- The workspace: tool tabs | canvas -------------------------------------------------------------
-with st.container(key="workspace-split"):
-    tools_col, canvas_col = st.columns([1.1, 1.4], gap="large")
+# --- The workspace: tool tabs in the sidebar, the canvas in the page -------------------------------
+# Like Photoshop, the window belongs to the image: the tools are a resizable, collapsible sidebar.
+tools_col, canvas_col = st.sidebar, st.container(key="workspace-canvas")
 
-    with tools_col:
-        st.markdown(t('<div class="panel-header-title">🛠️ Tool Workspace</div>'), unsafe_allow_html=True)
-        # on_change="rerun" + key: Streamlit reports which tab is on screen (`.open`), so hidden
-        # tabs skip their display-only work. Switching tabs is a (cheap, cached) rerun.
-        tabs = dict(zip(TOOL_TABS, st.tabs([t(_label) for _label in TOOL_TABS], key="tool-tab", on_change="rerun")))
+with tools_col:
+    st.markdown(t('<div class="panel-header-title">🛠️ Tool Workspace</div>'), unsafe_allow_html=True)
+    # on_change="rerun" + key: Streamlit reports which tab is on screen (`.open`), so hidden
+    # tabs skip their display-only work. Switching tabs is a (cheap, cached) rerun.
+    tabs = dict(zip(TOOL_TABS, st.tabs([t(_label) for _label in TOOL_TABS], key="tool-tab", on_change="rerun")))
 
-        def enter(tab_label: str, sub_tab=None):
-            set_tab_visible(tab_open(tabs[tab_label]) and (sub_tab is None or tab_open(sub_tab)))
+    def enter(tab_label: str, sub_tab=None):
+        set_tab_visible(tab_open(tabs[tab_label]) and (sub_tab is None or tab_open(sub_tab)))
 
-        # Geometry first: Crop and the Masks/Repair/White Balance tools draw against its frame.
-        enter("⛶ Geometry")
-        with tabs["⛶ Geometry"]:
-            geometry.rotate_section(ctx)
-            st.divider()
-            geometry.lens_section(ctx)
-            geometry.compute_geometry(ctx)
-            st.divider()
-            geometry.liquify_section(ctx)
-            st.divider()
-            geometry.crop_section(ctx)
+    # Geometry first: Crop and the Masks/Repair/White Balance tools draw against its frame.
+    enter("⛶ Geometry")
+    with tabs["⛶ Geometry"]:
+        geometry.rotate_section(ctx)
+        st.divider()
+        geometry.lens_section(ctx)
+        geometry.compute_geometry(ctx)
+        st.divider()
+        geometry.liquify_section(ctx)
+        st.divider()
+        geometry.crop_section(ctx)
 
-        enter("☼ Basic")
-        with tabs["☼ Basic"]:
-            basic.auto_enhance_button(ctx)
-            basic.tone_section(ctx)
-            st.divider()
-            basic.color_section(ctx)
-            st.divider()
-            basic.presence_section(ctx)
+    enter("☼ Basic")
+    with tabs["☼ Basic"]:
+        basic.auto_enhance_button(ctx)
+        basic.tone_section(ctx)
+        st.divider()
+        basic.color_section(ctx)
+        st.divider()
+        basic.presence_section(ctx)
 
-        enter("🎨 Curves & Color")
-        with tabs["🎨 Curves & Color"]:
-            color.curve_section(ctx)
-            color.hsl_section(ctx)
-            color.black_white_section(ctx)
-            color.grading_section(ctx)
-            color.lut_section(ctx)
-            color.soft_proof_section(ctx)
+    enter("🎨 Curves & Color")
+    with tabs["🎨 Curves & Color"]:
+        color.curve_section(ctx)
+        color.hsl_section(ctx)
+        color.black_white_section(ctx)
+        color.grading_section(ctx)
+        color.lut_section(ctx)
+        color.soft_proof_section(ctx)
 
-        enter("🔬 Detail")
-        with tabs["🔬 Detail"]:
-            detail.detail_section(ctx)
+    enter("🔬 Detail")
+    with tabs["🔬 Detail"]:
+        detail.detail_section(ctx)
 
-        with tabs["◉ Local"]:
-            local_tabs = dict(zip(LOCAL_TABS, st.tabs([t(_label) for _label in LOCAL_TABS], key="local-tab", on_change="rerun")))
-            enter("◉ Local", local_tabs["◉ Masks"])
-            with local_tabs["◉ Masks"]:
-                local.masks_section(ctx)
-            enter("◉ Local", local_tabs["🩹 Repair"])
-            with local_tabs["🩹 Repair"]:
-                local.repair_section(ctx)
-            enter("◉ Local", local_tabs["◌ Portrait"])
-            with local_tabs["◌ Portrait"]:
-                local.portrait_section(ctx)
+    with tabs["◉ Local"]:
+        local_tabs = dict(zip(LOCAL_TABS, st.tabs([t(_label) for _label in LOCAL_TABS], key="local-tab", on_change="rerun")))
+        enter("◉ Local", local_tabs["◉ Masks"])
+        with local_tabs["◉ Masks"]:
+            local.masks_section(ctx)
+        enter("◉ Local", local_tabs["🩹 Repair"])
+        with local_tabs["🩹 Repair"]:
+            local.repair_section(ctx)
+        enter("◉ Local", local_tabs["◌ Portrait"])
+        with local_tabs["◌ Portrait"]:
+            local.portrait_section(ctx)
 
-        enter("◈ Layers")
-        with tabs["◈ Layers"]:
-            layers_tab.layers_section(ctx)
+    enter("◈ Layers")
+    with tabs["◈ Layers"]:
+        layers_tab.layers_section(ctx)
 
-        enter("✨ Effects")
-        with tabs["✨ Effects"]:
-            detail.effects_section(ctx)
+    enter("✨ Effects")
+    with tabs["✨ Effects"]:
+        detail.effects_section(ctx)
 
-        with tabs["✦ Presets & Library"]:
-            library_tabs = dict(zip(LIBRARY_TABS, st.tabs([t(_label) for _label in LIBRARY_TABS], key="library-tab", on_change="rerun")))
-            enter("✦ Presets & Library", library_tabs["✦ Presets"])
-            with library_tabs["✦ Presets"]:
-                library.presets_section(ctx)
-            enter("✦ Presets & Library", library_tabs["☰ Library & Batch"])
-            with library_tabs["☰ Library & Batch"]:
-                library.library_section(ctx)
+    with tabs["✦ Presets & Library"]:
+        library_tabs = dict(zip(LIBRARY_TABS, st.tabs([t(_label) for _label in LIBRARY_TABS], key="library-tab", on_change="rerun")))
+        enter("✦ Presets & Library", library_tabs["✦ Presets"])
+        with library_tabs["✦ Presets"]:
+            library.presets_section(ctx)
+        enter("✦ Presets & Library", library_tabs["☰ Library & Batch"])
+        with library_tabs["☰ Library & Batch"]:
+            library.library_section(ctx)
 
-        # Undo/Redo history: one step per distinct recipe (every control has rendered by now).
-        if "edit_history" not in st.session_state:
-            st.session_state.edit_history = EditHistory()
-        ctx.history = st.session_state.edit_history
-        ctx.history.record(build_recipe())
+    # Undo/Redo history: one step per distinct recipe (every control has rendered by now).
+    if "edit_history" not in st.session_state:
+        st.session_state.edit_history = EditHistory()
+    ctx.history = st.session_state.edit_history
+    ctx.history.record(build_recipe())
 
-        # Export settings first (the Save footer needs them), then the edit itself.
-        enter("⬇ Export")
-        with tabs["⬇ Export"]:
-            export_panel.export_settings_section(ctx)
-            export_panel.watermark_section(ctx)
+    # Export settings first (the Save footer needs them), then the edit itself.
+    enter("⬇ Export")
+    with tabs["⬇ Export"]:
+        export_panel.export_settings_section(ctx)
+        export_panel.watermark_section(ctx)
 
-        processing.render_edit(ctx)
+    processing.render_edit(ctx)
 
-        enter("⬇ Export")
-        with tabs["⬇ Export"]:
-            export_panel.export_multiple_section(ctx)
-            export_panel.layered_psd_section(ctx)
-            export_panel.svg_section(ctx)
-            st.divider()
-            export_panel.project_file_section(ctx)
+    enter("⬇ Export")
+    with tabs["⬇ Export"]:
+        export_panel.export_multiple_section(ctx)
+        export_panel.layered_psd_section(ctx)
+        export_panel.svg_section(ctx)
+        st.divider()
+        export_panel.project_file_section(ctx)
 
-    set_tab_visible(True)  # the canvas column is always on screen
-    with canvas_col:
-        # "Original" and Split View compare against the source in the edit's orientation.
-        oriented_source = orient(source, ctx.values["rotate"], ctx.values["flip_horizontal"], ctx.values["flip_vertical"])
-        canvas.render_canvas_column(ctx, oriented_source)
-        export_panel.save_footer(ctx)
+set_tab_visible(True)  # the canvas column is always on screen
+with canvas_col:
+    # "Original" and Split View compare against the source in the edit's orientation.
+    oriented_source = orient(source, ctx.values["rotate"], ctx.values["flip_horizontal"], ctx.values["flip_vertical"])
+    canvas.render_canvas_column(ctx, oriented_source)
+    export_panel.save_footer(ctx)
 
 # Any panel's request_rerun() happens here, after every widget (tabs and canvas) has rendered.
 consume_rerun_request()

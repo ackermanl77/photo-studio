@@ -34,7 +34,7 @@ python -m streamlit run app/frontend_unified_app.py
 
 `app/frontend_unified_app.py` is currently the **only** Streamlit entry point in the project. Earlier "specialized workspace" scripts (`frontend_project.py`, `frontend_layers.py`, `frontend_masking.py`, `frontend_batch.py`, `frontend_library_editor.py`, `frontend_portrait.py`, `frontend_release.py`, and others) were consolidated into it during development and no longer exist. Mentions of them in `docs/CHANGELOG.md` are history, not current instructions.
 
-The unified workspace groups its tools by workflow in nine tabs -- ☼ Basic, 🎨 Curves & Color, 🔬 Detail, ⛶ Geometry, ◉ Local (Masks, Repair, Portrait), ◈ Layers, ✨ Effects, ⬇ Export and ✦ Presets & Library (sub-tabs ✦ Presets and ☰ Library & Batch, which holds the Library Catalog, the Batch Processor and System Health) -- with a "● modified" mark on every section you have changed. The tool tabs sit on the left, the preview and the Save button on the right.
+The unified workspace groups its tools by workflow in nine tabs -- ☼ Basic, 🎨 Curves & Color, 🔬 Detail, ⛶ Geometry, ◉ Local (Masks, Repair, Portrait), ◈ Layers, ✨ Effects, ⬇ Export and ✦ Presets & Library (sub-tabs ✦ Presets and ☰ Library & Batch, which holds the Library Catalog, the Batch Processor and System Health) -- with a "● modified" mark on every section you have changed. Like Photoshop, the window belongs to the photo: the tool tabs live in a sidebar on the left (drag its edge to widen it, or collapse it for the whole window), and the photo, its view controls and the Save button fill the page.
 
 ## Desktop App
 
