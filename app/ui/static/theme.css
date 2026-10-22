@@ -34,6 +34,10 @@ footer { visibility: hidden; }
     align-items: center;
     gap: 0.5rem;
 }
+.brand-icon {
+    width: 1.9rem;
+    height: 1.9rem;
+}
 .brand-badge {
     background: linear-gradient(135deg, var(--ps-brand), var(--ps-brand-dark));
     color: var(--ps-on-brand);
@@ -133,4 +137,10 @@ footer { visibility: hidden; }
 .st-key-m-wand-hidden, .st-key-rm-wand-hidden, .st-key-wb-wand-hidden,
 [class*="-paint-hidden"], [class*="l-path-"][class*="-hidden"] {
     display: none !important;
+}
+
+/* Streamlit DOM: Undo/Redo keep their label at any width -- their native shortcut hint (<kbd>)
+   would crowd it out; the tooltip already names the shortcut (UI1). */
+.st-key-hist-undo-btn kbd, .st-key-hist-redo-btn kbd {
+    display: none;
 }

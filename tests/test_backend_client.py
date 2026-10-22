@@ -31,12 +31,42 @@ def _reset_backend_running_cache():
 
 def test_ensure_backend_running_does_not_spawn_when_already_healthy(monkeypatch):
     monkeypatch.setattr(backend_client, "_backend_is_healthy", lambda: True)
+    monkeypatch.setattr(backend_client, "_backend_accepts_our_token", lambda: True)
     spawned = []
     monkeypatch.setattr(backend_client.subprocess, "Popen", lambda *args, **kwargs: spawned.append((args, kwargs)))
 
     backend_client.ensure_backend_running()
 
     assert spawned == []
+
+
+def test_a_backend_that_rejects_our_token_gets_a_sibling_on_a_free_port(monkeypatch):
+    """Another session's backend (or one an earlier run left behind) answers /health but 401s our
+    token: start our own on a free port instead of failing every edit with 'invalid backend token'."""
+    monkeypatch.setattr(backend_client, "BACKEND_URL", "http://127.0.0.1:8502")
+    monkeypatch.setenv("PHOTO_BACKEND_PORT", "8502")
+    monkeypatch.setattr(backend_client, "_backend_is_healthy", lambda: True)
+    monkeypatch.setattr(backend_client, "_backend_accepts_our_token", lambda: False)
+    monkeypatch.setattr(backend_client, "_free_port", lambda: 54321)
+    spawned = []
+    monkeypatch.setattr(backend_client.subprocess, "Popen", lambda *args, **kwargs: spawned.append(kwargs["env"]))
+
+    backend_client.ensure_backend_running()
+
+    assert len(spawned) == 1
+    assert spawned[0]["PHOTO_BACKEND_PORT"] == "54321"
+    assert backend_client.BACKEND_URL == "http://127.0.0.1:54321"
+
+
+def test_the_token_probe_reads_401_as_someone_elses_backend(monkeypatch):
+    class Reply:
+        def __init__(self, status):
+            self.status_code = status
+
+    monkeypatch.setattr(backend_client.requests, "post", lambda *a, **k: Reply(401))
+    assert backend_client._backend_accepts_our_token() is False
+    monkeypatch.setattr(backend_client.requests, "post", lambda *a, **k: Reply(400))
+    assert backend_client._backend_accepts_our_token() is True
 
 
 def test_ensure_backend_running_spawns_and_waits_for_health(monkeypatch):

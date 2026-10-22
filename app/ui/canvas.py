@@ -49,7 +49,7 @@ def _toggle_grid() -> None:
 
 def _snapshots_popover(history) -> None:
     with st.popover(
-        t("📌"), use_container_width=True,
+        t("📌 History"), use_container_width=True,
         help=t("History and Named Snapshots -- jump to any earlier step, or bookmark the current look under a name"),
     ):
         st.markdown(t("**Named Snapshots**"))
@@ -114,7 +114,10 @@ def _history_list(history) -> None:
 
 def canvas_header(ctx) -> None:
     history = ctx.history
-    top_c1, top_undo, top_redo, top_reset, top_snap, top_c2, top_c3 = st.columns([0.85, 0.18, 0.18, 0.18, 0.22, 0.65, 0.95], gap="small")
+    # Three rows (UI1): the view row, then the edit-history row and the toggles row with real
+    # labels -- packed into one row, the buttons shrank to ~30 px and the native shortcut hints
+    # printed over them.
+    top_c1, top_c2, top_c3 = st.columns([1.5, 0.8, 0.95], gap="small")
     with top_c1:
         # html.escape(): the file name is user-controlled and lands in an attribute and in markup.
         live_view_label = html.escape(f"{ctx.upload_name} ({ctx.output_size[0]}×{ctx.output_size[1]})")
@@ -122,21 +125,6 @@ def canvas_header(ctx) -> None:
             t("<div class=\"panel-header-title canvas-live-view\" title=\"{0}\">🖼️ Live View: <span>{1}</span></div>").format(t(live_view_label), t(live_view_label)),
             unsafe_allow_html=True,
         )
-    with top_undo:
-        if st.button(t("↶"), key="hist-undo-btn", disabled=not history.can_undo, help=t("Undo (Ctrl+Z)"), use_container_width=True, shortcut="Ctrl+Z"):
-            st.session_state["_pending_restore"] = history.undo() or {}
-            request_rerun()
-    with top_redo:
-        if st.button(t("↷"), key="hist-redo-btn", disabled=not history.can_redo, help=t("Redo (Ctrl+Shift+Z)"), use_container_width=True, shortcut="Ctrl+Shift+Z"):
-            st.session_state["_pending_restore"] = history.redo() or {}
-            request_rerun()
-    with top_reset:
-        # The same recipe fields Undo/Redo cover; layers and the opened photo stay.
-        if st.button(t("↺"), key="hist-reset-btn", help=t("Reset all adjustments to defaults"), use_container_width=True):
-            st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": [], "liquify_strokes": []}
-            request_rerun()
-    with top_snap:
-        _snapshots_popover(history)
     with top_c2:
         # Fit shows the whole photo; 100 % is a true 1:1 view of its pixels (full resolution even
         # for a proxy-previewed photo); 200 %/400 % enlarge those pixels.
@@ -147,6 +135,23 @@ def canvas_header(ctx) -> None:
     with top_c3:
         compare_mode = st.checkbox(t("⇄ Split View"), value=False, key="cv-split", help=t("Drag to compare before/after"))
         st.checkbox(t("👁️ Original"), value=False, key="cv-orig", disabled=compare_mode)
+
+    top_undo, top_redo, top_reset, top_snap = st.columns(4, gap="small")
+    with top_undo:
+        if st.button(t("↶ Undo"), key="hist-undo-btn", disabled=not history.can_undo, help=t("Undo (Ctrl+Z)"), use_container_width=True, shortcut="Ctrl+Z"):
+            st.session_state["_pending_restore"] = history.undo() or {}
+            request_rerun()
+    with top_redo:
+        if st.button(t("↷ Redo"), key="hist-redo-btn", disabled=not history.can_redo, help=t("Redo (Ctrl+Shift+Z)"), use_container_width=True, shortcut="Ctrl+Shift+Z"):
+            st.session_state["_pending_restore"] = history.redo() or {}
+            request_rerun()
+    with top_reset:
+        # The same recipe fields Undo/Redo cover; layers and the opened photo stay.
+        if st.button(t("↺ Reset"), key="hist-reset-btn", help=t("Reset all adjustments to defaults"), use_container_width=True):
+            st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": [], "liquify_strokes": []}
+            request_rerun()
+    with top_snap:
+        _snapshots_popover(history)
 
     # Keyboard shortcuts (native, F11): Z = 1:1 / Fit, B = before/after, G = grid. Ctrl+Z /
     # Ctrl+Shift+Z are on Undo/Redo, Ctrl+E on the Save button.

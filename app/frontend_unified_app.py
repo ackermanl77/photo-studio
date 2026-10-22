@@ -12,6 +12,7 @@ Run order matters for Streamlit's state rules (see CLAUDE.md):
 """
 from __future__ import annotations
 
+import base64
 import uuid
 from pathlib import Path
 
@@ -35,6 +36,9 @@ from app.i18n import LANGUAGES, save_language, saved_language, set_language, t
 # explore every tool; loaded through the same restored-source path a reopened project uses.
 SAMPLE_PHOTO_PATH = Path(__file__).resolve().parent / "assets" / "sample_photo.jpg"
 SAMPLE_PHOTO_NAME = "sample_photo.jpg"
+# The app icon (the browser tab and the header); the .exe's is photostudio.ico, rendered from the SVG.
+APP_ICON_PNG = Path(__file__).resolve().parent / "assets" / "photostudio.png"
+APP_ICON_SVG = Path(__file__).resolve().parent / "assets" / "photostudio.svg"
 
 # The tool tabs, grouped by workflow (F9). The labels are the "tool-tab" widget's values (tests
 # and saved session state select tabs by them); sub-tabs have their own keys ("local-tab",
@@ -43,7 +47,7 @@ TOOL_TABS = ["☼ Basic", "🎨 Curves & Color", "🔬 Detail", "⛶ Geometry", 
 LOCAL_TABS = ["◉ Masks", "🩹 Repair", "◌ Portrait"]
 LIBRARY_TABS = ["✦ Presets", "☰ Library & Batch"]
 
-st.set_page_config(page_title="Photo Studio Pro", page_icon="🎨", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Photo Studio Pro", page_icon=str(APP_ICON_PNG), layout="wide", initial_sidebar_state="collapsed")
 # The Streamlit process's own log (R2: modules never configure logging on import). Idempotent.
 configure_logging("frontend")
 inject_page_style()
@@ -53,10 +57,12 @@ inject_page_style()
 st.session_state.setdefault("ui-language", saved_language())
 set_language(st.session_state["ui-language"])
 
+_app_icon = base64.b64encode(APP_ICON_SVG.read_bytes()).decode("ascii")
 st.markdown(f"""
 <div class="top-header">
     <div class="brand-title">
-        <span>🎨 Photo Studio</span>
+        <img class="brand-icon" src="data:image/svg+xml;base64,{_app_icon}" alt="">
+        <span>Photo Studio</span>
         <span class="brand-badge">CPU Pro</span>
     </div>
     <div class="header-info">{t("⚡ Professional Photo Workstation")}</div>
@@ -73,6 +79,13 @@ if "_pending_restore" in st.session_state:
     restore_recipe_to_state(st.session_state.pop("_pending_restore"))
 
 # --- Open a photo ---------------------------------------------------------------------------------
+# Once a photo is open, the open row folds into one collapsed expander so the canvas starts near
+# the top (UI2). Its widgets still render every run (an expander's body always runs), so the
+# uploader and the language keep their state; the project opener can't be a nested expander there.
+_upload_key = f"main-upload-{st.session_state.get('_main_upload_generation', 0)}"
+photo_open = bool(st.session_state.get(_upload_key)) or "restored_source_bytes" in st.session_state
+open_bar = st.expander(t("📂 Open another photo or project · 🌐 Language"), expanded=False, key="sec-open-bar") if photo_open else st.container()
+open_bar.__enter__()
 upload_col1, upload_col2, language_col = st.columns([2.5, 1, 0.55], gap="small")
 with language_col:
     st.selectbox(
@@ -88,7 +101,7 @@ with upload_col1:
         type=uploader_types(),  # app.raw_import.SUPPORTED_EXTENSIONS, the one accepted-format list
         help=t("Open image (JPG, PNG, WEBP, TIFF, or Camera RAW). Original is never overwritten."),
         label_visibility="collapsed",
-        key=f"main-upload-{st.session_state.get('_main_upload_generation', 0)}",
+        key=_upload_key,
     )
 with upload_col2:
     st.caption(t("📂 Open any JPG, PNG, WEBP, TIFF, or camera RAW file."))
@@ -103,7 +116,10 @@ with upload_col2:
             st.session_state["restored_source_name"] = SAMPLE_PHOTO_NAME
             st.rerun()
 
-with st.expander(t("📁 Open a saved project (.photoproject)")):
+project_box = st.container() if photo_open else st.expander(t("📁 Open a saved project (.photoproject)"))
+with project_box:
+    if photo_open:
+        st.caption(t("📁 Open a saved project (.photoproject)"))
     project_upload = st.file_uploader(t("Project file"), type=["photoproject", "zip"], key="proj-upload")
     if project_upload and st.button(t("Load Project"), key="proj-load-btn"):
         try:
@@ -112,6 +128,7 @@ with st.expander(t("📁 Open a saved project (.photoproject)")):
             st.error(t("⚠️ Could not open this project file: {0}").format(t(error)))
         else:
             st.rerun()
+open_bar.__exit__(None, None, None)
 
 if not uploaded and "restored_source_bytes" not in st.session_state:
     st.info(t("👆 Upload an image above, load a saved project, or click \"Try a sample photo\" to open the editing workspace."))
