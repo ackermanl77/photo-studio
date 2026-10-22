@@ -28,6 +28,11 @@ app; from source it needs the optional `rawpy` package (`requirements-raw.txt`),
 you clearly if it's missing). Your original file
 is never overwritten — every edit lives in the app until you explicitly export or save.
 
+**Language:** the **🌐 Language** selector next to the uploader switches the interface between
+English and Español. The choice is remembered for the next launch. Presets, projects and recipes
+don't depend on the language, so a file saved in one opens the same in the other. Streamlit's own
+uploader text ("Drag and drop", "Browse files") stays in English.
+
 **Opening a saved project:** expand "📁 Open a saved project (.photoproject)" above the uploader to
 reopen a `.photoproject` file you saved earlier (see [Projects](#projects) below).
 
@@ -46,10 +51,10 @@ The screen is split in two:
   | **🔬 Detail** | Denoise, Color Noise, Sharpen |
   | **⛶ Geometry** | Rotate & Straighten, Lens Corrections, 🌀 Liquify, Crop / Aspect Ratio |
   | **◉ Local** | three sub-tabs: ◉ Masks, 🩹 Repair, ◌ Portrait |
-  | **◈ Layers** | image, text, shape and pen-path layers |
-  | **✨ Effects** | post-crop vignette, film grain |
-  | **⬇ Export** | export settings and presets, 🏷️ Watermark, GPU export transforms, AI Upscale, 📦 Export Multiple Sizes, 💾 Save Project |
-  | **✦ Presets & Library** | two sub-tabs: ✦ Presets, ☰ Library & Batch (Library Catalog, Batch Processor, System Health) |
+  | **◈ Layers** | image, text, shape, pen-path and adjustment layers, layer styles, align & distribute, PSD import |
+  | **✨ Effects** | post-crop vignette, film grain, Creative Filters, 💡 Relight, Background |
+  | **⬇ Export** | export settings and presets, 🏷️ Watermark, GPU export transforms, AI Upscale, 📦 Export Multiple Sizes, layered PSD and SVG downloads, 💾 Save Project |
+  | **✦ Presets & Library** | two sub-tabs: ✦ Presets, ☰ Library & Batch (Library Catalog, Batch Processor, HDR & Panorama, System Health) |
 
   Every section shows **● modified** next to its title (or a ● in its expander's title) as soon as
   one of its controls differs from the default, so you can see at a glance where a photo has been
@@ -552,6 +557,12 @@ Always visible above/below the preview, on every tab:
   these settings under a name; pick one and **Apply** to restore them. The file is only produced when
   you click Save (or press **Ctrl+E**), and it carries the original photo's camera metadata and colour
   profile.
+- **AI provenance** — when an AI tool contributed to the export (AI Upscale, a selection made with an
+  AI mask, or a Background cut out by the AI subject model), the file is marked as AI-assisted. The
+  mark is written whatever the metadata choice above: XMP metadata with the IPTC Digital Source Type
+  "composite with trained algorithmic media" and an edit-history entry naming the tools, in JPEG,
+  PNG, WEBP, TIFF and AVIF (16-bit PNG/TIFF too). An export made without AI tools carries no such
+  mark. This is a metadata label, not a signed C2PA credential.
 - **🏷️ Watermark** (⬇ Export tab) — optional text stamped only on exported files.
 - **Export Format / Quality / Save** (under the canvas) — choose JPEG, PNG, WEBP, TIFF or AVIF (Quality applies to
   JPEG/WEBP/AVIF; AVIF is about half the size of a JPEG at the same quality and keeps transparency), then download
