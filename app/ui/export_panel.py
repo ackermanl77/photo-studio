@@ -20,7 +20,7 @@ from app.batch_release import export_multiple
 from app.color_profiles import COLOR_SPACES
 from app.export import DEFAULT_NAME_TEMPLATE, EXPORT_FORMATS, FLOAT_FORMATS, HIGH_BIT_FORMATS, LOSSY_FORMATS, METADATA_POLICIES, METADATA_POLICY_LABELS, OUTPUT_SHARPENING, ExportPresetStore, cached_export, render_export_name
 from app.painted_masks import inline_painted_masks, session_painted_masks
-from app.pipeline import check_upscale_output, expected_output_size
+from app.pipeline import ai_tools_for, check_upscale_output, expected_output_size
 from app.professional_tools import EXPORT_PROFILES, WATERMARK_POSITIONS
 from app.reliability import image_digest
 from app.ui.layers import font_select, layers_payload
@@ -145,6 +145,16 @@ def watermark_section(ctx) -> None:
             font_size = st.slider(t("Font size"), 12, 120, 32, key="wm-size-sl")
         font = font_select(t("Font"), st.session_state.get("wm-font-sel", ""), key="wm-font-sel")
     ctx.export["watermark"] = {"text": text, "position": position, "opacity": opacity, "font_size": font_size, "font": font}
+
+
+def ai_tools_used(ctx) -> list[str]:
+    """F34: the AI tools this edit's export involves (app.export.AI_TOOLS) -- AI Upscale and an AI
+    Background from the options, plus "AI mask" when an enabled selection came from an AI mask."""
+    tools = ai_tools_for(_full_options(ctx))
+    if any(layer.get("enabled", True) and (layer.get("params") or {}).get("ai")
+           for key in ("mask_layers", "removal_mask_layers") for layer in st.session_state.get(key, [])):
+        tools.append("AI mask")
+    return tools
 
 
 def _full_options(ctx) -> dict:
@@ -279,6 +289,7 @@ def save_footer(ctx) -> None:
             "bit_depth": 16 if out_format in FLOAT_FORMATS else settings["bit_depth"] if out_format in HIGH_BIT_FORMATS else 8,
             "gpu_export": settings["gpu_export"],
             "color_space": settings["color_space"],
+            "ai_tools": ai_tools_used(ctx),
         }
         export_extension, export_mime = EXPORT_FORMATS[out_format]
         # A full-resolution backend render (which also encodes the file) is needed for a proxy

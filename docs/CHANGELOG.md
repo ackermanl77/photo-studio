@@ -7,6 +7,42 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-22 -- Real-browser smoke test
+
+- `tests/test_browser_smoke.py` (opt-in, `PHOTO_BROWSER_TESTS=1`): starts the real Streamlit app and
+  a headless system Chrome/Edge driven over the DevTools protocol (`websockets`, no Selenium or
+  Playwright), uploads a 3200x2000 photo and checks what AppTest can't see: refine-on-pause reaching
+  "Full-resolution view" through the fragments, a real mouse drag on the tone curve's midtone point
+  inside its `components.html()` iframe moving the Midtones slider (`c-p2`) through the hidden
+  commit field, and the keyboard-moved Exposure slider re-rendering the canvas. Streamlit 1.64's
+  sliders are react-aria `input[type=range]` elements (no `role=slider`). Skipped without the flag
+  or without a browser.
+
+## 2026-10-21 -- Intensity, Background, Relight, markup, provenance (F30-F34)
+
+- **Intensity (F30):** a `preset_amount` registry control (Preset intensity, 0-100) blends the
+  preset's result with the image it was applied to (`app.presets.apply_preset(..., amount)`, in
+  float in the 16-bit mode); the Auto Enhance intensity slider scales its measured changes
+  (`image_processor.scale_auto_enhance()`: exposure/temperature/tint/vibrance proportionally, the
+  black/white points toward 0/255, Denoise kept from 50 up).
+- **Background (F31):** `app/background.py` and an Effects-tab section. The subject mask is the F16
+  AI model when installed, otherwise OpenCV GrabCut seeded with a centred rectangle (largest region,
+  softened); cached by content. Blur reuses Lens Blur, Color fills, Remove becomes the result's alpha
+  channel at the end of `run_pipeline()` (an 8-bit RGBA result). New registry kind `"color"`
+  (`#RRGGBB`, a `st.color_picker`, validated and sanitized).
+- **Relight (F32):** `app/relight.py`, before Crop: a smoothed-luminance height field gives the
+  normals, one Lambertian light (direction, height) plus ambient and warmth, in linear light. A
+  model-based normal map can replace `estimate_normals()` later.
+- **Markup (F33):** arrow heads on Line shapes and open Pen paths (`arrow_start`/`arrow_end`), a
+  translucent `highlighter` stroke on open paths; the SVG export writes `marker-start`/`marker-end`
+  and `stroke-opacity`.
+- **Provenance (F34):** the export setting `ai_tools` ("AI Upscale", "AI mask", "AI background") adds
+  an XMP packet with the IPTC DigitalSourceType `compositeWithTrainedAlgorithmicMedia` and an
+  `xmpMM:History` event naming the tools (JPEG/PNG/WebP/TIFF/AVIF, 16-bit PNG/TIFF). The UI derives it
+  from the options (`pipeline.ai_tools_for()`) plus selections an AI model made (`params["ai"]`); the
+  backend and the CLI add the options' own tools. Export Multiple Sizes doesn't write it yet.
+- **Tests:** `tests/test_competitor_features.py` (23).
+
 ## 2026-10-19 -- SVG export, align/distribute, gradient fills (F27)
 
 - **Gradient fills:** `app/vector_shapes.py` adds `FILL_STYLES` (Solid / Linear gradient / Radial

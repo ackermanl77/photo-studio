@@ -72,8 +72,11 @@ The starting point for every edit.
 - **✨ Auto Enhance** — measures *this* photo and sets Exposure, the black/white points (tone
   curve), a gray-world white balance, Vibrance for a flat image, and Denoise only for a noisy one; a
   message lists what it changed. Crop, masks, HSL and everything else stay as you left them.
+  **Auto Enhance intensity** (above the button) applies a gentler version: at 50 every change is
+  halved, and Denoise is only kept from 50 up.
 - **Preset Look** — a row of thumbnails (None, plus every built-in look) previews each one on your
-  actual photo before you pick it.
+  actual photo before you pick it. **Preset intensity** blends the look with the photo (100 = the
+  look as designed).
 - **Exposure (EV)** — in stops of light, −5 to +5: +1 doubles the light, −1 halves it. Bright
   highlights roll off smoothly instead of clipping.
 - **Contrast**, **Highlights**, **Shadows** — −100 to +100. Highlights/Shadows work on regions (an
@@ -219,6 +222,16 @@ tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color
       preview matches the export.
     - Sizes follow the photo, so the preview and the full-resolution export look alike, and the
       blurs work in linear light.
+  - **💡 Relight** — adds one light from a new direction: **Light direction** (0 = right, 90 =
+    top), **Light height** (low grazes from the side), **Ambient light** (how open the shadows
+    stay) and **Light warmth**. It runs before Crop. Brighter areas are read as nearer (a classical
+    shape-from-shading estimate, no AI), so it suits portraits, products and landscapes better than
+    flat graphics.
+  - **Background** — keeps the subject and **Blur**s the rest (with **Background blur**),
+    **Remove**s it (a transparent result: export PNG or TIFF), or fills it with a **Color**.
+    **Subject** chooses what to keep. With the GPU pack it uses the Subject/Person AI mask;
+    without it, a classical cut-out (GrabCut) that works best on one subject in the middle of the
+    frame. It runs on the cropped frame, before the other effects.
 
 ## 8. Repair — object removal (◉ Local → 🩹 Repair)
 
@@ -287,6 +300,9 @@ sub-tabs:
   only where one of the ◉ Masks selections is (its own softness, invert and opacity apply), and
   **Invert layer mask** flips it — e.g. a texture layer that covers only the sky. Build the
   selection on the Masks tab; leave its target sliders at 0 if it should only mask the layer.
+
+**Markup:** a Line shape and an open Pen path can have an **Arrow at start** and/or **Arrow at end**
+(also in the SVG export), and an open path can be a **🖍 Highlighter** — a translucent stroke.
 
 ### The Pen Tool
 

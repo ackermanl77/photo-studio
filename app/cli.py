@@ -9,7 +9,7 @@ from PIL import Image
 from app.batch import process_folder
 from app.edit_schema import OptionsError, migrate_recipe, parse_options, sanitize_recipe
 from app.export import METADATA_POLICIES, write_export
-from app.pipeline import decode_source, run_pipeline
+from app.pipeline import ai_tools_for, decode_source, run_pipeline
 from app.presets import PRESETS
 from app.professional_color import HSL_BAND_ORDER
 from app.recipe_options import recipe_to_options, without_per_photo_only_keys
@@ -207,6 +207,7 @@ def main() -> None:
     }
     if options.get("bit_depth") == 16:
         export_settings["bit_depth"] = 16
+    export_settings["ai_tools"] = ai_tools_for(options)
     if args.color_space == "Display P3":
         options["working_space"] = "Display P3"  # B14: keep colours outside sRGB
 

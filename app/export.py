@@ -26,6 +26,13 @@ RGB from the same float pixels; choosing one always renders in high precision (b
 16), and neither carries EXIF -- an EXR records its primaries in the chromaticities attribute instead
 of an ICC profile.
 
+Provenance (F34, settings["ai_tools"]): the AI tools that contributed to the picture ("AI Upscale",
+"AI mask", "AI background"). When any did, the file carries an XMP packet with the IPTC
+DigitalSourceType "compositeWithTrainedAlgorithmicMedia" and an xmpMM:History "edited" event that
+names them -- written under every metadata policy (it describes the picture, not the person), in
+JPEG, PNG, WebP, TIFF and AVIF at 8 bits and in 16-bit PNG/TIFF. C2PA signing can follow once a
+certificate exists.
+
 Color space (settings["color_space"]): "sRGB" (the working space; the file keeps the image's own
 profile) or "Display P3", which converts the finished pixels into P3 and embeds a Display P3 profile
 (app.color_profiles) -- last, after resize, sharpening and the watermark, at 8 or 16 bits alike.
@@ -84,7 +91,10 @@ DEFAULT_EXPORT_SETTINGS = {
     "bit_depth": 8,
     "gpu_export": False,
     "color_space": "sRGB",
+    "ai_tools": (),
 }
+AI_TOOLS = ("AI Upscale", "AI mask", "AI background")
+DIGITAL_SOURCE_TYPE_AI_COMPOSITE = "http://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia"
 # Formats that can hold 16 bits per channel (the user picks 8 or 16).
 HIGH_BIT_FORMATS = ("PNG", "TIFF")
 # Floating-point formats (F24): always rendered from the high-precision path, written linear.
@@ -126,6 +136,10 @@ def validate_export_settings(settings) -> dict:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
             raise ValueError(f"export {key} must be between {low} and {high}")
         clean[key] = int(value)
+    tools = clean["ai_tools"]
+    if not isinstance(tools, (list, tuple)) or any(tool not in AI_TOOLS for tool in tools):
+        raise ValueError(f"export ai_tools must be a list of {', '.join(AI_TOOLS)}")
+    clean["ai_tools"] = tuple(tool for tool in AI_TOOLS if tool in tools)
     if not isinstance(clean["remove_gps"], bool):
         raise ValueError("export remove_gps must be true or false")
     if not isinstance(clean["gpu_export"], bool):
@@ -183,6 +197,34 @@ def prepare_exif(exif_bytes: bytes | None, size: tuple[int, int], policy: str = 
     if gps_ifd and policy == "all" and not remove_gps:
         result.get_ifd(_GPS_IFD).update(gps_ifd)
     return result.tobytes()
+
+
+def provenance_xmp(ai_tools, when=None) -> bytes | None:
+    """The F34 provenance XMP packet for an export the `ai_tools` contributed to (None: none did)."""
+    tools = [tool for tool in AI_TOOLS if tool in (ai_tools or ())]
+    if not tools:
+        return None
+    from datetime import datetime, timezone
+    from xml.sax.saxutils import escape
+
+    from app import __version__
+
+    stamp = (when or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    agent = escape(f"Photo Studio {__version__}")
+    parameters = escape("AI tools used: " + ", ".join(tools))
+    packet = (
+        '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        '<rdf:Description rdf:about="" xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/" '
+        'xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/" xmlns:stEvt="http://ns.adobe.com/xap/1.0/sType/ResourceEvent#" '
+        f'xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="{agent}" '
+        f'Iptc4xmpExt:DigitalSourceType="{DIGITAL_SOURCE_TYPE_AI_COMPOSITE}">'
+        '<xmpMM:History><rdf:Seq><rdf:li rdf:parseType="Resource">'
+        f'<stEvt:action>edited</stEvt:action><stEvt:when>{stamp}</stEvt:when>'
+        f'<stEvt:softwareAgent>{agent}</stEvt:softwareAgent><stEvt:parameters>{parameters}</stEvt:parameters>'
+        '</rdf:li></rdf:Seq></xmpMM:History></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>'
+    )
+    return packet.encode("utf-8")
 
 
 def _resize_long_edge(image: Image.Image, long_edge: int) -> Image.Image:
@@ -274,6 +316,18 @@ def encode_export(image: Image.Image, settings: dict | None = None, *, exif: byt
         save_kwargs["exif"] = exif_out
     if icc:
         save_kwargs["icc_profile"] = icc
+    xmp = provenance_xmp(settings["ai_tools"])
+    if xmp:
+        if format_name == "PNG":
+            from PIL import PngImagePlugin
+
+            info = PngImagePlugin.PngInfo()
+            info.add_itxt("XML:com.adobe.xmp", xmp.decode("utf-8"))
+            save_kwargs["pnginfo"] = info
+        elif format_name == "TIFF":
+            save_kwargs["tiffinfo"] = {700: xmp}
+        else:
+            save_kwargs["xmp"] = xmp
     buffer = io.BytesIO()
     result.save(buffer, **save_kwargs)
     extension, mime = EXPORT_FORMATS[format_name]
@@ -322,7 +376,7 @@ def _png_chunk(kind: bytes, data: bytes) -> bytes:
     return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
 
 
-def _png16(array16: np.ndarray, exif: bytes | None, icc: bytes | None) -> bytes:
+def _png16(array16: np.ndarray, exif: bytes | None, icc: bytes | None, xmp: bytes | None = None) -> bytes:
     """A 16-bit RGB PNG (OpenCV writes the pixels), with iCCP/eXIf chunks spliced in after IHDR --
     OpenCV writes no metadata, and Pillow can't write 16-bit RGB."""
     import cv2
@@ -337,6 +391,8 @@ def _png16(array16: np.ndarray, exif: bytes | None, icc: bytes | None) -> bytes:
         chunks += _png_chunk(b"iCCP", b"ICC Profile\x00\x00" + zlib.compress(icc))
     if exif:
         chunks += _png_chunk(b"eXIf", exif[6:] if exif.startswith(b"Exif\x00\x00") else exif)
+    if xmp:
+        chunks += _png_chunk(b"iTXt", b"XML:com.adobe.xmp" + bytes(5) + xmp)
     ihdr_end = 8 + 4 + 4 + 13 + 4  # signature, then the IHDR chunk (length, type, 13 bytes, CRC)
     return content[:ihdr_end] + chunks + content[ihdr_end:]
 
@@ -345,7 +401,7 @@ def _png16(array16: np.ndarray, exif: bytes | None, icc: bytes | None) -> bytes:
 _TIFF_TEXT_TAGS = (0x010F, 0x0110, 0x0131, 0x0132, 0x013B, 0x8298)
 
 
-def _tiff16(array16: np.ndarray, exif: bytes | None, icc: bytes | None) -> bytes:
+def _tiff16(array16: np.ndarray, exif: bytes | None, icc: bytes | None, xmp: bytes | None = None) -> bytes:
     """A 16-bit RGB TIFF (tifffile; Pillow can't write one) with the ICC profile, the IFD0 text tags
     and the EXIF and GPS sub-IFDs of the prepared EXIF. tifffile only writes top-level tags, so the
     sub-IFD pointers are written as placeholders and the sub-IFDs -- serialized by Pillow's own
@@ -371,6 +427,8 @@ def _tiff16(array16: np.ndarray, exif: bytes | None, icc: bytes | None) -> bytes
             if entries:
                 sub_ifds[pointer] = entries
                 extratags.append((pointer + 1, "I", 1, 0, True))  # placeholder, linked below
+    if xmp:
+        extratags.append((700, "B", len(xmp), xmp, True))
     buffer = io.BytesIO()
     tifffile.imwrite(
         buffer, array16, photometric="rgb", compression="zlib", iccprofile=icc or None, extratags=extratags,
@@ -453,7 +511,8 @@ def _encode_16bit(image: Image.Image, settings: dict, exif: bytes | None, icc: b
         content = encode_exr(linear, settings["color_space"]) if format_name == "EXR" else encode_pfm(linear)
         extension, mime = EXPORT_FORMATS[format_name]
         return content, extension, mime
-    content = _png16(array16, exif_out, icc) if format_name == "PNG" else _tiff16(array16, exif_out, icc)
+    xmp = provenance_xmp(settings["ai_tools"])
+    content = _png16(array16, exif_out, icc, xmp) if format_name == "PNG" else _tiff16(array16, exif_out, icc, xmp)
     extension, mime = EXPORT_FORMATS[format_name]
     return content, extension, mime
 

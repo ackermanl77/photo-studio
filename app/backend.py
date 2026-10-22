@@ -25,7 +25,7 @@ from app.export import FLOAT_FORMATS, encode_export
 from app.image_processor import PhotoProcessor
 from app.layer_workspace import layers_from_json
 from app.observability import ProcessingAudit, configure_logging, get_logger, log_audit
-from app.pipeline import PipelineCancelled, decode_source, run_pipeline
+from app.pipeline import PipelineCancelled, ai_tools_for, decode_source, run_pipeline
 from app.reliability import check_pixel_count, new_request_id
 
 app = Flask(__name__)
@@ -231,7 +231,8 @@ def _encode_response(result: Image.Image, options: dict):
     or JPEG, both carrying EXIF and ICC unless strip_metadata."""
     export_settings = options.get("export")
     if export_settings:
-        content, extension, mime = encode_export(result, export_settings)
+        tools = [*export_settings.get("ai_tools", ()), *ai_tools_for(options)]
+        content, extension, mime = encode_export(result, {**export_settings, "ai_tools": tools})
         return BytesIO(content), mime, f"edited{extension}"
     output_format = options.get("output_format", "PNG")
     max_width, max_height = options.get("max_width", 0), options.get("max_height", 0)

@@ -7,7 +7,7 @@ import json
 import streamlit as st
 
 from app.controls import CONTROLS_BY_KEY
-from app.image_processor import auto_enhance_recipe
+from app.image_processor import auto_enhance_recipe, scale_auto_enhance
 from app.professional_color import estimate_white_balance
 from app.professional_tools import preview_image
 from app.ui.processing import preset_thumbnails
@@ -21,8 +21,10 @@ def auto_enhance_button(ctx) -> None:
     """Image-adaptive (app.image_processor.auto_enhance_recipe, measured on a small proxy):
     exposure, black/white points, white balance, vibrance and -- only for a noisy photo -- denoise,
     applied through _pending_restore; everything else stays as the user left it."""
+    amount = st.slider(t("Auto Enhance intensity"), 0, 100, 100, step=5, key="auto-enhance-amount",
+                       help=t("How strongly Auto Enhance corrects the photo: 100 applies its full measurement, lower applies a gentler version (F30)."))
     if st.button(t("✨ Auto Enhance"), key="auto-enhance-btn", help=t("Measure this photo and set exposure, black/white points, white balance and vibrance to suit it"), use_container_width=True):
-        auto_settings = auto_enhance_recipe(ctx.source)
+        auto_settings = scale_auto_enhance(auto_enhance_recipe(ctx.source), amount)
         st.session_state["_pending_restore"] = auto_settings
         changed = [
             t("exposure {0:+.2f} EV").format(auto_settings['exposure_ev']) if auto_settings["exposure_ev"] else None,
@@ -47,6 +49,7 @@ def tone_section(ctx) -> None:
                     st.image(thumbs[name], use_container_width=True)
                     st.caption(t(name))
         values["preset"] = render_control("preset")
+        values["preset_amount"] = render_control("preset_amount")
     section_header("Tone", "tone")
     for key in ("exposure_ev", "contrast_amount", "highlights", "shadows", "whites", "blacks"):
         values[key] = render_control(key)

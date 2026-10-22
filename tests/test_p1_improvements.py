@@ -323,6 +323,7 @@ def test_recipe_controls_match_the_real_widgets():
     checkboxes = {checkbox.key: checkbox for checkbox in at.checkbox}
     selectboxes = {selectbox.key: selectbox for selectbox in at.selectbox}
     number_inputs = {number.key: number for number in at.number_input}
+    color_pickers = {picker.key: picker for picker in at.color_picker}
     checked = 0
     for control in CONTROLS:
         assert RECIPE_CONTROLS[control.key].default == control.default
@@ -339,6 +340,8 @@ def test_recipe_controls_match_the_real_widgets():
         elif control.widget_type == "number_input":
             widget = number_inputs[control.widget_key]
             assert (widget.min, widget.max, widget.value) == (control.minimum, control.maximum, control.default), control.key
+        elif control.widget_type == "color_picker":
+            assert color_pickers[control.widget_key].value.upper() == control.default, control.key
         else:
             assert control.widget_type == "state"  # the free-form crop box, set by the crop editor
             continue

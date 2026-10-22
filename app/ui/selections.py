@@ -89,7 +89,10 @@ def add_ai_mask_selection(layers: list, key_prefix: str, source: Image.Image) ->
             return
         from app.painted_masks import intern_painted_mask
 
-        layers.append(_new_selection(f"{kind} {len(layers) + 1}", "Painted", {"mask_ref": intern_painted_mask(ai_masks.mask_to_painted_b64(mask))}))
+        params = {"mask_ref": intern_painted_mask(ai_masks.mask_to_painted_b64(mask))}
+        if kind in ai_masks.MODEL_KINDS:
+            params["ai"] = kind  # an AI model made it: the export's provenance mark says so (F34)
+        layers.append(_new_selection(f"{kind} {len(layers) + 1}", "Painted", params))
         request_rerun()
 
 

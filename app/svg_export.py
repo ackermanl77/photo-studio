@@ -20,7 +20,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 from PIL import Image
 
-from app.vector_shapes import _polygon_points
+from app.vector_shapes import HIGHLIGHTER_OPACITY, _polygon_points
 
 CSS_BLEND = {
     "normal": "normal", "multiply": "multiply", "screen": "screen", "overlay": "overlay", "darken": "darken",
@@ -71,6 +71,13 @@ class _Defs:
                               f'y1="{_num(cy - dy * half)}" x2="{_num(cx + dx * half)}" y2="{_num(cy + dy * half)}">{stops}</linearGradient>')
         return f"url(#{gid})"
 
+    def arrow(self, color: str) -> str:
+        """An arrow-head marker (F33) in `color`, sized in stroke widths like app.vector_shapes'."""
+        mid = f"arrow{len(self.items)}"
+        self.items.append(f'<marker id="{mid}" viewBox="0 0 4 2.4" refX="4" refY="1.2" markerWidth="4" markerHeight="2.4" '
+                          f'orient="auto-start-reverse" markerUnits="strokeWidth"><path d="M 0 0 L 4 1.2 L 0 2.4 Z" fill="{color}"/></marker>')
+        return f"url(#{mid})"
+
 
 def _paint(layer: dict, defs: _Defs, box) -> str:
     """fill/stroke attributes of a Shape or closed Path."""
@@ -88,6 +95,15 @@ def _paint(layer: dict, defs: _Defs, box) -> str:
     return " ".join(parts)
 
 
+def _arrow_attributes(layer: dict, color: str, defs: _Defs) -> str:
+    parts = []
+    if layer.get("arrow_start", False):
+        parts.append(f' marker-start="{defs.arrow(color)}"')
+    if layer.get("arrow_end", False):
+        parts.append(f' marker-end="{defs.arrow(color)}"')
+    return "".join(parts)
+
+
 def _shape_element(layer: dict, width: int, height: int, defs: _Defs) -> str:
     cx, cy = width * float(layer.get("x_pct", 50.0)) / 100, height * float(layer.get("y_pct", 50.0)) / 100
     hw, hh = width * max(0.5, float(layer.get("width_pct", 30.0))) / 200, height * max(0.5, float(layer.get("height_pct", 30.0))) / 200
@@ -98,7 +114,7 @@ def _shape_element(layer: dict, width: int, height: int, defs: _Defs) -> str:
     if shape == "Line":
         color = _hex(layer.get("fill_color", "#FFFFFF"))
         return (f'<line x1="{_num(cx - hw)}" y1="{_num(cy)}" x2="{_num(cx + hw)}" y2="{_num(cy)}" stroke="{color}" '
-                f'stroke-width="{_num(float(layer.get("line_thickness", 6)))}"{transform}/>')
+                f'stroke-width="{_num(float(layer.get("line_thickness", 6)))}"{_arrow_attributes(layer, color, defs)}{transform}/>')
     paint = _paint(layer, defs, box)
     if shape == "Rectangle":
         return f'<rect x="{_num(cx - hw)}" y="{_num(cy - hh)}" width="{_num(2 * hw)}" height="{_num(2 * hh)}" {paint}{transform}/>'
@@ -134,7 +150,13 @@ def _path_element(layer: dict, width: int, height: int, defs: _Defs) -> str | No
     ys = [p["y_pct"] / 100 * height for p in points]
     paint_layer = {**layer, "fill_enabled": closed and layer.get("fill_enabled", False), "stroke_enabled": layer.get("stroke_enabled", True),
                    "stroke_width": layer.get("stroke_width", 3), "stroke_color": layer.get("stroke_color", "#FFFFFF")}
-    return f'<path d="{path_d(points, width, height, closed)}" {_paint(paint_layer, defs, (min(xs), min(ys), max(xs), max(ys)))} stroke-linecap="round"/>'
+    extra = ""
+    if not closed and paint_layer["stroke_enabled"]:
+        color = _hex(paint_layer["stroke_color"])
+        extra = _arrow_attributes(layer, color, defs)
+        if layer.get("highlighter", False):
+            extra += f' stroke-opacity="{_num(HIGHLIGHTER_OPACITY)}"'
+    return f'<path d="{path_d(points, width, height, closed)}" {_paint(paint_layer, defs, (min(xs), min(ys), max(xs), max(ys)))} stroke-linecap="round"{extra}/>'
 
 
 def _text_element(layer: dict, width: int, height: int) -> str | None:

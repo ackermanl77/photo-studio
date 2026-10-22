@@ -269,7 +269,7 @@ def run_pipeline(
         processor.apply_highlights_shadows(options.get("highlights", 0.0), options.get("shadows", 0.0))
         processor.apply_whites_blacks(options.get("whites", 0.0), options.get("blacks", 0.0))
         if options.get("preset") and options["preset"] != "None":
-            apply_preset(processor, options["preset"])
+            apply_preset(processor, options["preset"], options.get("preset_amount", 100))
 
         checkpoint()
         # Color
@@ -394,6 +394,16 @@ def run_pipeline(
                 processor.image, options["portrait_smoothing"], blur_radius=_SKIN_BLUR_RADIUS * scale, faces=faces
             )
 
+    # Relight (F32) -- one movable light over a classical normal map (app.relight), on the whole
+    # frame before Crop, so the light's direction is the same however the photo is framed.
+    if options.get("relight_amount"):
+        checkpoint()
+        from app.relight import relight
+
+        processor.apply_float_step(lambda array: relight(
+            array, options["relight_amount"], options.get("relight_azimuth", 135), options.get("relight_elevation", 35),
+            options.get("relight_ambient", 40), options.get("relight_warmth", 0)))
+
     checkpoint()
     # Crop -- an explicit crop_box (full-resolution pixels) takes priority over a named aspect.
     crop_box = options.get("crop_box")
@@ -404,6 +414,22 @@ def run_pipeline(
         ratio = parse_aspect(options.get("aspect"))
         if ratio:
             processor.fit_aspect_ratio(*ratio)
+
+    # Background (F31) -- on the final frame, before the Effects: the subject mask (app.background)
+    # blurs or fills the rest; Remove keeps the mask and makes it the alpha channel at the end.
+    background_alpha = None
+    background_mode = options.get("background_mode") or "None"
+    if background_mode != "None":
+        checkpoint()
+        from app.background import apply_background, subject_mask
+
+        with HEAVY_STEP_SEMAPHORE:
+            subject = subject_mask(processor.image, options.get("background_subject") or "Subject")
+        if background_mode == "Remove":
+            background_alpha = subject
+        else:
+            processor.apply_float_step(lambda array: apply_background(
+                array, subject, background_mode, options.get("background_amount", 60), options.get("background_color") or "#FFFFFF"))
 
     # Effects -- creative finishing on the final (cropped) frame.
     processor.apply_post_crop_vignette(options.get("effects_vignette_amount", 0.0), options.get("effects_vignette_midpoint", 50.0))
@@ -433,7 +459,29 @@ def run_pipeline(
         check_upscale_output(processor.image.size, factor)
         processor.apply_ai_upscale(factor)
 
+    if background_alpha is not None:
+        # Remove: the subject mask (resized to the final, possibly upscaled frame) as alpha. An
+        # 8-bit RGBA result -- the 16-bit float copy has no alpha channel.
+        result = processor.image.convert("RGBA")
+        alpha = Image.fromarray(np.clip(np.rint(background_alpha * 255.0), 0, 255).astype(np.uint8), mode="L")
+        result.putalpha(alpha.resize(result.size, Image.Resampling.BILINEAR))
+        return _with_metadata(result, source_exif, source_icc, strip)
     return _with_metadata(processor.image, source_exif, source_icc, strip, processor.hdr)
+
+
+def ai_tools_for(options: dict) -> list[str]:
+    """The AI tools (app.export.AI_TOOLS, F34's provenance mark) these options make the pipeline
+    use: AI Upscale, and a Background whose subject mask comes from the AI model (app.background).
+    AI-made selections travel as plain masks, so the caller adds "AI mask" itself."""
+    tools = []
+    if options.get("ai_upscale"):
+        tools.append("AI Upscale")
+    if (options.get("background_mode") or "None") != "None":
+        from app.background import _model_available
+
+        if _model_available():
+            tools.append("AI background")
+    return tools
 
 
 def _normalize_to_display_p3(processor: PhotoProcessor, source_icc: bytes | None) -> bytes | None:

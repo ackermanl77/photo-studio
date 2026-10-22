@@ -714,6 +714,9 @@ def render_layer_stack(source: Image.Image) -> str | None:
                             layer["line_thickness"] = st.slider(t("Thickness (px)"), 1, 60, int(layer.get("line_thickness", 6)), key=f"l-shp-thick-{layer_id}")
                         with shp_line2:
                             layer["fill_color"] = st.color_picker(t("Color"), layer.get("fill_color", "#FFFFFF"), key=f"l-shp-fcolor-{layer_id}")
+                        shp_arrow1, shp_arrow2 = st.columns(2)
+                        layer["arrow_start"] = shp_arrow1.checkbox(t("Arrow at start"), layer.get("arrow_start", False), key=f"l-shp-arrs-{layer_id}")
+                        layer["arrow_end"] = shp_arrow2.checkbox(t("Arrow at end"), layer.get("arrow_end", False), key=f"l-shp-arre-{layer_id}")
                     else:
                         layer["fill_enabled"] = st.checkbox(t("Fill"), layer.get("fill_enabled", True), key=f"l-shp-fen-{layer_id}")
                         if layer["fill_enabled"]:
@@ -762,6 +765,13 @@ def render_layer_stack(source: Image.Image) -> str | None:
                             layer["stroke_color"] = st.color_picker(t("Stroke Color"), layer.get("stroke_color", "#FFFFFF"), key=f"l-path-scolor-{layer_id}")
                         with path_stroke2:
                             layer["stroke_width"] = st.slider(t("Stroke Width"), 1, 40, int(layer.get("stroke_width", 3)), key=f"l-path-sw-{layer_id}")
+                    # Markup (F33): always rendered (disabled for a closed path), so the widgets keep their state.
+                    path_open = not layer["closed"] and layer["stroke_enabled"]
+                    path_arrow1, path_arrow2, path_hl = st.columns(3)
+                    layer["arrow_start"] = path_arrow1.checkbox(t("Arrow at start"), layer.get("arrow_start", False), key=f"l-path-arrs-{layer_id}", disabled=not path_open)
+                    layer["arrow_end"] = path_arrow2.checkbox(t("Arrow at end"), layer.get("arrow_end", False), key=f"l-path-arre-{layer_id}", disabled=not path_open)
+                    layer["highlighter"] = path_hl.checkbox(t("🖍 Highlighter"), layer.get("highlighter", False), key=f"l-path-hl-{layer_id}", disabled=not path_open,
+                                                            help=t("A translucent stroke, like a highlighter pen -- use a wide stroke and a bright colour."))
                 else:
                     layer["stretch"] = st.checkbox(
                         t("Stretch to fill the photo"), layer.get("stretch", "x_pct" not in layer), key=f"l-img-stretch-{layer_id}",

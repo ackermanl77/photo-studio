@@ -90,6 +90,63 @@ def _ellipse_points(center: tuple[float, float], radius_x: float, radius_y: floa
     ]
 
 
+# Markup (F33): arrow heads on a Line or an open Pen path, and a translucent highlighter stroke.
+HIGHLIGHTER_OPACITY = 0.4
+
+
+def arrow_head_points(tip: tuple[float, float], tail: tuple[float, float], thickness: float) -> list[tuple[float, float]]:
+    """The triangle of an arrow head at `tip`, pointing away from `tail`: 4x the stroke long (at
+    least 10 px) and 2.4x the stroke wide at its base."""
+    length = max(10.0, 4.0 * thickness)
+    half_width = max(5.0, 1.2 * length / 2.0)
+    dx, dy = tip[0] - tail[0], tip[1] - tail[1]
+    norm = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / norm, dy / norm
+    base = (tip[0] - ux * length, tip[1] - uy * length)
+    return [tip, (base[0] - uy * half_width, base[1] + ux * half_width), (base[0] + uy * half_width, base[1] - ux * half_width)]
+
+
+def _arrow_tail(polyline: list[tuple[float, float]], from_end: bool, distance: float) -> tuple[float, float]:
+    """The point `distance` back along `polyline` from its last (or first) point -- the direction a
+    curved path's arrow head points along."""
+    points = list(reversed(polyline)) if from_end else list(polyline)
+    tip = points[0]
+    for point in points[1:]:
+        if math.hypot(point[0] - tip[0], point[1] - tip[1]) >= distance:
+            return point
+    return points[-1]
+
+
+def _shorten(polyline: list[tuple[float, float]], at_end: bool, distance: float) -> list[tuple[float, float]]:
+    """`polyline` with its last (or first) point pulled back by `distance`, so a thick stroke's
+    square end doesn't poke out past the arrow head's tip."""
+    points = list(polyline)
+    index, neighbour = (-1, -2) if at_end else (0, 1)
+    tip, previous = points[index], points[neighbour]
+    length = math.hypot(tip[0] - previous[0], tip[1] - previous[1])
+    if length <= distance or length == 0:
+        return points
+    k = (length - distance) / length
+    points[index] = (previous[0] + (tip[0] - previous[0]) * k, previous[1] + (tip[1] - previous[1]) * k)
+    return points
+
+
+def _draw_with_arrows(draw: ImageDraw.ImageDraw, polyline: list[tuple[float, float]], color, width: int,
+                      arrow_start: bool, arrow_end: bool, **line_options) -> None:
+    head_length = max(10.0, 4.0 * width)
+    line = polyline
+    heads = []
+    if arrow_end and len(polyline) >= 2:
+        heads.append(arrow_head_points(polyline[-1], _arrow_tail(polyline, True, head_length), width))
+        line = _shorten(line, True, head_length * 0.6)
+    if arrow_start and len(polyline) >= 2:
+        heads.append(arrow_head_points(polyline[0], _arrow_tail(polyline, False, head_length), width))
+        line = _shorten(line, False, head_length * 0.6)
+    draw.line(line, fill=color, width=width, **line_options)
+    for head in heads:
+        draw.polygon(head, fill=color)
+
+
 def render_shape_layer(canvas_size: tuple[int, int], params: dict) -> Image.Image:
     """Render one parametric vector shape into a transparent RGBA image at the source photo's real
     pixel size. `params` (matching one entry of st.session_state.image_layers for a "shape"-kind
@@ -109,6 +166,7 @@ def render_shape_layer(canvas_size: tuple[int, int], params: dict) -> Image.Imag
       - sides (Polygon/Star, 3-12), inner_ratio (Star only, 0.05-0.95): the inner vertices' radius
         as a fraction of the outer one
       - line_thickness (Line only): a Line has no separate fill/stroke, just one paint color/width
+      - arrow_start/arrow_end (Line only, F33): an arrow head at that end
     """
     if (params.get("fill_style", "Solid") != "Solid" and params.get("fill_enabled", True)
             and params.get("shape_type", "Rectangle") != "Line"):
@@ -133,7 +191,8 @@ def render_shape_layer(canvas_size: tuple[int, int], params: dict) -> Image.Imag
         thickness = max(1, int(params.get("line_thickness", 4)))
         p1 = _rotate_point((cx - half_w, cy), (cx, cy), rotation)
         p2 = _rotate_point((cx + half_w, cy), (cx, cy), rotation)
-        draw.line([p1, p2], fill=fill or (*fill_rgb, 255), width=thickness)
+        _draw_with_arrows(draw, [p1, p2], fill or (*fill_rgb, 255), thickness,
+                          bool(params.get("arrow_start", False)), bool(params.get("arrow_end", False)))
         return image
 
     if shape_type == "Ellipse":
@@ -215,7 +274,8 @@ def render_path_layer(canvas_size: tuple[int, int], params: dict) -> Image.Image
     image. An open path can only be stroked (there's no well-defined "inside" to fill); a closed
     one can be filled, stroked, or both -- same fill_enabled/fill_color/fill_opacity/stroke_enabled/
     stroke_color/stroke_width fields as a Shape layer's own vector fill+outline, so the two share
-    the exact same UI vocabulary."""
+    the exact same UI vocabulary. An open path can also carry arrow heads (arrow_start/arrow_end)
+    and be a translucent highlighter stroke (`highlighter`, F33)."""
     points = params.get("points", [])
     image = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
     if len(points) < 2:
@@ -236,7 +296,10 @@ def render_path_layer(canvas_size: tuple[int, int], params: dict) -> Image.Image
         draw = ImageDraw.Draw(image)
         draw.polygon(outline, fill=fill, outline=stroke_color, width=stroke_width or 1)
     elif stroke_enabled:
+        if params.get("highlighter", False):
+            stroke_color = (*stroke_color[:3], int(round(255 * HIGHLIGHTER_OPACITY)))
         draw = ImageDraw.Draw(image)
-        draw.line(outline, fill=stroke_color, width=stroke_width, joint="curve")
+        _draw_with_arrows(draw, outline, stroke_color, stroke_width,
+                          bool(params.get("arrow_start", False)), bool(params.get("arrow_end", False)), joint="curve")
 
     return image

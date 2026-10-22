@@ -50,6 +50,8 @@ def render_control(key: str, container=None, *, label: str | None = None, disabl
         choices = list(control.choices)
         kwargs["format_func"] = t_format(format_func) if format_func is not None else t_option
         return target.selectbox(text, choices, index=choices.index(control.default), **kwargs)
+    if widget == "color_picker":
+        return target.color_picker(text, control.default, **kwargs)
     if widget == "number_input":
         return target.number_input(text, control.minimum, control.maximum, control.default, **kwargs)
     raise ValueError(f"control {key!r} has no widget of its own ({widget})")
