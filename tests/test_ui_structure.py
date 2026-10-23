@@ -324,3 +324,27 @@ def test_every_editor_commit_field_is_hidden_by_the_stylesheet():
             covered = f".st-key-{key}" in hidden_rule or any(
                 f'[class*="{part}"]' in hidden_rule for part in ("-paint-hidden",) if key.endswith(part))
         assert covered, f"theme.css doesn't hide the commit field container {key!r}"
+
+
+def test_tool_tabs_icon_strip_names_every_tab_and_escapes_text():
+    """The tool tabs show only their icons (F-UI icon strip): every tab gets its icon and its name
+    (hover and the open-tab line), and the CSS strings are escaped. The tab labels themselves -- the
+    saved tab values -- are untouched."""
+    from app.ui.theme import icon_tabs_style
+    from tests.test_frontend_unified_app import TOOL_TABS
+
+    style = icon_tabs_style("tool-tab", [tuple(label.split(" ", 1)) for label in TOOL_TABS])
+    for index, label in enumerate(TOOL_TABS):
+        icon, name = label.split(" ", 1)
+        assert f'[data-key="{index}"] p::before {{ content: "{icon}"; }}' in style
+        assert f'[aria-selected="true"])::after {{ content: "{name}"; }}' in style
+    assert r'content: "say \"hi\" \\ there"' in icon_tabs_style("x", [("i", r'say "hi" \ there')])
+
+
+def test_canvas_controls_are_keyed_for_the_phone_layout():
+    """theme.css wraps the controls above the photo into a grid on a phone through this key."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    assert 'st.container(key="canvas-controls")' in (root / "app" / "ui" / "canvas.py").read_text(encoding="utf-8")
+    assert ".st-key-canvas-controls" in (root / "app" / "ui" / "static" / "theme.css").read_text(encoding="utf-8")

@@ -47,7 +47,9 @@ reopen a `.photoproject` file you saved earlier (see [Projects](#projects) below
 Like Photoshop, the window belongs to the photo:
 
 - **Sidebar (left)** — the app name, **📂 Open another photo or project · 🌐 Language**, and the
-  tools in nine tabs, grouped by how you work. Drag the sidebar's right edge to make it wider, or
+  tools in nine tabs, grouped by how you work. The tabs are a row of icons, like Photoshop's
+  toolbar: hover one to see its name; the open tab's name is written under the row. Drag the
+  sidebar's right edge to make it wider, or
   click **«** at its top to hide it and give the photo the whole window (the **»** button at the
   top left brings it back):
 
@@ -75,7 +77,8 @@ Like Photoshop, the window belongs to the photo:
   image: pick a tool to work on the photo, or **🖼 Photo** to go back to the normal view. Each of
   these tools also has a **✏️ … on the photo** button where it sits in the sidebar.
 
-On a narrow window (a phone) the sidebar starts hidden and opens over the photo.
+On a narrow window (a phone) the sidebar starts hidden and opens over the photo, and the controls
+above the photo fold into a compact grid so the photo stays near the top of the screen.
 
 Every control updates the same live preview — there's no separate "apply" step. Changing a slider
 sends the edit to the local processing backend and the canvas updates in place.

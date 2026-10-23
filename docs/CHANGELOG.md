@@ -7,6 +7,20 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-22 -- Tool tabs as an icon strip; compact controls on a phone
+
+- The nine tool tabs in the sidebar wrapped onto two rows of words. Like Photoshop's toolbar they
+  are now one row of icons (`app.ui.theme.icon_tabs_style()`, injected after the "Tool Workspace"
+  heading): hovering an icon shows the tab's name, and the open tab's name is written under the row.
+  Only the text is hidden by CSS: the tab labels (the saved `tool-tab` values, and the tabs'
+  accessible names) are unchanged, and the Local / Presets & Library / curve-channel sub-tabs keep
+  their words (child combinators stop at the outer tab row).
+- On a phone Streamlit stacked every column of the two control rows above the photo full width:
+  526 px of buttons, the photo starting 653 px down an 844 px screen. The rows are now in
+  `st.container(key="canvas-controls")`, and a `max-width: 640px` rule in theme.css wraps them into a
+  grid (the file name on its own line, Undo/Redo/Reset/History on one, the view controls three to a
+  line, shortcut hints hidden): 146 px, the photo starts at 272 px, no horizontal scroll.
+
 ## 2026-10-22 -- Editors that work on the photo are drawn over it
 
 After the tools moved to the sidebar, the crop box, Liquify, the paint editor (new painting and
