@@ -69,6 +69,11 @@ Like Photoshop, the window belongs to the photo:
 - **The page** — the photo, fitted to the window, with two rows of controls above it (Undo,
   Redo, Reset, History; zoom, 1:1, Before/After, Grid, Split View, Original) and the histogram, a
   clipping warning and the Save button below it, whichever tool tab is open.
+- **Tools that work on the photo** — like Photoshop, the crop box, 🌀 Liquify, 🖌 Paint and 🎨 Edit
+  Painting, 🪄 Magic Wand, 🎯 White Balance and the ✒ Pen draw over the photo itself, at full
+  size. When the open tab has one, a row **🖼 Photo | ✂ Crop | 🌀 Liquify …** appears above the
+  image: pick a tool to work on the photo, or **🖼 Photo** to go back to the normal view. Each of
+  these tools also has a **✏️ … on the photo** button where it sits in the sidebar.
 
 On a narrow window (a phone) the sidebar starts hidden and opens over the photo.
 

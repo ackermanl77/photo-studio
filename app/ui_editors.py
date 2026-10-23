@@ -78,9 +78,10 @@ def _png_b64(image: Image.Image) -> str:
 
 
 def _display_size(background: Image.Image) -> tuple[int, int]:
+    """The editor's drawing size: the background's own, which the caller already fitted to where the
+    editor goes (480 px in the sidebar, larger over the photo -- app.ui.state.editor_box())."""
     width, height = background.size
-    display_w = min(480, width)
-    return display_w, int(display_w * height / width) if width else 320
+    return width, height if width else 320
 
 
 def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, int]:

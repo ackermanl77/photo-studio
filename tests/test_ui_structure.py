@@ -299,3 +299,28 @@ def test_every_editor_is_a_static_html_and_js_pair_with_no_python_built_script()
         ui_editors._render("picker", {"display_w": 1, "bg_b64": "", "hint": "", "extra": 1})
     # A "</script>" inside the config can't end the script early.
     assert "<\\/script>" in ui_editors._render("picker", {"display_w": 1, "bg_b64": "", "hint": ""}, {"x": "</script>"})
+
+
+def test_every_editor_commit_field_is_hidden_by_the_stylesheet():
+    """The on-canvas editors commit through text_areas in "*-hidden" containers that theme.css must
+    hide; Liquify's was missing, so an empty box showed in the Geometry tab."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    css = (root / "app" / "ui" / "static" / "theme.css").read_text(encoding="utf-8")
+    hidden_rule = css[css.index(".st-key-curve-hidden"):]
+    hidden_rule = hidden_rule[:hidden_rule.index("{")]
+    source = "\n".join(path.read_text(encoding="utf-8") for path in (root / "app" / "ui").rglob("*.py"))
+    keys = set(re.findall(r'st\.container\(key=f?"([^"]*-hidden)"\)', source))
+    assert keys, "no hidden commit containers found"
+    for key in keys:
+        if "{" in key:  # an f-string key: checked by its fixed suffix/prefix patterns in the rule
+            suffix = key[key.rindex("}") + 1:]
+            # A substring pattern, or the prefixes listed one by one (".st-key-m-wand-hidden" & co).
+            covered = (f'[class*="{suffix}"]' in hidden_rule or ('[class*="l-path-"]' in hidden_rule and suffix == "-hidden")
+                       or re.search(r"\.st-key-[a-z]+" + re.escape(suffix) + r"[,\s]", hidden_rule) is not None)
+        else:
+            covered = f".st-key-{key}" in hidden_rule or any(
+                f'[class*="{part}"]' in hidden_rule for part in ("-paint-hidden",) if key.endswith(part))
+        assert covered, f"theme.css doesn't hide the commit field container {key!r}"

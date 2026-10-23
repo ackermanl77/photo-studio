@@ -45,7 +45,9 @@ docs/ARCHITECTURE.md ("CI and releases") and docs/PROJECT_STATUS.md ("Verificati
 - **Setting a widget from outside it** (Undo, Reset, presets, editor commits) goes through
   `st.session_state["_pending_restore"]` + `request_rerun()`; never write an instantiated widget's key.
 - **On-canvas editors** (`components.html()`, static files in `app/ui/static/editors/`) commit through a
-  hidden `st.text_area` + `consume_new_commit()`; a JS-driven `st.slider` does not reach the server.
+  hidden `st.text_area` + `consume_new_commit()`; a JS-driven `st.slider` does not reach the server. An
+  editor that works on the photo passes `canvas_label`/`slot_id` to `show_component()` and fits its
+  background to `editor_box()`, so it is drawn over the photo; its commit field stays in the sidebar.
 - **List widgets** (masks, layers) use stable UUID keys, and `break` out of the loop right after a
   Move/Duplicate/Remove.
 - **Every `st.cache_data` has `max_entries`**; large inputs are underscore-prefixed (unhashed) args.

@@ -133,13 +133,60 @@ def tab_open(tab) -> bool:
     return True if is_open is None else bool(is_open)
 
 
-def show_component(build) -> None:
+def show_component(build, canvas_label: str | None = None, slot_id: str | None = None) -> None:
     """components.html() for an on-canvas editor, only when its tab is visible -- `build()` returns
     (markup, height) and isn't even called otherwise (it base64-encodes a preview). The editor's
-    hidden commit text_area is rendered by the caller regardless, so its state survives."""
-    if tab_visible():
+    hidden commit text_area is rendered by the caller regardless, so its state survives.
+
+    With `canvas_label`, the editor works on the photo itself, Photoshop-style: it is offered above
+    the canvas ("On the photo: ...") and drawn there at full size instead of at sidebar width; the
+    sidebar keeps a button that switches to it. Its commit field stays where the caller renders it
+    (the editors find it in the page by selector, wherever it is)."""
+    if not tab_visible():
+        return
+    if canvas_label is None:
         markup, height = build()
         components.html(markup, height=height)
+        return
+    editors = _canvas.__dict__.setdefault("editors", [])
+    label, number = canvas_label, 2
+    while any(existing == label for existing, _build in editors):
+        label, number = f"{canvas_label} {number}", number + 1
+    editors.append((label, build))
+    st.button(
+        t("✏️ {0} on the photo").format(t(label)), key=f"to-canvas-{slot_id or label}",
+        on_click=lambda: st.session_state.__setitem__(CANVAS_MODE_KEY, label),
+        help=t("Opens this tool over the photo, at full size."),
+    )
+
+
+# On-canvas editors (show_component(canvas_label=...)): the ones this run offered, and the preview
+# size their backgrounds are drawn at -- 480 px in the sidebar, larger when drawn over the photo.
+_canvas = threading.local()
+CANVAS_MODE_KEY = "canvas-mode"
+CANVAS_PHOTO = "🖼 Photo"
+SIDEBAR_EDITOR_BOX = (480, 480)
+
+
+def editor_box() -> tuple[int, int]:
+    """The box an editor's background preview fits in (preview_image(source, editor_box()))."""
+    return getattr(_canvas, "box", SIDEBAR_EDITOR_BOX)
+
+
+def build_on_canvas(build, box: tuple[int, int]):
+    """Call an editor's build() with its background drawn to fit `box`."""
+    _canvas.box = box
+    try:
+        return build()
+    finally:
+        _canvas.box = SIDEBAR_EDITOR_BOX
+
+
+def take_canvas_editors() -> list:
+    """The (label, build) editors offered during this run, in order; clears the list."""
+    editors = getattr(_canvas, "editors", [])
+    _canvas.editors = []
+    return editors
 
 
 def hex_to_rgba(hex_color: str) -> tuple[int, int, int, int]:

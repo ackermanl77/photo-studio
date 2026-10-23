@@ -15,7 +15,7 @@ from app.controls import CONTROLS_BY_KEY, section_keys
 from app.lens_corrections import LENS_PROFILES
 from app.professional_tools import draw_guides_and_grid, grid_line_fractions, preview_image
 from app.ui.processing import lens_corrected_source
-from app.ui.state import consume_new_commit, request_rerun, section_header, section_reset_button, show_component
+from app.ui.state import consume_new_commit, editor_box, request_rerun, section_header, section_reset_button, show_component
 from app.ui.widgets import render_control
 from app.ui_editors import _crop_editor_html, _liquify_editor_html
 from app.i18n import t, t_format
@@ -120,9 +120,9 @@ def liquify_section(ctx) -> None:
     mask_source = ctx.mask_source
 
     def build_editor():
-        return _liquify_editor_html(preview_image(mask_source, (480, 480)), "liquify-editor", size / 100.0, liquify.MAX_POINTS)
+        return _liquify_editor_html(preview_image(mask_source, editor_box()), "liquify-editor", size / 100.0, liquify.MAX_POINTS)
 
-    show_component(build_editor)
+    show_component(build_editor, canvas_label="🌀 Liquify", slot_id="liquify")
     with st.container(key="liquify-editor-hidden"):
         pending = st.text_area(t("Liquify stroke"), key="liquify-editor-data", label_visibility="collapsed")
     if consume_new_commit(pending, "liquify-editor-committed"):
@@ -181,12 +181,12 @@ def crop_section(ctx) -> None:
         snap_y = list(grid_line_fractions(crop_grid_type)) + [g["position_pct"] / 100.0 for g in crop_guides if g.get("orientation") == "horizontal"]
 
         def build_editor():
-            background = preview_image(mask_source, (480, 480))
+            background = preview_image(mask_source, editor_box())
             if crop_grid_type != "None" or crop_guides:
                 background = draw_guides_and_grid(background, crop_grid_type, crop_guides)
             return _crop_editor_html(background, "crop-editor", crop_box_fractional, mask_source.size, snap_x=snap_x, snap_y=snap_y)
 
-        show_component(build_editor)
+        show_component(build_editor, canvas_label="✂ Crop", slot_id="crop")
         with st.container(key="crop-editor-hidden"):
             pending_crop = st.text_area(t("Free-form crop box"), key="crop-editor-data", label_visibility="collapsed")
         if consume_new_commit(pending_crop, "crop-editor-committed"):

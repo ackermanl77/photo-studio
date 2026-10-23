@@ -27,7 +27,7 @@ from app.raw_import import uploader_types
 from app.ui import canvas, export_panel, processing
 from app.ui.context import EditorContext
 from app.ui.project_io import open_launch_file, open_project_bytes
-from app.ui.state import build_recipe, consume_rerun_request, restore_recipe_to_state, set_tab_visible, tab_open
+from app.ui.state import build_recipe, consume_rerun_request, restore_recipe_to_state, set_tab_visible, tab_open, take_canvas_editors
 from app.ui.tabs import basic, color, detail, geometry, layers_tab, library, local
 from app.ui.theme import inject_page_style
 from app.i18n import LANGUAGES, save_language, saved_language, set_language, t
@@ -178,6 +178,7 @@ ctx = EditorContext(
 # --- The workspace: tool tabs in the sidebar, the canvas in the page -------------------------------
 # Like Photoshop, the window belongs to the image: the tools are a resizable, collapsible sidebar.
 tools_col, canvas_col = st.sidebar, st.container(key="workspace-canvas")
+take_canvas_editors()  # the open tab's photo editors register again below (an interrupted run's are stale)
 
 with tools_col:
     st.markdown(t('<div class="panel-header-title">🛠️ Tool Workspace</div>'), unsafe_allow_html=True)

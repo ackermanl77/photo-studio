@@ -7,6 +7,26 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-22 -- Editors that work on the photo are drawn over it
+
+After the tools moved to the sidebar, the crop box, Liquify, the paint editor (new painting and
+Edit Painting), the magic-wand and white-balance pickers and the Pen were drawn at sidebar width
+(480 px). Like Photoshop, they now work on the photo itself:
+
+- `show_component(build, canvas_label=..., slot_id=...)` registers such an editor instead of
+  drawing it in the sidebar (where it leaves a "✏️ … on the photo" button);
+  `app.ui.canvas.canvas_editor_choice()` offers the open tab's editors above the photo
+  ("🖼 Photo | ✂ Crop | 🌀 Liquify ...", widget `canvas-mode`) and draws the chosen one over it,
+  its background fitted to `CANVAS_EDITOR_BOX` (1000x600) through `editor_box()`. The tone curve
+  stays in the sidebar (it's a graph, not the photo).
+- The editors' commit fields stay in the sidebar: `commitToStreamlit()` finds them in the page by
+  selector, wherever they are. Checked in a real browser: a drag on the crop box over the photo
+  cropped 900x600 to 748x498, and a Liquify stroke over it added a stroke.
+- `_display_size()` follows the background (already fitted to where the editor goes) instead of
+  capping every editor at 480 px.
+- Liquify's commit field was never in theme.css's hidden list, so an empty box showed in the
+  Geometry tab; fixed, and `tests/test_ui_structure.py` now checks every `*-hidden` container.
+
 ## 2026-10-22 -- Tools in a sidebar: the window is for the photo
 
 Measured against Photoshop 2026 (whose document area is about 54 % of its window): the photo took

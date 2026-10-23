@@ -26,7 +26,7 @@ from app.advanced_masks import (
 )
 from app.painted_masks import resolve_painted_mask
 from app.professional_tools import preview_image
-from app.ui.state import consume_new_commit, request_rerun, show_component
+from app.ui.state import consume_new_commit, editor_box, request_rerun, show_component
 from app.ui_editors import _paint_editor_html, _wand_picker_html
 from app.i18n import t, t_format, t_option
 
@@ -125,8 +125,8 @@ def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image,
                 format_func=lambda n: t("Point") if n == 1 else f"{n} × {n}",
                 help=t("Average the colour over a small square around the click -- steadier than a single pixel on noisy or textured areas."),
             )
-            st.caption(t("Click a point on the photo below to select similar colors around it."))
-            show_component(lambda: _wand_picker_html(preview_image(source, (480, 480)), key_prefix))
+            st.caption(t("Open 🪄 Magic Wand over the photo (the button below, or above the image) and click a point to select similar colors around it."))
+            show_component(lambda: _wand_picker_html(preview_image(source, editor_box()), key_prefix), canvas_label="🪄 Magic Wand", slot_id=f"{key_prefix}-wand")
             with st.container(key=f"{key_prefix}-wand-hidden"):
                 pending_wand = st.text_area(t("Magic wand click"), key=f"{key_prefix}-wand-data", label_visibility="collapsed")
             if consume_new_commit(pending_wand, f"{key_prefix}-wand-committed"):
@@ -141,8 +141,8 @@ def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image,
                     layers.append(_new_selection(f"Magic Wand {len(layers) + 1}", "Magic Wand", params))
                     request_rerun()
         elif new_kind == "Painted":
-            st.caption(t('Paint directly on the photo below — brush, radial, or gradient, plus an eraser. Click "Add to selections" inside the canvas when done.'))
-            show_component(lambda: _paint_editor_html(preview_image(source, (480, 480)), key_prefix))
+            st.caption(t('Open 🖌 Paint over the photo (the button below, or above the image) — brush, radial, or gradient, plus an eraser. Click "Add to selections" there when done.'))
+            show_component(lambda: _paint_editor_html(preview_image(source, editor_box()), key_prefix), canvas_label="🖌 Paint", slot_id=f"{key_prefix}-paint")
             with st.container(key=f"{key_prefix}-paint-hidden"):
                 pending_paint = st.text_area(t("Painted mask data"), key=f"{key_prefix}-paint-data", label_visibility="collapsed")
             # A fresh editor iframe starts blank, so only a genuine new painting produces new data;
@@ -214,9 +214,9 @@ def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image,
                 if st.checkbox(t("🎨 Edit Painting"), key=f"{key_prefix}-editpaint-toggle-{layer_id}"):
                     edit_prefix = f"{key_prefix}-ep-{layer_id}"
                     show_component(lambda: _paint_editor_html(
-                        preview_image(source, (480, 480)), edit_prefix,
+                        preview_image(source, editor_box()), edit_prefix,
                         preload_mask_b64=resolve_painted_mask(layer["params"]), commit_label="💾 Update Painting",
-                    ))
+                    ), canvas_label="🎨 Edit Painting", slot_id=edit_prefix)
                     with st.container(key=f"{edit_prefix}-paint-hidden"):
                         pending_edit = st.text_area(t("Edited painted mask data"), key=f"{edit_prefix}-paint-data", label_visibility="collapsed")
                     if consume_new_commit(pending_edit, f"{edit_prefix}-paint-committed"):

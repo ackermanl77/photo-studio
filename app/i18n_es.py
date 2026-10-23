@@ -290,6 +290,18 @@ ES = {
     "↺ Reset": "↺ Restablecer",
     "📌 History": "📌 Historial",
     "📂 Open another photo or project · 🌐 Language": "📂 Abrir otra foto o proyecto · 🌐 Idioma",
+    "✏️ {0} on the photo": "✏️ {0} sobre la foto",
+    "Opens this tool over the photo, at full size.": "Abre esta herramienta sobre la foto, a tamaño completo.",
+    "On the photo": "Sobre la foto",
+    "Work on the photo with one of this tab's tools, or just view it.": "Trabaja sobre la foto con una de las herramientas de esta pestaña, o solo mírala.",
+    "🖼 Photo": "🖼 Foto",
+    "🌀 Liquify": "🌀 Licuar",
+    "✂ Crop": "✂ Recortar",
+    "🪄 Magic Wand": "🪄 Varita mágica",
+    "🖌 Paint": "🖌 Pintar",
+    "🎨 Edit Painting": "🎨 Editar pintura",
+    "✒ Pen": "✒ Pluma",
+    "🎯 White Balance": "🎯 Balance de blancos",
     "Zoom View": "Zoom",
     "⇄ Split View": "⇄ Vista dividida",
     "Drag to compare before/after": "Arrastra para comparar antes/después",
@@ -466,8 +478,8 @@ ES = {
     "Visible": "Visible",
     "Opacity": "Opacidad",
     "Blend Mode": "Modo de fusión",
-    "Click points on the photo below to trace a path, then \"Add Path Layer\" when done.":
-        "Haz clic en puntos de la foto de abajo para trazar un camino y luego en \"Añadir capa de trazado\" cuando termines.",
+    "Open ✒ Pen over the photo (the button below, or above the image), click points to trace a path, then \"Add Path Layer\" when done.":
+        "Abre ✒ Pluma sobre la foto (el botón de abajo, o encima de la imagen), haz clic en puntos para trazar un camino y luego en \"Añadir capa de trazado\" cuando termines.",
     "➕ Add Path Layer": "➕ Añadir capa de trazado",
     "Layer image": "Imagen de la capa",
     "Alignment": "Alineación",
@@ -528,15 +540,15 @@ ES = {
     "Point": "Punto",
     "Average the colour over a small square around the click -- steadier than a single pixel on noisy or textured areas.":
         "Promedia el color en un pequeño cuadrado alrededor del clic: más estable que un solo píxel en zonas con ruido o textura.",
-    "Click a point on the photo below to select similar colors around it.":
-        "Haz clic en un punto de la foto de abajo para seleccionar los colores parecidos a su alrededor.",
+    "Open 🪄 Magic Wand over the photo (the button below, or above the image) and click a point to select similar colors around it.":
+        "Abre 🪄 Varita mágica sobre la foto (el botón de abajo, o encima de la imagen) y haz clic en un punto para seleccionar los colores parecidos a su alrededor.",
     "Enabled": "Activada",
     "Invert": "Invertir",
     "Soften edges (px)": "Suavizar bordes (px)",
     "Combine with the selections above": "Combinar con las selecciones de arriba",
     "Magic wand click": "Clic de la varita mágica",
-    "Paint directly on the photo below — brush, radial, or gradient, plus an eraser. Click \"Add to selections\" inside the canvas when done.":
-        "Pinta directamente sobre la foto de abajo: pincel, radial o degradado, además de un borrador. Haz clic en \"Añadir a las selecciones\" dentro del lienzo cuando termines.",
+    "Open 🖌 Paint over the photo (the button below, or above the image) — brush, radial, or gradient, plus an eraser. Click \"Add to selections\" there when done.":
+        "Abre 🖌 Pintar sobre la foto (el botón de abajo, o encima de la imagen): pincel, radial o degradado, además de un borrador. Haz clic allí en \"Añadir a las selecciones\" cuando termines.",
     "Invert selection": "Invertir selección",
     "Layer name": "Nombre de la capa",
     "Add selection": "Añadir selección",
