@@ -167,7 +167,7 @@ def _full_options(ctx) -> dict:
 def export_multiple_section(ctx) -> None:
     """"Export As" several EXPORT_PROFILES (Web/Social/Print/Archive) of this one photo at once --
     distinct from the Batch Processor (one recipe, many photos)."""
-    with st.expander(t("📦 Export Multiple Sizes")):
+    with st.expander(t("📦 Export Multiple Sizes"), key="sec-export-multi"):
         selected_profiles = st.multiselect(t("Sizes to include"), list(EXPORT_PROFILES), default=["Web", "Social"], key="exp-multi-profiles", format_func=t_option)
         multi_remove_gps = st.checkbox(
             t("Remove GPS location"), value=True, key="exp-multi-remove-gps",

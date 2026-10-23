@@ -84,21 +84,35 @@ def _display_size(background: Image.Image) -> tuple[int, int]:
     return width, height if width else 320
 
 
+def _image_view_html(image: Image.Image, label: str) -> tuple[str, int]:
+    """A still image drawn over the photo like an editor (the Masks and Repair overlay previews),
+    centred at its own size -- already fitted to the box by the caller."""
+    width, height = _display_size(image)
+    markup = (f'<img src="data:image/png;base64,{_png_b64(image)}" alt="{_tx(label)}" '
+              f'style="display:block;width:{width}px;max-width:100%;height:auto;margin:0 auto;border-radius:4px;">')
+    return editor_style() + markup, height + 20
+
+
 def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, int]:
-    """A draggable before/after comparison: a single range input drives a CSS clip-path on the
-    "before" image layered over the "after" image. Static before_after.html/.js via
+    """A draggable before/after comparison: a single range input (or a drag on the photo) drives a
+    CSS clip-path on the "before" image layered over the "after" image, split side by side or top
+    and bottom. Static before_after.html/.js via
     st.components.v1.html -- no component library dependency, consistent with keeping this app's
     UI free of extra dependencies after removing streamlit-drawable-canvas.
 
     `before` and `after` must already be the same pixel size (the caller resizes if a crop made
     them differ) -- that's what makes the overlay line up.
     """
+    # Sized for the photo's place (about 1000 px wide, at most 600 tall), and no wider than that
+    # height allows -- sized by width alone, a landscape photo ran past the iframe's bottom.
     width, height = after.size
-    display_height = max(220, min(560, int(700 * height / width))) if width else 320
+    display_height = max(220, min(600, int(1000 * height / width))) if width else 320
+    display_w = int(display_height * width / height) if height else 1000
     fields = {
-        "after_b64": _png_b64(after), "before_b64": _png_b64(before),
+        "after_b64": _png_b64(after), "before_b64": _png_b64(before), "display_w": display_w,
         "label_before": _tx("BEFORE"), "label_after": _tx("AFTER"),
         "label_range": _tx("Before/after comparison position"),
+        "label_dir": _tx("Split side by side or top and bottom"),
     }
     return _render("before_after", fields), display_height
 
@@ -202,13 +216,13 @@ def _paint_editor_html(background: Image.Image, key_prefix: str, preload_mask_b6
     """
     display_w, display_h = _display_size(background)
     fields = {
-        "label_root": _tx("Selection painter. [ and ] change the brush size; arrow keys move the last radial or gradient (Alt: its end point, Shift: 10x)."),
+        "label_root": _tx("Selection painter. [ and ] change the brush size, Ctrl+Z undoes the last stroke; arrow keys move the last radial or gradient (Alt: its end point, Shift: 10x)."),
         "label_brush": _tx("🖌 Brush"), "label_radial": _tx("⭕ Radial"), "label_gradient": _tx("📐 Gradient"),
-        "label_erase": _tx("🧹 Erase"), "label_clear": _tx("✖ Clear"), "label_size": _tx("Size"),
+        "label_erase": _tx("🧹 Erase"), "label_clear": _tx("✖ Clear"), "label_size": _tx("Size"), "label_undo": _tx("↶ Undo stroke"),
         "label_size_input": _tx("Brush size ([ and ] keys)"),
         "display_w": display_w, "display_h": display_h, "bg_b64": _png_b64(background),
         "label_commit": _tx(commit_label),
-        "label_keys": _tx("Keys: [ / ] brush size. After a radial or gradient: arrows move it, Alt+arrows move its end point, Shift = x10."),
+        "label_keys": _tx("Keys: [ / ] brush size, Ctrl+Z undoes the last stroke. After a radial or gradient: arrows move it, Alt+arrows move its end point, Shift = x10."),
     }
     config = {"hiddenSelector": f".st-key-{key_prefix}-paint-hidden", "preloadMaskB64": preload_mask_b64 or ""}
     return _render("paint", fields, config), display_h + 130

@@ -62,7 +62,7 @@ def color_section(ctx) -> None:
     for key in ("temperature", "tint", "saturation_amount", "vibrance"):
         values[key] = render_control(key)
     section_reset_button("color", "Color")
-    with st.expander(t("🎯 Pick White Balance"), expanded=False):
+    with st.expander(t("🎯 Pick White Balance"), expanded=False, key="sec-pick-wb"):
         st.caption(t("Click a spot in the photo that should be neutral gray or white -- Temperature and Tint above are set to whatever would neutralize it. A starting point to fine-tune from, not a guaranteed perfect result."))
         show_component(lambda: _wand_picker_html(preview_image(ctx.mask_source, editor_box()), "wb"), canvas_label="🎯 White Balance", slot_id="wb")
         with st.container(key="wb-wand-hidden"):

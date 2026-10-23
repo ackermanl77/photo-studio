@@ -26,7 +26,7 @@ from app.advanced_masks import (
 )
 from app.painted_masks import resolve_painted_mask
 from app.professional_tools import preview_image
-from app.ui.state import consume_new_commit, editor_box, request_rerun, show_component
+from app.ui.state import CANVAS_MODE_KEY, CANVAS_PHOTO, consume_new_commit, editor_box, request_rerun, show_component
 from app.ui_editors import _paint_editor_html, _wand_picker_html
 from app.i18n import t, t_format, t_option
 
@@ -100,11 +100,17 @@ def _new_selection(name: str, kind: str, params: dict, soften: int = 0, invert: 
     return {"id": uuid.uuid4().hex, "name": name, "kind": kind, "params": params, "soften": soften, "invert": invert, "opacity": 1.0, "enabled": True}
 
 
-def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image, include_opacity: bool = True) -> str:
+def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image, include_opacity: bool = True,
+                           default_kind: str = "Luminance", paint_label: str = "🖌 Paint",
+                           paint_commit_label: str = "➕ Add to selections", paint_back_to_photo: bool = False) -> str:
     """"Add a selection, then list/edit/remove the existing ones" -- the Masks panel (local
     adjustments) and the Repair panel (object removal) each call it with their own session_state
     list and widget-key prefix. Returns the signature of the selections that join the combined mask
-    (selections_signature); the caller builds the mask from it (combined_mask_png)."""
+    (selections_signature); the caller builds the mask from it (combined_mask_png).
+
+    Repair names its paint editor a repair brush (`paint_label`, `paint_commit_label`), starts on it
+    (`default_kind`), and returns to the photo once a painting is added (`paint_back_to_photo`), so
+    the removal shows straight away."""
     from app.painted_masks import intern_painted_mask
 
     if state_key not in st.session_state:
@@ -114,7 +120,8 @@ def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image,
         layer.setdefault("id", uuid.uuid4().hex)  # selections saved before ids existed
 
     with st.expander(t("➕ Add a selection"), expanded=not layers):
-        new_kind = st.selectbox(t("Selection Type"), NEW_SELECTION_KINDS, key=f"{key_prefix}-new-kind", format_func=t_option)
+        new_kind = st.selectbox(t("Selection Type"), NEW_SELECTION_KINDS, index=NEW_SELECTION_KINDS.index(default_kind),
+                                key=f"{key_prefix}-new-kind", format_func=t_option)
         if new_kind == "AI Mask":
             add_ai_mask_selection(layers, key_prefix, source)
         elif new_kind == "Magic Wand":
@@ -141,14 +148,18 @@ def render_selection_stack(state_key: str, key_prefix: str, source: Image.Image,
                     layers.append(_new_selection(f"Magic Wand {len(layers) + 1}", "Magic Wand", params))
                     request_rerun()
         elif new_kind == "Painted":
-            st.caption(t('Open 🖌 Paint over the photo (the button below, or above the image) — brush, radial, or gradient, plus an eraser. Click "Add to selections" there when done.'))
-            show_component(lambda: _paint_editor_html(preview_image(source, editor_box()), key_prefix), canvas_label="🖌 Paint", slot_id=f"{key_prefix}-paint")
+            st.caption(t('Open {0} over the photo (the button below, or above the image) — brush, radial, or gradient, plus an eraser. Click "{1}" there when done.').format(
+                t(paint_label), t(paint_commit_label)))
+            show_component(lambda: _paint_editor_html(preview_image(source, editor_box()), key_prefix, commit_label=paint_commit_label),
+                           canvas_label=paint_label, slot_id=f"{key_prefix}-paint")
             with st.container(key=f"{key_prefix}-paint-hidden"):
                 pending_paint = st.text_area(t("Painted mask data"), key=f"{key_prefix}-paint-data", label_visibility="collapsed")
             # A fresh editor iframe starts blank, so only a genuine new painting produces new data;
             # clicking "Add to selections" again without drawing is a no-op, not a duplicate.
             if consume_new_commit(pending_paint, f"{key_prefix}-paint-committed"):
                 layers.append(_new_selection(f"Painted {len(layers) + 1}", "Painted", {"mask_ref": intern_painted_mask(pending_paint)}))
+                if paint_back_to_photo:
+                    st.session_state[CANVAS_MODE_KEY] = CANVAS_PHOTO  # its widget renders later in this run
                 request_rerun()
         else:
             new_params: dict = {}

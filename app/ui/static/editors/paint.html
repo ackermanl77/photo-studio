@@ -5,6 +5,7 @@
     <button type="button" class="tool-btn" data-tool="radial">{{label_radial}}</button>
     <button type="button" class="tool-btn" data-tool="gradient">{{label_gradient}}</button>
     <button type="button" id="erase-btn" class="tool-btn">{{label_erase}}</button>
+    <button type="button" id="undo-btn" class="tool-btn" disabled>{{label_undo}}</button>
     <button type="button" id="clear-btn" class="tool-btn">{{label_clear}}</button>
     <label style="display:flex;align-items:center;gap:4px;color:var(--ps-text);font:12px system-ui;margin-left:4px;">
       {{label_size}} <input id="brush-size" type="range" min="4" max="80" value="18" style="width:80px;" aria-label="{{label_size_input}}">
@@ -28,5 +29,6 @@
   .tool-btn { background:rgba(255,255,255,0.08); color:var(--ps-text); border:1px solid rgba(255,255,255,0.15);
               border-radius:5px; padding:5px 9px; font:12px system-ui; cursor:pointer; }
   .tool-btn.active { background:var(--ps-accent); color:var(--ps-on-accent); border-color:var(--ps-accent); }
+  .tool-btn:disabled { opacity:0.45; cursor:default; }
   #erase-btn.active { background:var(--ps-danger); color:var(--ps-on-accent); border-color:var(--ps-danger); }
 </style>

@@ -132,7 +132,7 @@ def lut_section(ctx) -> None:
 
 
 def soft_proof_section(ctx) -> None:
-    with st.expander(t("🎯 Soft Proof: Gamut Warning"), expanded=False):
+    with st.expander(t("🎯 Soft Proof: Gamut Warning"), expanded=False, key="sec-soft-proof"):
         source_icc_bytes = ctx.source.info.get("icc_profile")
         if not source_icc_bytes:
             st.caption(t("This photo has no embedded color profile to check against, so there's nothing to proof."))

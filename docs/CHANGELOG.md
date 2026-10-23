@@ -7,6 +7,39 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-22 -- From a Photoshop review: Repair brush, Find a tool, profile notice, split direction, shortcuts
+
+A second look at Photoshop 2026 (its UI strings, read from its locale catalog, and its open
+window -- read-only) against Photo Studio, then:
+
+- **Repair as a general remover.** Repair starts on the paint editor, here the **🩹 Repair brush**
+  (`render_selection_stack(default_kind=, paint_label=, paint_commit_label=, paint_back_to_photo=)`),
+  drawn over the photo; **🩹 Remove** adds the painting and switches the canvas back to the photo,
+  so the removal shows at once. The paint editor (Masks too) gained a ring that shows the brush
+  size under the pointer and stroke undo (**↶ Undo stroke**, Ctrl+Z, the last 20). The Masks and
+  Repair overlay previews are drawn over the photo too (`_image_view_html`; ticking the checkbox
+  opens them there) instead of at sidebar width. Not a watermark remover: it removes what the
+  user paints.
+- **Find a tool** (`app/ui/tool_search.py`): a search box above the tool tabs. Its index is ~40
+  curated sections plus every registry control with a unique label; picking one sets the tab and
+  sub-tab (and the Library's tool radio) from the box's callback, and a one-shot same-origin script
+  opens the section's expander, scrolls to the widget by its `.st-key-` class and flashes it. Three
+  expanders got keys for it (`sec-pick-wb`, `sec-soft-proof`, `sec-export-multi`).
+- **Color profile notice** (`canvas.profile_notice`, `color_profiles.profile_name()`): a photo whose
+  embedded profile isn't sRGB says so above the canvas, with **Show clipped colors** (opens Soft
+  Proof with the gamut warning on). Photoshop asks in a modal; the conversion here is automatic.
+- **Split View top and bottom.** The before/after view has a ↔/↕ toggle (remembered in the
+  browser) and moves its divider by dragging on the photo. It was also sized from a 700 px width
+  while the canvas is ~1000 px wide, so a landscape photo ran past the bottom of its iframe; it is
+  now fitted to 1000×600. The `cv-split`/`cv-orig` checkboxes stay (saved widget keys).
+- **⌨️ Keyboard shortcuts** popover at the end of the first control row (`canvas.SHORTCUTS`; a test
+  checks every `shortcut=` is listed), and a **tool hint line** over each on-photo tool
+  (`canvas.CANVAS_HINTS`: what to do, where its settings are).
+- Checked in Chrome: the P3 notice and its button (Soft Proof opened, warning on); Find a tool to
+  Remove Objects (tab, sub-tab, scroll, flash) and to Watermark (expander opened); a repair stroke,
+  Ctrl+Z, a second stroke, Remove (canvas back on the photo, the triangle's tip filled); the split
+  view at 900×600 inside a 972×610 frame, then top/bottom; the phone header still 146 px.
+
 ## 2026-10-22 -- Tool tabs as an icon strip; compact controls on a phone
 
 - The nine tool tabs in the sidebar wrapped onto two rows of words. Like Photoshop's toolbar they

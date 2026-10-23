@@ -65,17 +65,28 @@ Like Photoshop, the window belongs to the photo:
   | **⬇ Export** | export settings and presets, 🏷️ Watermark, GPU export transforms, AI Upscale, 📦 Export Multiple Sizes, layered PSD and SVG downloads, 💾 Save Project |
   | **✦ Presets & Library** | two sub-tabs: ✦ Presets, ☰ Library & Batch (Library Catalog, Batch Processor, HDR & Panorama, System Health) |
 
+  **🔎 Find a tool…**, above the tabs, finds any tool by name (type "vignette", "watermark",
+  "exposure"…): picking one opens its tab, sub-tab and section, scrolls the sidebar to it and
+  flashes it.
+
   Every section shows **● modified** next to its title (or a ● in its expander's title) as soon as
   one of its controls differs from the default, so you can see at a glance where a photo has been
   edited; most sections also have their own **↺ Reset** button.
 - **The page** — the photo, fitted to the window, with two rows of controls above it (Undo,
-  Redo, Reset, History; zoom, 1:1, Before/After, Grid, Split View, Original) and the histogram, a
-  clipping warning and the Save button below it, whichever tool tab is open.
+  Redo, Reset, History, ⌨️ keyboard shortcuts; zoom, 1:1, Before/After, Grid, Split View, Original)
+  and the histogram, a clipping warning and the Save button below it, whichever tool tab is open.
+- **Color profile notice** — a photo with an embedded profile other than sRGB (Adobe RGB, Display
+  P3, ProPhoto…) gets a line above it naming the profile: Photo Studio edits in sRGB, so colors
+  outside sRGB are clipped (export as Display P3 to keep more of them). **Show clipped colors**
+  opens 🎯 Soft Proof with the out-of-gamut pixels shown. Photoshop asks this in a dialog
+  ("Embedded Profile Mismatch"); here the conversion is automatic and only reported.
 - **Tools that work on the photo** — like Photoshop, the crop box, 🌀 Liquify, 🖌 Paint and 🎨 Edit
-  Painting, 🪄 Magic Wand, 🎯 White Balance and the ✒ Pen draw over the photo itself, at full
-  size. When the open tab has one, a row **🖼 Photo | ✂ Crop | 🌀 Liquify …** appears above the
-  image: pick a tool to work on the photo, or **🖼 Photo** to go back to the normal view. Each of
-  these tools also has a **✏️ … on the photo** button where it sits in the sidebar.
+  Painting, the 🩹 Repair brush, 🪄 Magic Wand, 🎯 White Balance, the ✒ Pen and the mask and
+  removal previews draw over the photo itself, at full size. When the open tab has one, a row
+  **🖼 Photo | ✂ Crop | 🌀 Liquify …** appears above the image: pick a tool to work on the photo,
+  or **🖼 Photo** to go back to the normal view. A line under that row says what to do with the
+  tool and where its settings are. Each of these tools also has a **✏️ … on the photo** button
+  where it sits in the sidebar.
 
 On a narrow window (a phone) the sidebar starts hidden and opens over the photo, and the controls
 above the photo fold into a compact grid so the photo stays near the top of the screen.
@@ -214,7 +225,8 @@ tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color
   `--curve-green`, `--curve-blue` (same `x:y,...` format as `--curve`).
 - **🎯 Soft Proof: Gamut Warning** — for a photo with an embedded color profile, highlights in
   magenta any pixel that gets clipped when converted into this app's sRGB working space. Not a
-  simulation of a specific printer profile.
+  simulation of a specific printer profile. The color profile notice above the photo opens it
+  directly.
 
 ## 7. Detail (🔬 Detail), Presence (☼ Basic) and Effects (✨ Effects)
 
@@ -255,8 +267,17 @@ tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color
 
 ## 8. Repair — object removal (◉ Local → 🩹 Repair)
 
-Select a blemish or unwanted object with the same selection tools as Masks (see
-[Selection Types](#selection-types-masks--repair) below), and it's repaired by the chosen method:
+Paint over a blemish or unwanted object — or select it with any of the other selection tools
+Masks has (see [Selection Types](#selection-types-masks--repair) below) — and it's repaired by the
+chosen method:
+
+- **🩹 Repair brush** — Repair starts on it (Selection Type: Painted). Pick **🩹 Repair brush** above
+  the photo (or **✏️ 🩹 Repair brush on the photo** in the sidebar) and paint over what should go,
+  at full size: a ring under the pointer shows the brush size (**[** / **]** change it),
+  **↶ Undo stroke** or **Ctrl+Z** takes back the last stroke, and **🧹 Erase** / **✖ Clear** fix the
+  painting. **🩹 Remove** adds it as a selection and goes back to the photo with the area already
+  removed. Paint again for the next spot; each painting is its own selection, which can be turned
+  off, edited or removed in the list below.
 
 - **Repair Method** — **Fill** paints the area over from its edges (inpainting): good for wires and
   small objects on smooth areas such as sky. **Heal** looks for the best-matching patch nearby,
@@ -265,8 +286,9 @@ Select a blemish or unwanted object with the same selection tools as Masks (see
   or one too large for a clean nearby patch, is filled instead.
 - **Repair Softness** — how far the repair blends into the surrounding area; higher softens a wider
   edge. Disabled until at least one selection is enabled.
-- **👁️ Preview removal selection** — shows the selected region in yellow (Masks' own preview uses
-  red, so the two are never confused).
+- **👁️ Preview removal selection** — shows the selected region in yellow over the photo
+  (**🟨 Removal preview**; Masks' own preview, **🟥 Mask preview**, uses red, so the two are never
+  confused).
 
 ## 9. Layers (◈ Layers)
 
@@ -540,7 +562,9 @@ Always visible above/below the preview, on every tab:
   reuses that render instead of computing it again.
 - **🔍 1:1 / Fit (Z)**, **👁 Before / After (B)**, **# Grid (G)** — one-click toggles, also on the
   keyboard.
-- **⇄ Split View** — a draggable before/after comparison slider over the same zoomed/panned view.
+- **⇄ Split View** — a before/after comparison over the same zoomed/panned view: drag on the photo
+  (or the slider) to move the divider; **↕** splits it top and bottom instead of side by side
+  (**↔** goes back), remembered in this browser.
 - **👁️ Original** — shows the untouched source image instead of your edit (disabled while Split
   View is active, since that already shows both).
 - **🧭 Guides & Grid** — a composition aid, purely visual: it's never sent through the processing
@@ -704,6 +728,8 @@ python -m app --input photo.jpg --output clean.jpg --remove-mask object-mask.png
 
 ## Keyboard Shortcuts Reference
 
+The same list is in the app: **⌨️** at the right end of the controls above the photo.
+
 | Shortcut | Action | Where |
 |---|---|---|
 | Ctrl+Z | Undo | Anywhere |
@@ -716,6 +742,7 @@ python -m app --input photo.jpg --output clean.jpg --remove-mask object-mask.png
 | ← ↑ → ↓ / Alt+arrows / Delete | Move the selected point / its curve handle / remove it | Layers tab, Pen editor |
 | ↑ / ↓ (Shift = 10×) | Raise / lower the focused curve point | 🎨 Curves & Color, curve editor (Tab to a point) |
 | [ / ] (Shift = 10×) | Smaller / larger brush | Masks & Repair, paint editor |
+| Ctrl+Z | Undo the last stroke | Masks & Repair, paint editor |
 | ← ↑ → ↓ / Alt+arrows | Move the last radial or gradient / only its end point | Masks & Repair, paint editor |
 | Drag, or ← ↑ → ↓ | Pan the zoomed view (Shift = half a screen) | Canvas at 100 % and above |
 | 1–5 | Rate current photo | Library Catalog, Rate & Flag panel |

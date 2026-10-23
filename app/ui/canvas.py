@@ -11,16 +11,19 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import uuid
 
 import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image
 
+from app.color_profiles import is_srgb_name, profile_name
 from app.professional_color import clipping_warning_overlay
 from app.professional_tools import GRID_PRESETS, compute_histogram, compute_waveform, draw_guides_and_grid, draw_viewport_box, preview_image, zoom_preview, zoom_viewport
 from app.refine_preview import POLL_SECONDS as REFINE_POLL_SECONDS
 from app.ui.processing import refine_status_view
+from app.ui.tool_search import jump_to
 from app.ui.state import (
     CANVAS_MODE_KEY, CANVAS_PHOTO, RECIPE_DEFAULTS, build_on_canvas, build_recipe, consume_new_commit, request_rerun,
     run_fragment, take_canvas_editors,
@@ -93,6 +96,28 @@ def _snapshots_popover(history) -> None:
 HISTORY_LIST_STEPS = 30
 
 
+# Every keyboard shortcut, for the "⌨" list (Photoshop's Keyboard Shortcuts). Keep in sync with the
+# shortcut= buttons, app/ui/static/library_shortcuts.html and the editors' key handlers.
+SHORTCUTS = (
+    ("Ctrl+Z", "Undo"), ("Ctrl+Shift+Z", "Redo"), ("Ctrl+E", "Save (export) the photo"),
+    ("Z", "1:1 / Fit"), ("B", "Before / after"), ("G", "Composition grid"),
+    ("[ / ]", "Brush size (Paint, Repair brush)"), ("Ctrl+Z", "Undo the last stroke (Paint, Repair brush)"),
+    ("Arrows", "Nudge the crop box, a Pen point, the Liquify brush, the last radial or gradient (Shift: x10)"),
+    ("Space", "Liquify: apply the brush where it is"), ("Delete", "Pen: remove the selected point"),
+    ("1-5 / 0", "Library: rate / clear the rating"), ("6-9", "Library: color label"), ("X", "Library: reject"),
+    ("← / →", "Library: previous / next photo"),
+)
+
+
+def _shortcuts_popover() -> None:
+    # "⌨" plus VS16 (U+FE0F): the emoji glyph -- the bare character has none in the UI font.
+    with st.popover("⌨️", help=t("Keyboard shortcuts"), use_container_width=True):
+        st.markdown(t("**Keyboard shortcuts**"))
+        rows = [f"| `{keys}` | {t(action)} |" for keys, action in SHORTCUTS]
+        st.markdown("\n".join([f"| {t('Keys')} | {t('Action')} |", "|---|---|", *rows]))
+        st.caption(t("Single-letter keys work when you aren't typing in a field."))
+
+
 def _history_list(history) -> None:
     """The Undo steps as a list (F13): click one to jump there, like pressing Undo/Redo until it."""
     st.divider()
@@ -122,7 +147,7 @@ def canvas_header(ctx) -> None:
     # into one row, the buttons shrank to ~30 px and the native shortcut hints printed over them.
     # Keyed for the stylesheet: on a phone its columns wrap into a compact grid, not one per line.
     with st.container(key="canvas-controls"):
-        top_c1, top_undo, top_redo, top_reset, top_snap = st.columns([1.7, 0.7, 0.7, 0.75, 0.8], gap="small", vertical_alignment="center")
+        top_c1, top_undo, top_redo, top_reset, top_snap, top_keys = st.columns([1.7, 0.7, 0.7, 0.75, 0.8, 0.42], gap="small", vertical_alignment="center")
         with top_c1:
             # html.escape(): the file name is user-controlled and lands in an attribute and in markup.
             live_view_label = html.escape(f"{ctx.upload_name} ({ctx.output_size[0]}×{ctx.output_size[1]})")
@@ -145,6 +170,8 @@ def canvas_header(ctx) -> None:
                 request_rerun()
         with top_snap:
             _snapshots_popover(history)
+        with top_keys:
+            _shortcuts_popover()
 
         # Keyboard shortcuts (native, F11): Z = 1:1 / Fit, B = before/after, G = grid. Ctrl+Z /
         # Ctrl+Shift+Z are on Undo/Redo, Ctrl+E on the Save button.
@@ -160,13 +187,38 @@ def canvas_header(ctx) -> None:
         key_c2.button(t("👁 Before / After"), key="kb-orig-btn", on_click=_toggle_original, shortcut="B", use_container_width=True, help=t("Show the original (B)"))
         key_c3.button(t("# Grid"), key="kb-grid-btn", on_click=_toggle_grid, shortcut="G", use_container_width=True, help=t("Toggle the composition grid (G)"))
         with split_c:
-            compare_mode = st.checkbox(t("⇄ Split View"), value=False, key="cv-split", help=t("Drag to compare before/after"))
+            compare_mode = st.checkbox(t("⇄ Split View"), value=False, key="cv-split", help=t("Drag on the photo to compare before/after; ↕ in the view splits it top and bottom"))
         with orig_c:
             st.checkbox(t("👁️ Original"), value=False, key="cv-orig", disabled=compare_mode)
 
     # Refine-on-pause status (P1): a fragment that polls only while a full-resolution render is
     # pending for a proxy preview, so a settled photo costs nothing.
     st.fragment(refine_status_view, run_every=REFINE_POLL_SECONDS if ctx.refine_tracker.pending() else None)()
+
+
+def _show_clipped_colors() -> None:
+    jump_to("🎯 Soft Proof: Gamut Warning")
+    st.session_state["gamut-warning-toggle"] = True
+
+
+def profile_notice(ctx) -> None:
+    """Photoshop stops to ask what to do with a photo whose embedded profile isn't its working space
+    ("Embedded Profile Mismatch"). Here the conversion is automatic (run_pipeline()'s ICC step), so
+    it's said above the photo instead, without a dialog: which profile, that editing happens in
+    sRGB, and a button to Soft Proof, which shows what that clips."""
+    name = profile_name(ctx.source.info.get("icc_profile"))
+    if name is None or is_srgb_name(name):
+        return
+    with st.container(key="profile-notice"):
+        text_col, button_col = st.columns([5, 1.5], vertical_alignment="center")
+        if not name:
+            text_col.caption(t("🎨 This photo's color profile couldn't be read, so its colors are shown as sRGB."))
+            return
+        # The name comes from the file: escaped, so it can't add Markdown of its own.
+        shown_name = re.sub(r"([\\`*_{}\[\]()#+\-.!|<>~:])", r"\\\1", name)
+        text_col.caption(t("🎨 Color profile **{0}**: edited in sRGB, so colors outside sRGB are clipped. Export as Display P3 to keep more of them.").format(shown_name))
+        button_col.button(t("Show clipped colors"), key="profile-proof-btn", on_click=_show_clipped_colors, use_container_width=True,
+                          help=t("Opens Soft Proof (🎨 Curves & Color) with the out-of-gamut pixels shown."))
 
 
 def guides_panel() -> None:
@@ -311,6 +363,28 @@ def scopes_panel(edited_image: Image.Image) -> None:
 CANVAS_EDITOR_BOX = (1000, 600)
 
 
+# The status line over a tool that works on the photo (Photoshop's per-tool status-bar hint): what to
+# do, and where its settings are -- the sidebar may be collapsed. Keyed by the editor's label.
+CANVAS_HINTS = {
+    "✂ Crop": ("Drag a corner to resize the box, drag inside it to move it", "⛶ Geometry › Crop / Aspect Ratio"),
+    "🌀 Liquify": ("Drag on the photo to warp it", "⛶ Geometry › 🌀 Liquify"),
+    "🖌 Paint": ("Paint what to select, then click Add to selections", "◉ Local › Masks"),
+    "🩹 Repair brush": ("Paint over what to remove, then click Remove", "◉ Local › 🩹 Repair"),
+    "🎨 Edit Painting": ("Paint or erase, then click Update Painting", "◉ Local"),
+    "🪄 Magic Wand": ("Click a point to select similar colors around it", "◉ Local"),
+    "🎯 White Balance": ("Click a spot that should be neutral gray or white", "☼ Basic › Color"),
+    "✒ Pen": ("Click to add points; drag a point to move it, its handle to curve the path", "◈ Layers"),
+    "🟨 Removal preview": ("Yellow = what will be removed", "◉ Local › 🩹 Repair"),
+    "🟥 Mask preview": ("Highlighted = selected by the combined mask", "◉ Local › Masks"),
+}
+
+
+def canvas_hint(label: str) -> None:
+    hint = CANVAS_HINTS.get(re.sub(r" \d+$", "", label))  # a second editor of a kind is "<label> 2"
+    if hint:
+        st.caption(t("{0}. Its settings: {1} · 🖼 Photo goes back to the normal view.").format(t(hint[0]), t(hint[1])))
+
+
 def canvas_editor_choice(editors: list) -> str:
     """"On the photo": the photo itself, or one of the open tab's photo editors (crop, liquify,
     paint, magic wand, pen...), drawn over the photo instead of at sidebar width -- Photoshop's
@@ -330,12 +404,14 @@ def canvas_editor_choice(editors: list) -> str:
 
 def render_canvas_column(ctx, oriented_source: Image.Image) -> None:
     canvas_header(ctx)
+    profile_notice(ctx)
     guides_panel()
     editors = take_canvas_editors()
     choice = canvas_editor_choice(editors)
     if choice == CANVAS_PHOTO:
         run_fragment(canvas_view, ctx.edited_image, oriented_source)
     else:
+        canvas_hint(choice)
         markup, height = build_on_canvas(dict(editors)[choice], CANVAS_EDITOR_BOX)
         components.html(markup, height=height)
     run_fragment(scopes_panel, ctx.edited_image)

@@ -348,3 +348,39 @@ def test_canvas_controls_are_keyed_for_the_phone_layout():
     root = Path(__file__).resolve().parents[1]
     assert 'st.container(key="canvas-controls")' in (root / "app" / "ui" / "canvas.py").read_text(encoding="utf-8")
     assert ".st-key-canvas-controls" in (root / "app" / "ui" / "static" / "theme.css").read_text(encoding="utf-8")
+
+
+def test_find_a_tool_points_at_real_widgets_and_tabs():
+    """Every place in Find a tool names a tab that exists and a widget/expander key the panels
+    really render (a renamed key would make the jump scroll nowhere)."""
+    import re
+    from pathlib import Path
+
+    from app.controls import CONTROLS
+    from app.ui.tool_search import PLACES
+    from tests.test_frontend_unified_app import TOOL_TABS
+
+    root = Path(__file__).resolve().parents[1]
+    source = "\n".join(path.read_text(encoding="utf-8") for path in (root / "app" / "ui").rglob("*.py"))
+    keys = set(re.findall(r'key="([^"{]+)"', source)) | {control.widget_key for control in CONTROLS if control.widget_key}
+    keys |= {f"{prefix}-new-kind" for prefix in ("m", "rm")} | {"sec-hsl-red"}  # built from a prefix / band name
+    for name, place in PLACES.items():
+        assert place.tab in TOOL_TABS, name
+        for key in (place.anchor, place.expander):
+            assert key is None or key in keys, (name, key)
+
+
+def test_shortcut_list_and_canvas_hints_cover_every_shortcut_and_photo_tool():
+    import re
+    from pathlib import Path
+
+    from app.ui.canvas import CANVAS_HINTS, SHORTCUTS
+    from app.ui.tabs.local import MASK_PREVIEW, REMOVAL_PREVIEW
+
+    root = Path(__file__).resolve().parents[1]
+    source = "\n".join(path.read_text(encoding="utf-8") for path in (root / "app" / "ui").rglob("*.py"))
+    listed = {keys for keys, _action in SHORTCUTS}
+    for shortcut in set(re.findall(r'shortcut="([^"]+)"', source)):
+        assert shortcut in listed, shortcut
+    labels = set(re.findall(r'canvas_label="([^"]+)"', source)) | {MASK_PREVIEW, REMOVAL_PREVIEW, "🩹 Repair brush"}
+    assert labels <= set(CANVAS_HINTS), labels - set(CANVAS_HINTS)

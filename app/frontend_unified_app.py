@@ -24,7 +24,7 @@ from app.edit_history import EditHistory
 from app.geometry import orient
 from app.observability import configure_logging
 from app.raw_import import uploader_types
-from app.ui import canvas, export_panel, processing
+from app.ui import canvas, export_panel, processing, tool_search
 from app.ui.context import EditorContext
 from app.ui.project_io import open_launch_file, open_project_bytes
 from app.ui.state import build_recipe, consume_rerun_request, restore_recipe_to_state, set_tab_visible, tab_open, take_canvas_editors
@@ -182,6 +182,7 @@ take_canvas_editors()  # the open tab's photo editors register again below (an i
 
 with tools_col:
     st.markdown(t('<div class="panel-header-title">🛠️ Tool Workspace</div>'), unsafe_allow_html=True)
+    tool_search.find_tool_box()
     # The nine tool tabs as an icon strip (Photoshop's toolbar): one row in the sidebar, names on
     # hover and under the strip. The labels themselves stay the tabs' values.
     st.markdown(icon_tabs_style("tool-tab", [tuple(t(label).split(" ", 1)) for label in TOOL_TABS]), unsafe_allow_html=True)
