@@ -17,7 +17,7 @@ from streamlit.testing.v1 import AppTest
 from app import backend_client, refine_preview
 from app.backend import app as flask_app
 from app.refine_preview import RefineTracker
-from app.ui_editors import KEY_COMMIT_DELAY_MS, _crop_editor_html, _curve_editor_html, _paint_editor_html, _pan_viewer_html, _pen_editor_html
+from app.ui_editors import KEY_COMMIT_DELAY_MS, _before_after_html, _crop_editor_html, _curve_editor_html, _paint_editor_html, _pan_viewer_html, _pen_editor_html
 from tests.test_frontend_unified_app import APP_PATH, _fake_process_via_backend
 
 
@@ -432,3 +432,49 @@ def test_curve_extra_points_never_share_an_x_with_another_point(tmp_path):
     for points in (added, dragged):
         xs = [x for x, _ in points]
         assert len(set(xs)) == len(xs) and not fixed_x & set(xs)
+
+
+@needs_node
+def test_paint_undoes_strokes_and_shows_the_brush_size(tmp_path):
+    """Photoshop-style stroke undo (the button and Ctrl+Z) and the brush outline under the pointer."""
+    html = _paint_editor_html(_background(), "rm", commit_label="🩹 Remove")[0]
+    scenario = """
+      const canvas = document.getElementById('mask-canvas'), undoBtn = document.getElementById('undo-btn');
+      out.undoBeforeAnyStroke = undoBtn.disabled;
+      canvasCalls.length = 0;
+      canvas.dispatch('pointermove', {clientX: 50, clientY: 50});
+      out.ringDrawn = canvasCalls.includes('arc') && canvasCalls.includes('stroke');
+      canvas.dispatch('pointerdown', {clientX: 50, clientY: 50});
+      canvas.dispatch('pointermove', {clientX: 80, clientY: 60});
+      canvas.dispatch('pointerup', {clientX: 80, clientY: 60});
+      out.undoAfterStroke = undoBtn.disabled;
+      canvasCalls.length = 0;
+      out.ctrlZPrevented = key(document.getElementById('paint-root'), 'z', {ctrlKey: true}).defaultPrevented;
+      out.restored = canvasCalls.includes('putImageData');
+      out.undoAfterUndo = undoBtn.disabled;
+    """
+    out = _run_editor(tmp_path, html, scenario, "document.getElementById('undo-btn').disabled = true;  // as in paint.html")
+    assert out["undoBeforeAnyStroke"] is True and out["undoAfterStroke"] is False
+    assert out["ringDrawn"] and out["ctrlZPrevented"] and out["restored"]
+    assert out["undoAfterUndo"] is True  # one stroke, one undo
+    assert "🩹 Remove" in html
+
+
+@needs_node
+def test_before_after_splits_side_by_side_or_top_and_bottom(tmp_path):
+    before, after = Image.new("RGB", (60, 40), (0, 0, 0)), Image.new("RGB", (60, 40), (255, 255, 255))
+    html, height = _before_after_html(before, after)
+    assert height == 600 and "max-width:900px" in html  # fitted to the photo's place, not cut off
+    scenario = """
+      const root = document.getElementById('ba-root'), before = document.getElementById('ba-before');
+      const range = document.getElementById('ba-range');
+      root.dispatch('pointerdown', {clientX: 100, clientY: 150, target: root});
+      out.side = [range.value, before.style.clipPath, root.className];
+      document.getElementById('ba-dir').dispatch('click');
+      root.dispatch('pointerdown', {clientX: 100, clientY: 75, target: root});
+      out.top = [range.value, before.style.clipPath, root.className];
+    """
+    out = _run_editor(tmp_path, html, scenario)
+    # The fake layout is 400x300: x=100 is 25 % across, y=75 is 25 % down.
+    assert out["side"][0] == 25 and out["side"][1] == "inset(0 75% 0 0)" and "ba-h" in out["side"][2]
+    assert out["top"][0] == 25 and out["top"][1] == "inset(0 0 75% 0)" and "ba-v" in out["top"][2]

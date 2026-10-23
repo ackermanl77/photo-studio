@@ -2129,25 +2129,37 @@ def test_lens_perspective_is_included_in_reset():
 # true of the Library Catalog's keyboard shortcuts (see "Known Issues" in docs/PROJECT_STATUS.md).
 
 
+def _canvas_iframe_images(at) -> list[str]:
+    """The base64 PNGs inside the components.html() iframes on the page (what an on-canvas view
+    draws: AppTest has no DOM, but the iframe's srcdoc is in its proto)."""
+    return [image for frame in at.get("iframe") for image in re.findall(r"data:image/png;base64,([A-Za-z0-9+/=]+)", frame.proto.srcdoc)]
+
+
 def test_mask_overlay_preview_reflects_lens_distortion_correction():
     """Same bug class as test_crop_preview_reflects_lens_distortion_correction, but for the
-    Masks tab's "Preview combined mask overlay" debug view, which used to build the overlay
-    from the raw `source` regardless of the Lens tab's sliders."""
+    Masks tab's "Preview combined mask overlay" view, which used to build the overlay from the raw
+    `source` regardless of the Lens tab's sliders. Ticking it now draws it over the photo."""
+    def run_in_local_tab():
+        open_tab(at, "◉ Local")  # the tab must be open for its views to be offered over the photo
+        at.run(timeout=30)
+
     at = run_with_uploaded_image(color=(80, 80, 80))
     at.selectbox(key="m-new-kind").set_value("Radial")
-    at.run(timeout=30)
+    run_in_local_tab()
     at.button(key="m-add-btn").click()
-    at.run(timeout=30)
+    run_in_local_tab()
     at.checkbox(key="m-preview-overlay").set_value(True)
-    at.run(timeout=30)
-    baseline = [img.value[0] for img in at.image if img.captions and img.captions[0] == "Highlighted = selected by the combined mask"][0]
+    run_in_local_tab()
+    assert at.session_state["canvas-mode"] == "🟥 Mask preview"
+    baseline = _canvas_iframe_images(at)
+    assert baseline
 
     at.slider(key="lens-distortion").set_value(80)
-    at.run(timeout=30)
+    run_in_local_tab()
 
     assert not at.exception
-    overlay_after = [img.value[0] for img in at.image if img.captions and img.captions[0] == "Highlighted = selected by the combined mask"][0]
-    assert overlay_after != baseline
+    assert at.session_state["canvas-mode"] == "🟥 Mask preview"
+    assert _canvas_iframe_images(at) != baseline
 
 
 def test_rgb_curve_defaults_to_identity_and_is_off():
@@ -2571,3 +2583,69 @@ def test_every_streamlit_data_cache_is_bounded():
     decorators = re.findall(r"@st\.cache_data\((.*?)\)\n", source)
     assert decorators
     assert all("max_entries" in args for args in decorators)
+
+
+def test_repair_starts_on_the_repair_brush_and_shows_the_result_on_the_photo():
+    """Repair is mostly painting over something: its selection type starts on the paint editor,
+    named a repair brush, and adding a painting returns the canvas to the photo with it removed."""
+    at = run_with_uploaded_image(color=(80, 80, 80))
+    assert at.selectbox(key="rm-new-kind").value == "Painted"
+    baseline = canvas_hash(at)
+    open_tab(at, "◉ Local", "🩹 Repair")
+    at.run(timeout=30)
+    assert "to-canvas-rm-paint" in [button.key for button in at.button]
+
+    at.session_state["canvas-mode"] = "🩹 Repair brush"
+    open_tab(at, "◉ Local", "🩹 Repair")
+    at.run(timeout=30)
+    assert at.session_state["canvas-mode"] == "🩹 Repair brush"
+    assert any("🩹 Remove" in frame.proto.srcdoc for frame in at.get("iframe"))
+
+    at.text_area(key="rm-paint-data").set_value(painted_mask_base64())
+    open_tab(at, "◉ Local", "🩹 Repair")
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["removal_mask_layers"][0]["kind"] == "Painted"
+    assert at.session_state["canvas-mode"] == "🖼 Photo"
+    assert canvas_hash(at) != baseline
+
+
+def test_find_a_tool_opens_its_tab_and_scrolls_to_it():
+    at = run_with_uploaded_image()
+    at.selectbox(key="find-tool").set_value("Remove Objects")
+    at.run(timeout=30)
+
+    assert not at.exception
+    assert at.session_state["tool-tab"] == "◉ Local" and at.session_state["local-tab"] == "🩹 Repair"
+    assert at.selectbox(key="find-tool").value is None  # ready for the next search
+    assert any(".st-key-" in frame.proto.srcdoc and '"rm-new-kind"' in frame.proto.srcdoc for frame in at.get("iframe"))
+
+    at.selectbox(key="find-tool").set_value("Batch Processor")
+    at.run(timeout=30)
+    assert at.session_state["tool-tab"] == "✦ Presets & Library" and at.radio(key="more-mode").value == "Batch Processor"
+
+
+def _upload_with_profile(icc: bytes | None):
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 30), (200, 60, 40)).save(buf, format="PNG", **({"icc_profile": icc} if icc else {}))
+    at.file_uploader[0].set_value(("photo.png", buf.getvalue(), "image/png"))
+    at.run(timeout=30)
+    return at
+
+
+def test_a_wide_gamut_profile_is_named_above_the_photo_with_a_way_to_proof_it():
+    """Photoshop stops at "Embedded Profile Mismatch"; here the conversion is automatic, and said."""
+    from app.color_profiles import display_p3_icc_bytes
+
+    at = _upload_with_profile(display_p3_icc_bytes())
+    assert any("Display P3" in caption.value and "sRGB" in caption.value for caption in at.caption)
+    at.button(key="profile-proof-btn").click()
+    at.run(timeout=30)
+    assert not at.exception
+    assert at.session_state["tool-tab"] == "🎨 Curves & Color" and at.checkbox(key="gamut-warning-toggle").value is True
+
+    plain = _upload_with_profile(None)
+    assert "profile-proof-btn" not in [button.key for button in plain.button]

@@ -169,6 +169,27 @@ def output_icc(color_space: str, current_icc: bytes | None) -> bytes | None:
 WORKING_SPACES = COLOR_SPACES
 
 
+@lru_cache(maxsize=8)
+def profile_name(icc: bytes | None) -> str | None:
+    """An embedded profile's name (its ICC description), "" when the bytes aren't a readable profile,
+    None when there are none."""
+    if not icc:
+        return None
+    import io
+
+    from PIL import ImageCms
+
+    try:
+        return ImageCms.getProfileDescription(ImageCms.ImageCmsProfile(io.BytesIO(icc))).strip()
+    except (OSError, ValueError, TypeError, ImageCms.PyCMSError):
+        return ""
+
+
+def is_srgb_name(name: str) -> bool:
+    """Whether a profile name is an sRGB profile ("sRGB IEC61966-2.1", "sRGB built-in", ...)."""
+    return "srgb" in name.lower().replace(" ", "")
+
+
 def is_display_p3_icc(icc: bytes | None) -> bool:
     """True when `icc` is this module's own Display P3 profile -- how app.export recognises pixels
     the pipeline already rendered in P3 (and must not convert from sRGB a second time)."""

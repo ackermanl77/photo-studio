@@ -51,7 +51,8 @@ footer { visibility: hidden; }
         width: auto !important;
         min-width: 0 !important;
     }
-    .st-key-canvas-controls [data-testid="stHorizontalBlock"]:has(.canvas-live-view) > [data-testid="stColumn"] { flex-basis: calc(25% - 0.35rem) !important; }
+    .st-key-canvas-controls [data-testid="stHorizontalBlock"]:has(.canvas-live-view) > [data-testid="stColumn"] { flex-basis: calc(25% - 1.25rem) !important; }
+    .st-key-canvas-controls [data-testid="stHorizontalBlock"]:has(.canvas-live-view) > [data-testid="stColumn"]:last-child { flex: 0 0 3.4rem !important; }
     .st-key-canvas-controls [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.canvas-live-view) { flex-basis: 100% !important; }
     .st-key-canvas-controls button { padding-left: 0.3rem; padding-right: 0.3rem; }
     .st-key-canvas-controls kbd { display: none; }
@@ -175,6 +176,21 @@ footer { visibility: hidden; }
 .st-key-m-wand-hidden, .st-key-rm-wand-hidden, .st-key-wb-wand-hidden,
 [class*="-paint-hidden"], [class*="l-path-"][class*="-hidden"] {
     display: none !important;
+}
+
+/* Streamlit DOM: the "⌨️" shortcuts button (the header's last column) is narrow -- with the default
+   padding its icon was clipped behind the popover's chevron. */
+.st-key-canvas-controls [data-testid="stHorizontalBlock"]:has(.canvas-live-view) > [data-testid="stColumn"]:last-child [data-testid="stPopoverButton"] {
+    padding-left: 0.3rem; padding-right: 0.3rem;
+}
+
+/* Streamlit DOM: Find a tool (app/ui/tool_search.py) -- its one-shot scroll script's iframe takes no
+   room (still loaded and run: not display:none), and the tool it jumped to flashes. */
+.st-key-find-scroll { position: absolute; width: 0; height: 0; overflow: hidden; }
+.ps-find-flash { animation: ps-find-flash 1.8s ease-out; border-radius: 6px; }
+@keyframes ps-find-flash {
+    0%, 40% { box-shadow: 0 0 0 2px var(--ps-accent); }
+    100% { box-shadow: 0 0 0 2px transparent; }
 }
 
 /* Streamlit DOM: Undo/Redo keep their label at any width -- their native shortcut hint (<kbd>)

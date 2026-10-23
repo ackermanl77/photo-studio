@@ -25,13 +25,30 @@
     erasing = !erasing;
     e.currentTarget.classList.toggle('active', erasing);
   });
-  document.getElementById('clear-btn').addEventListener('click', () => { ctx.clearRect(0, 0, W, H); lastShape = null; pctx.clearRect(0, 0, W, H); });
+  // Stroke undo: the mask as it was before each stroke, shape or Clear (the last 20).
+  const undoBtn = document.getElementById('undo-btn');
+  const history = [];
+  function remember() {
+    history.push(ctx.getImageData(0, 0, W, H));
+    if (history.length > 20) history.shift();
+    undoBtn.disabled = false;
+  }
+  function undo() {
+    if (!history.length) return;
+    ctx.putImageData(history.pop(), 0, 0);
+    undoBtn.disabled = !history.length;
+    lastShape = null;
+    pctx.clearRect(0, 0, W, H);
+  }
+  undoBtn.addEventListener('click', undo);
+  document.getElementById('clear-btn').addEventListener('click', () => { remember(); ctx.clearRect(0, 0, W, H); lastShape = null; pctx.clearRect(0, 0, W, H); });
   const sizeInput = document.getElementById('brush-size');
   const sizeLabel = document.getElementById('brush-size-label');
   function setBrushSize(value) {
     brushSize = Math.max(Number(sizeInput.min), Math.min(Number(sizeInput.max), value));
     sizeInput.value = brushSize;
     sizeLabel.textContent = brushSize;
+    if (ring) drawRing(ring[0], ring[1]);
   }
   sizeInput.addEventListener('input', (e) => setBrushSize(Number(e.target.value)));
 
@@ -62,6 +79,11 @@
   const ARROWS = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]};
   document.addEventListener('keydown', (e) => {
     if (e.target && e.target.tagName === 'INPUT') return;
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      undo();
+      return;
+    }
     if (e.key === '[' || e.key === ']') {
       e.preventDefault();
       setBrushSize(brushSize + (e.key === ']' ? 1 : -1) * (e.shiftKey ? 10 : 2));
@@ -75,6 +97,19 @@
     lastShape.x1 += move[0] * step; lastShape.y1 += move[1] * step;
     repaintShape();
   });
+
+  // The brush's outline under the pointer, so its size is visible before painting.
+  let ring = null;
+  function drawRing(x, y) {
+    ring = [x, y];
+    outlineShape();
+    if (tool !== 'brush' || drawing) return;
+    pctx.setLineDash([]); pctx.lineWidth = 1.5;
+    pctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    pctx.beginPath(); pctx.arc(x, y, brushSize + 1, 0, Math.PI * 2); pctx.stroke();
+    pctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    pctx.beginPath(); pctx.arc(x, y, brushSize, 0, Math.PI * 2); pctx.stroke();
+  }
 
   function toCanvasXY(e) {
     const rect = maskCanvas.getBoundingClientRect();
@@ -115,13 +150,14 @@
     [startX, startY] = toCanvasXY(e);
     lastX = startX; lastY = startY;
     lastShape = null;
+    remember();
     beforeShape = tool === 'brush' ? null : ctx.getImageData(0, 0, W, H);
     if (tool === 'brush') paintDab(startX, startY);
     e.preventDefault();
   });
   maskCanvas.addEventListener('pointermove', (e) => {
-    if (!drawing) return;
     const [x, y] = toCanvasXY(e);
+    if (!drawing) { drawRing(x, y); return; }
     if (tool === 'brush') {
       paintDab(x, y);
       lastX = x; lastY = y;
@@ -152,7 +188,7 @@
     outlineShape();
   }
   maskCanvas.addEventListener('pointerup', endStroke);
-  maskCanvas.addEventListener('pointerleave', endStroke);
+  maskCanvas.addEventListener('pointerleave', (e) => { endStroke(e); ring = null; outlineShape(); });
 
   document.getElementById('commit-btn').addEventListener('click', () => {
     const base64 = maskCanvas.toDataURL('image/png').split(',')[1];
