@@ -202,9 +202,11 @@ on:
 6. Fragments: panning at 200 % and toggling the waveform/clipping scopes rerun only the canvas; the
    refine-on-pause status line still swaps in the full-resolution render.
 7. `shortcut=` buttons (Ctrl+Z, Ctrl+Shift+Z, Ctrl+E, Z, B, G) and the Library's 1-5/0/X/arrow keys.
-   Find a tool still switches tabs through `st.session_state["tool-tab"]` (tabs with `on_change="rerun"`),
-   and its one-shot script still finds the sidebar (`[data-testid="stSidebar"] .st-key-<key>`), opens an
-   expander by clicking its `<summary>` and flashes the place; the ⌨️ button's icon isn't clipped.
+   Find a tool and the remembered layout (`app.ui.layout_memory`) still switch tabs through
+   `st.session_state["tool-tab"]` (tabs with `on_change="rerun"`); a reload still keeps the sidebar's
+   width (Streamlit's own `sidebarWidth` in localStorage); Find a tool's one-shot script still finds the
+   sidebar (`[data-testid="stSidebar"] .st-key-<key>`), opens an expander by clicking its `<summary>`
+   and flashes the place; the ⌨️ button's icon isn't clipped.
 8. The `--ps-*` colours: header, canvas background, export footer, and the editors' panels/handles.
 9. Then run the whole suite (AppTest catches API changes, not layout ones).
 

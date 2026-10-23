@@ -11,10 +11,18 @@ from app.image_processor import auto_enhance_recipe, scale_auto_enhance
 from app.professional_color import estimate_white_balance
 from app.professional_tools import preview_image
 from app.ui.processing import preset_thumbnails
-from app.ui.state import consume_new_commit, editor_box, request_rerun, section_header, section_label, section_reset_button, show_component, tab_visible
+from app.ui.state import (
+    RECIPE_DEFAULTS, CanvasAction, consume_new_commit, editor_box, request_rerun, section_header, section_label, section_reset_button,
+    show_component, tab_visible,
+)
 from app.ui.widgets import render_control
 from app.ui_editors import _wand_picker_html
 from app.i18n import t
+
+
+def _reset_white_balance() -> None:
+    """The white-balance picker's "↺ Reset" over the photo (a callback, through _pending_restore)."""
+    st.session_state["_pending_restore"] = {key: RECIPE_DEFAULTS[key] for key in ("temperature", "tint")}
 
 
 def auto_enhance_button(ctx) -> None:
@@ -64,7 +72,8 @@ def color_section(ctx) -> None:
     section_reset_button("color", "Color")
     with st.expander(t("🎯 Pick White Balance"), expanded=False, key="sec-pick-wb"):
         st.caption(t("Click a spot in the photo that should be neutral gray or white -- Temperature and Tint above are set to whatever would neutralize it. A starting point to fine-tune from, not a guaranteed perfect result."))
-        show_component(lambda: _wand_picker_html(preview_image(ctx.mask_source, editor_box()), "wb"), canvas_label="🎯 White Balance", slot_id="wb")
+        show_component(lambda: _wand_picker_html(preview_image(ctx.mask_source, editor_box()), "wb"), canvas_label="🎯 White Balance", slot_id="wb",
+                       actions=(CanvasAction("↺ Reset", "cv-act-wb-reset", _reset_white_balance, help="Temperature and Tint back to 0"),))
         with st.container(key="wb-wand-hidden"):
             wb_click_raw = st.text_area(t("White balance click"), key="wb-wand-data", label_visibility="collapsed")
         if consume_new_commit(wb_click_raw, "wb-wand-committed"):

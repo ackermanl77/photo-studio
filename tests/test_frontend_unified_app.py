@@ -2649,3 +2649,76 @@ def test_a_wide_gamut_profile_is_named_above_the_photo_with_a_way_to_proof_it():
 
     plain = _upload_with_profile(None)
     assert "profile-proof-btn" not in [button.key for button in plain.button]
+
+
+def test_an_opened_photo_is_listed_in_recent_files_and_reopens_from_the_start_screen():
+    """Photoshop's Home screen: the next session's start screen lists the photo, and opens it."""
+    from app import recent_files
+
+    first = run_with_uploaded_image(color=(30, 140, 90))
+    assert not first.exception
+    [entry] = recent_files.load()
+    assert entry["name"] == "photo.jpg" and entry["kind"] == "photo"
+
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    button = at.button(key=f"recent-open-{entry['id']}")
+    assert "photo.jpg" in button.label
+    button.click()
+    at.run(timeout=30)
+    assert not at.exception
+    assert at.session_state["restored_source_name"] == "photo.jpg" and canvas_hash(at) is not None
+    assert f"recent-open-{entry['id']}" in [b.key for b in at.button]  # and in the open bar while editing
+
+
+def test_the_sample_photo_is_not_listed_in_recent_files():
+    from app import recent_files
+
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.button(key="sample-photo-btn").click()
+    at.run(timeout=30)
+    assert not at.exception and recent_files.load() == []
+
+
+def test_the_bar_over_a_photo_tool_has_its_actions_and_done():
+    """Photoshop's contextual task bar: Liquify's undo over the photo, and Done back to the photo."""
+    at = run_with_uploaded_image()
+    at.session_state["liquify_strokes"] = [{"tool": "push", "size": 0.1, "strength": 0.5, "points": [[0.4, 0.4], [0.5, 0.5]]}]
+    open_tab(at, "⛶ Geometry")  # first, so "🌀 Liquify" is one of the "On the photo" choices
+    at.run(timeout=30)
+    at.session_state["canvas-mode"] = "🌀 Liquify"
+    open_tab(at, "⛶ Geometry")
+    at.run(timeout=30)
+    assert at.button(key="cv-act-liq-undo").disabled is False
+    at.button(key="cv-act-liq-undo").click()
+    open_tab(at, "⛶ Geometry")
+    at.run(timeout=30)
+    assert not at.exception and at.session_state["liquify_strokes"] == []
+
+    at.button(key="canvas-done-btn").click()
+    open_tab(at, "⛶ Geometry")
+    at.run(timeout=30)
+    assert at.session_state["canvas-mode"] == "🖼 Photo"
+
+
+def test_flip_view_mirrors_only_the_view():
+    at = run_with_uploaded_image()
+    before = canvas_hash(at)
+    at.checkbox(key="cv-mirror").set_value(True)
+    at.run(timeout=30)
+    assert not at.exception
+    assert any(img.captions and img.captions[0] == "Current Edited Image (flipped view)" for img in at.image)
+    assert at.session_state["cv-mirror"] is True and before is not None
+
+
+def test_the_open_tool_tab_is_remembered_for_the_next_session():
+    from app.settings import read_settings
+
+    at = run_with_uploaded_image()
+    open_tab(at, "◉ Local", "🩹 Repair")
+    at.run(timeout=30)
+    assert read_settings()["layout"]["tool-tab"] == "◉ Local"
+
+    again = run_with_uploaded_image()
+    assert again.session_state["tool-tab"] == "◉ Local" and again.session_state["local-tab"] == "🩹 Repair"

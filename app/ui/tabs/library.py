@@ -387,6 +387,7 @@ def merge_section() -> None:
             st.session_state["restored_source_name"] = name
             st.session_state["_main_upload_generation"] = st.session_state.get("_main_upload_generation", 0) + 1
             st.session_state.pop("_library_open_path", None)
+            st.session_state.pop("_restored_source_path", None)  # a result in memory, not a file
             request_rerun()
         download_col.download_button(t("⬇️ Download 16-bit TIFF"), tiff, file_name=name, mime="image/tiff",
                                      key="merge-download", use_container_width=True)
