@@ -12,14 +12,15 @@ written t("Saved {0}").format(t(name)), and the catalog entry translates "Saved 
 
 The language is per Streamlit session: the entry script calls set_language() at the start of
 every run (a thread-local, like app.ui.state's tab visibility); anything else falls back to the
-saved preference. The preference lives in user_data_dir()/settings.json (`"language"`), and
+saved preference. The preference lives in settings.json (`"language"`, app.settings), and
 PHOTO_STUDIO_LANGUAGE ("en"/"es") overrides it. Streamlit-free.
 """
 from __future__ import annotations
 
-import json
 import os
 import threading
+
+from app.settings import read_settings, save_setting
 
 LANGUAGES = {"en": "English", "es": "Español"}
 DEFAULT_LANGUAGE = "en"
@@ -35,38 +36,16 @@ def _catalog(language: str) -> dict:
     return {}
 
 
-def _settings_path():
-    from app.config import user_data_dir
-
-    return user_data_dir() / "settings.json"
-
-
-def _read_settings() -> dict:
-    try:
-        data = json.loads(_settings_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def saved_language() -> str:
     """The preferred language: PHOTO_STUDIO_LANGUAGE, else settings.json, else English."""
-    language = os.environ.get("PHOTO_STUDIO_LANGUAGE", "").strip().lower() or _read_settings().get("language")
+    language = os.environ.get("PHOTO_STUDIO_LANGUAGE", "").strip().lower() or read_settings().get("language")
     return language if language in LANGUAGES else DEFAULT_LANGUAGE
 
 
 def save_language(language: str) -> None:
     """Remember `language` for the next launch (best effort: a read-only data folder is no error)."""
-    if language not in LANGUAGES:
-        return
-    from app.config import atomic_write_text
-
-    settings = _read_settings()
-    settings["language"] = language
-    try:
-        atomic_write_text(_settings_path(), json.dumps(settings, indent=2))
-    except OSError:
-        pass
+    if language in LANGUAGES:
+        save_setting("language", language)
 
 
 def set_language(language: str | None) -> None:

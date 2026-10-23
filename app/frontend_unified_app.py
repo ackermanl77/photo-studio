@@ -24,9 +24,9 @@ from app.edit_history import EditHistory
 from app.geometry import orient
 from app.observability import configure_logging
 from app.raw_import import uploader_types
-from app.ui import canvas, export_panel, processing, tool_search
+from app.ui import canvas, export_panel, layout_memory, processing, tool_search
 from app.ui.context import EditorContext
-from app.ui.project_io import open_launch_file, open_project_bytes
+from app.ui.project_io import open_launch_file, open_project_bytes, recent_files_section, remember_opened_file, remember_opened_project
 from app.ui.state import build_recipe, consume_rerun_request, restore_recipe_to_state, set_tab_visible, tab_open, take_canvas_editors
 from app.ui.tabs import basic, color, detail, geometry, layers_tab, library, local
 from app.ui.theme import icon_tabs_style, inject_page_style
@@ -46,6 +46,8 @@ APP_ICON_SVG = Path(__file__).resolve().parent / "assets" / "photostudio.svg"
 TOOL_TABS = ["☼ Basic", "🎨 Curves & Color", "🔬 Detail", "⛶ Geometry", "◉ Local", "◈ Layers", "✨ Effects", "⬇ Export", "✦ Presets & Library"]
 LOCAL_TABS = ["◉ Masks", "🩹 Repair", "◌ Portrait"]
 LIBRARY_TABS = ["✦ Presets", "☰ Library & Batch"]
+# The tab rows whose open tab is remembered between launches (app.ui.layout_memory).
+TAB_LISTS = {"tool-tab": TOOL_TABS, "local-tab": LOCAL_TABS, "library-tab": LIBRARY_TABS}
 
 st.set_page_config(page_title="Photo Studio Pro", page_icon=str(APP_ICON_PNG), layout="wide", initial_sidebar_state="expanded")
 # The Streamlit process's own log (R2: modules never configure logging on import). Idempotent.
@@ -121,6 +123,7 @@ with upload_col2:
         ):
             st.session_state["restored_source_bytes"] = SAMPLE_PHOTO_PATH.read_bytes()
             st.session_state["restored_source_name"] = SAMPLE_PHOTO_NAME
+            st.session_state.pop("_restored_source_path", None)
             st.rerun()
 
 project_box = st.container() if photo_open else st.expander(t("📁 Open a saved project (.photoproject)"))
@@ -134,11 +137,15 @@ with project_box:
         except (ValueError, KeyError, OSError) as error:
             st.error(t("⚠️ Could not open this project file: {0}").format(t(error)))
         else:
+            remember_opened_project(project_upload.name, project_upload.getvalue())
             st.rerun()
+if photo_open:
+    recent_files_section(compact=True)  # Photoshop's File > Open Recent
 open_bar.__exit__(None, None, None)
 
 if not uploaded and "restored_source_bytes" not in st.session_state:
     st.info(t("👆 Upload an image above, load a saved project, or click \"Try a sample photo\" to open the editing workspace."))
+    recent_files_section(compact=False)  # Photoshop's Home screen: the files opened lately
     st.stop()
 
 # A fresh upload wins; otherwise the photo a project/Library/launch file opened.
@@ -159,6 +166,7 @@ except OSError:
     # PIL's own message for an unreadable file includes a memory address -- not worth showing.
     st.error(t("⚠️ Couldn't open '{0}' — the file may be corrupted, incomplete, or not a supported image format.").format(t(upload_name)))
     st.stop()
+remember_opened_file(source_digest, upload_name, upload_bytes, source, bool(uploaded), listed=bool(uploaded) or upload_name != SAMPLE_PHOTO_NAME)
 
 try:
     backend_client.ensure_backend_running()
@@ -182,6 +190,7 @@ take_canvas_editors()  # the open tab's photo editors register again below (an i
 
 with tools_col:
     st.markdown(t('<div class="panel-header-title">🛠️ Tool Workspace</div>'), unsafe_allow_html=True)
+    layout_memory.restore_tabs(TAB_LISTS)  # the tabs open last time, before they're created
     tool_search.find_tool_box()
     # The nine tool tabs as an icon strip (Photoshop's toolbar): one row in the sidebar, names on
     # hover and under the strip. The labels themselves stay the tabs' values.
@@ -255,6 +264,7 @@ with tools_col:
         enter("✦ Presets & Library", library_tabs["☰ Library & Batch"])
         with library_tabs["☰ Library & Batch"]:
             library.library_section(ctx)
+    layout_memory.remember_tabs(TAB_LISTS)
 
     # Undo/Redo history: one step per distinct recipe (every control has rendered by now).
     if "edit_history" not in st.session_state:

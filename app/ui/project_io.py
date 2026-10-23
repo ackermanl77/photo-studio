@@ -3,7 +3,11 @@
 Opening anything puts its bytes in st.session_state["restored_source_bytes"/"restored_source_name"]
 and bumps "_main_upload_generation" (which empties the main uploader by re-keying it), so the
 opened file, not a previously uploaded one, is what gets edited. A project's recipe goes through
-"_pending_restore" like every other outside write into the widgets.
+"_pending_restore" like every other outside write into the widgets. A file opened from a path also
+sets "_restored_source_path", so Recent files can list it by that path instead of a copy.
+
+Recent files (app.recent_files) are recorded by remember_opened_file() once the opened photo has
+decoded, and listed by recent_files_section() on the start screen and in the open bar.
 """
 from __future__ import annotations
 
@@ -16,7 +20,9 @@ from pathlib import Path
 import streamlit as st
 from PIL import Image
 
+from app import recent_files
 from app.edit_schema import migrate_legacy_keys
+from app.i18n import t
 from app.major_features import BLEND_MODE_LABELS
 from app.project_bundle import ProjectBundle
 from app.raw_import import SUPPORTED_EXTENSIONS
@@ -112,6 +118,7 @@ def open_project_bytes(content: bytes) -> None:
     pending_recipe["layers"] = layers_from_project(loaded_project)
     st.session_state["restored_source_bytes"] = loaded_project.source_bytes
     st.session_state["restored_source_name"] = loaded_project.source_name
+    st.session_state.pop("_restored_source_path", None)
     # Empties the main "Open Image" uploader on the next run (see its key) so the project's bundled
     # source, not a previously opened photo, is what gets edited.
     st.session_state["_main_upload_generation"] = st.session_state.get("_main_upload_generation", 0) + 1
@@ -124,6 +131,7 @@ def open_library_photo(path: Path) -> None:
     look can be carried from one photo of a shoot to the next."""
     st.session_state["restored_source_bytes"] = path.read_bytes()
     st.session_state["restored_source_name"] = path.name
+    st.session_state["_restored_source_path"] = str(path)
     st.session_state["_main_upload_generation"] = st.session_state.get("_main_upload_generation", 0) + 1
     # Which catalogued file is open (virtual copies are saved against it, F21).
     st.session_state["_library_open_path"] = str(path)
@@ -139,13 +147,97 @@ def open_launch_file() -> None:
     path = Path(path_text)
     try:
         if path.suffix.lower() in (".photoproject", ".zip"):
-            open_project_bytes(path.read_bytes())
+            content = path.read_bytes()
+            open_project_bytes(content)
+            remember_opened_project(path.name, content, str(path))
         elif path.suffix.lower() in SUPPORTED_EXTENSIONS:
             st.session_state["restored_source_bytes"] = path.read_bytes()
             st.session_state["restored_source_name"] = path.name
+            st.session_state["_restored_source_path"] = str(path)
         else:
             return
     except (ValueError, KeyError, OSError) as error:
         st.session_state["_launch_file_error"] = f"Could not open {path.name}: {error}"
         return
     st.rerun()
+
+
+# --- Recent files ---------------------------------------------------------------------------------
+
+def remember_opened_project(name: str, content: bytes, path: str | None = None) -> None:
+    """List an opened project; its thumbnail follows once its photo has decoded (next run)."""
+    entry_id = recent_files.remember(name, content, "project", path=path)
+    st.session_state["_recent_project_id"] = entry_id
+
+
+def remember_opened_file(source_digest: str, name: str, content: bytes, source: Image.Image, from_upload: bool, listed: bool = True) -> None:
+    """Once per opened photo, after it decoded: list it in Recent files -- or, for a project just
+    opened, give the project's entry its thumbnail instead. `listed=False` (the bundled sample)
+    leaves it out."""
+    if st.session_state.get("_recent_recorded") == source_digest:
+        return
+    st.session_state["_recent_recorded"] = source_digest
+    project_id = st.session_state.pop("_recent_project_id", None)
+    if project_id:
+        recent_files.set_thumbnail(project_id, source)
+    elif listed:
+        path = None if from_upload else st.session_state.get("_restored_source_path")
+        recent_files.remember(name, content, "photo", source, path=path)
+
+
+def _open_recent(entry_id: str) -> None:
+    """A recent file's button (a callback: it runs before the script, like the other openers)."""
+    entry = next((entry for entry in recent_files.load() if entry["id"] == entry_id), None)
+    if entry is None:
+        return
+    try:
+        content = recent_files.read_bytes(entry)
+        if entry["kind"] == "project":
+            open_project_bytes(content)
+            st.session_state["_recent_project_id"] = entry_id
+            recent_files.remember(entry["name"], content, "project", path=entry.get("path"))  # back to the top
+        else:
+            st.session_state["restored_source_bytes"] = content
+            st.session_state["restored_source_name"] = entry["name"]
+            st.session_state["_main_upload_generation"] = st.session_state.get("_main_upload_generation", 0) + 1
+            if entry.get("path"):
+                st.session_state["_restored_source_path"] = entry["path"]
+            else:
+                st.session_state.pop("_restored_source_path", None)
+    except (ValueError, KeyError, OSError) as error:
+        st.session_state["_launch_file_error"] = f"Could not open {entry['name']}: {error}"
+        recent_files.forget(entry_id)
+
+
+def _when(timestamp: float) -> str:
+    import time
+
+    days = int((time.time() - timestamp) // 86400)
+    return t("today") if days < 1 else t("yesterday") if days < 2 else t("{0} days ago").format(days)
+
+
+def recent_files_section(compact: bool) -> None:
+    """Recent files: a grid of thumbnails on the start screen, a short list in the open bar."""
+    entries = recent_files.load()
+    if not entries:
+        return
+    if compact:
+        st.caption(t("🕘 Recent"))
+        for entry in entries:
+            icon = "📁" if entry["kind"] == "project" else "🖼️"
+            st.button(f"{icon} {entry['name']}", key=f"recent-open-{entry['id']}", on_click=_open_recent, args=(entry["id"],),
+                      use_container_width=True, help=t("Opened {0}").format(_when(entry.get("opened", 0))))
+        return
+    st.markdown(t("**🕘 Recent**"))
+    for row_start in range(0, len(entries), 4):
+        for column, entry in zip(st.columns(4), entries[row_start:row_start + 4]):
+            with column:
+                thumb = recent_files.thumbnail_path(entry)
+                if thumb is not None:
+                    st.image(str(thumb), use_container_width=True)
+                icon = "📁" if entry["kind"] == "project" else "🖼️"
+                st.button(f"{icon} {entry['name']}", key=f"recent-open-{entry['id']}", on_click=_open_recent, args=(entry["id"],),
+                          use_container_width=True, help=t("Opened {0}").format(_when(entry.get("opened", 0))))
+                st.caption(t("Project · {0}").format(_when(entry.get("opened", 0))) if entry["kind"] == "project" else _when(entry.get("opened", 0)))
+    st.button(t("🗑️ Clear recent files"), key="recent-clear-btn", on_click=recent_files.clear,
+              help=t("Forget this list (and the copies of uploaded files kept for it). Your own files aren't touched."))

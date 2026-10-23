@@ -15,6 +15,8 @@ The rules these helpers encode (see CLAUDE.md, "Architecture"):
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
+from typing import Callable
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -133,7 +135,19 @@ def tab_open(tab) -> bool:
     return True if is_open is None else bool(is_open)
 
 
-def show_component(build, canvas_label: str | None = None, slot_id: str | None = None) -> None:
+@dataclass(frozen=True)
+class CanvasAction:
+    """A one-click action shown in the bar over an on-canvas editor (Photoshop's contextual task
+    bar): a button with an on_click callback, so it runs before the script like any outside write."""
+    label: str
+    key: str
+    on_click: Callable
+    args: tuple = ()
+    disabled: bool = False
+    help: str | None = None
+
+
+def show_component(build, canvas_label: str | None = None, slot_id: str | None = None, actions: tuple[CanvasAction, ...] = ()) -> None:
     """components.html() for an on-canvas editor, only when its tab is visible -- `build()` returns
     (markup, height) and isn't even called otherwise (it base64-encodes a preview). The editor's
     hidden commit text_area is rendered by the caller regardless, so its state survives.
@@ -141,7 +155,8 @@ def show_component(build, canvas_label: str | None = None, slot_id: str | None =
     With `canvas_label`, the editor works on the photo itself, Photoshop-style: it is offered above
     the canvas ("On the photo: ...") and drawn there at full size instead of at sidebar width; the
     sidebar keeps a button that switches to it. Its commit field stays where the caller renders it
-    (the editors find it in the page by selector, wherever it is)."""
+    (the editors find it in the page by selector, wherever it is). `actions` are its one-click
+    actions, offered in the bar over it next to "✓ Done"."""
     if not tab_visible():
         return
     if canvas_label is None:
@@ -150,9 +165,9 @@ def show_component(build, canvas_label: str | None = None, slot_id: str | None =
         return
     editors = _canvas.__dict__.setdefault("editors", [])
     label, number = canvas_label, 2
-    while any(existing == label for existing, _build in editors):
+    while any(editor.label == label for editor in editors):
         label, number = f"{canvas_label} {number}", number + 1
-    editors.append((label, build))
+    editors.append(CanvasEditor(label, build, tuple(actions)))
     st.button(
         t("✏️ {0} on the photo").format(t(label)), key=f"to-canvas-{slot_id or label}",
         on_click=lambda: st.session_state.__setitem__(CANVAS_MODE_KEY, label),
@@ -182,8 +197,15 @@ def build_on_canvas(build, box: tuple[int, int]):
         _canvas.box = SIDEBAR_EDITOR_BOX
 
 
-def take_canvas_editors() -> list:
-    """The (label, build) editors offered during this run, in order; clears the list."""
+@dataclass(frozen=True)
+class CanvasEditor:
+    label: str
+    build: Callable
+    actions: tuple[CanvasAction, ...] = ()
+
+
+def take_canvas_editors() -> list[CanvasEditor]:
+    """The editors offered during this run, in order; clears the list."""
     editors = getattr(_canvas, "editors", [])
     _canvas.editors = []
     return editors

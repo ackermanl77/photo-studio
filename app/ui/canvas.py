@@ -16,7 +16,7 @@ import uuid
 
 import streamlit as st
 import streamlit.components.v1 as components
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.color_profiles import is_srgb_name, profile_name
 from app.professional_color import clipping_warning_overlay
@@ -227,9 +227,12 @@ def guides_panel() -> None:
     if "guides" not in st.session_state:
         st.session_state.guides = []
     guides = st.session_state.guides
-    grid_on = st.session_state.get("grid-type", "None") != "None" or bool(guides)
+    grid_on = st.session_state.get("grid-type", "None") != "None" or bool(guides) or st.session_state.get("cv-mirror", False)
     with st.expander(t("🧭 Guides & Grid" + (" ●" if grid_on else "")), expanded=False, key="sec-guides"):
         st.caption(t("View-only -- never affects the exported image. The free-form Crop tool's corner handles snap to these lines."))
+        # Photoshop's View > Flip Horizontal: a fresh look at a composition's balance.
+        st.checkbox(t("⇋ Flip the view (mirror)"), key="cv-mirror",
+                    help=t("Shows the photo mirrored left to right, to judge its composition with fresh eyes. View-only: the edit and the export aren't flipped. Not applied to the zoomed (100 %+) view."))
         st.selectbox(t("Grid overlay"), list(GRID_PRESETS), key="grid-type", format_func=t_option)
         for guide in guides:
             guide.setdefault("id", uuid.uuid4().hex)
@@ -262,6 +265,9 @@ def canvas_view(edited_image: Image.Image, oriented_source: Image.Image) -> None
     show_original = bool(st.session_state.get("cv-orig", False)) and not compare_mode
     grid_type = st.session_state.get("grid-type", "None")
     guides = st.session_state.get("guides", [])
+    # Flip view (Guides & Grid): mirrored last, after the guides, so they stay on the same content.
+    # Not at 100 %+, where dragging pans the view and a mirror would turn the drag around.
+    mirror = ImageOps.mirror if st.session_state.get("cv-mirror", False) and zoom_level < 1.0 else (lambda image: image)
     pan_x = pan_y = 0.5
     if zoom_level >= 1.0:
         # Navigator: click the overview to center the zoomed view there (the hidden text_area
@@ -294,7 +300,7 @@ def canvas_view(edited_image: Image.Image, oriented_source: Image.Image) -> None
         after_preview = zoom_preview(edited_image, zoom_level, (pan_x, pan_y))
         if before_preview.size != after_preview.size:
             before_preview = before_preview.resize(after_preview.size, Image.Resampling.LANCZOS)
-        compare_html, compare_height = _before_after_html(before_preview, after_preview)
+        compare_html, compare_height = _before_after_html(mirror(before_preview), mirror(after_preview))
         components.html(compare_html, height=compare_height + 10)
         return
     st.markdown(t('<div class="canvas-container">'), unsafe_allow_html=True)
@@ -314,6 +320,8 @@ def canvas_view(edited_image: Image.Image, oriented_source: Image.Image) -> None
     else:
         # Keyed so theme.css can fit the photo to the window's height too (a tall photo used to
         # run past the bottom of the screen once the canvas had the page's full width).
+        if mirror is ImageOps.mirror:
+            canvas_display, canvas_caption = mirror(canvas_display), t("{0} (flipped view)").format(t(canvas_caption))
         with st.container(key="canvas-stage"):
             st.image(canvas_display, caption=canvas_caption, use_container_width=True)
     st.markdown(t('</div>'), unsafe_allow_html=True)
@@ -382,7 +390,25 @@ CANVAS_HINTS = {
 def canvas_hint(label: str) -> None:
     hint = CANVAS_HINTS.get(re.sub(r" \d+$", "", label))  # a second editor of a kind is "<label> 2"
     if hint:
-        st.caption(t("{0}. Its settings: {1} · 🖼 Photo goes back to the normal view.").format(t(hint[0]), t(hint[1])))
+        st.caption(t("{0}. Its settings: {1}.").format(t(hint[0]), t(hint[1])))
+
+
+def _back_to_photo() -> None:
+    st.session_state[CANVAS_MODE_KEY] = CANVAS_PHOTO
+
+
+def canvas_action_bar(editor) -> None:
+    """The bar over a tool that works on the photo, like Photoshop's contextual task bar: what to do
+    (the hint), the tool's one-click actions, and "✓ Done" back to the photo."""
+    with st.container(key="canvas-action-bar"):
+        columns = st.columns([4.2] + [1.25] * len(editor.actions) + [1], vertical_alignment="center")
+        with columns[0]:
+            canvas_hint(editor.label)
+        for column, action in zip(columns[1:], editor.actions):
+            column.button(t(action.label), key=action.key, on_click=action.on_click, args=action.args, disabled=action.disabled,
+                          help=t(action.help) if action.help else None, use_container_width=True)
+        columns[-1].button(t("✓ Done"), key="canvas-done-btn", on_click=_back_to_photo, type="primary", use_container_width=True,
+                           help=t("Back to the photo (🖼 Photo)."))
 
 
 def canvas_editor_choice(editors: list) -> str:
@@ -392,7 +418,7 @@ def canvas_editor_choice(editors: list) -> str:
     switching tabs (other editors) falls back to the photo."""
     if not editors:
         return CANVAS_PHOTO
-    options = [CANVAS_PHOTO] + [label for label, _build in editors]
+    options = [CANVAS_PHOTO] + [editor.label for editor in editors]
     if st.session_state.get(CANVAS_MODE_KEY) not in options:
         st.session_state[CANVAS_MODE_KEY] = CANVAS_PHOTO
     choice = st.segmented_control(
@@ -411,7 +437,8 @@ def render_canvas_column(ctx, oriented_source: Image.Image) -> None:
     if choice == CANVAS_PHOTO:
         run_fragment(canvas_view, ctx.edited_image, oriented_source)
     else:
-        canvas_hint(choice)
-        markup, height = build_on_canvas(dict(editors)[choice], CANVAS_EDITOR_BOX)
+        editor = next(editor for editor in editors if editor.label == choice)
+        canvas_action_bar(editor)
+        markup, height = build_on_canvas(editor.build, CANVAS_EDITOR_BOX)
         components.html(markup, height=height)
     run_fragment(scopes_panel, ctx.edited_image)

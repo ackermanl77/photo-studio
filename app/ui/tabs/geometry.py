@@ -15,7 +15,7 @@ from app.controls import CONTROLS_BY_KEY, section_keys
 from app.lens_corrections import LENS_PROFILES
 from app.professional_tools import draw_guides_and_grid, grid_line_fractions, preview_image
 from app.ui.processing import lens_corrected_source
-from app.ui.state import consume_new_commit, editor_box, request_rerun, section_header, section_reset_button, show_component
+from app.ui.state import CanvasAction, consume_new_commit, editor_box, request_rerun, section_header, section_reset_button, show_component
 from app.ui.widgets import render_control
 from app.ui_editors import _crop_editor_html, _liquify_editor_html
 from app.i18n import t, t_format
@@ -107,6 +107,22 @@ def compute_geometry(ctx) -> None:
         request_rerun()
 
 
+# The on-photo bar's actions (callbacks: they run before the script, like the sidebar's buttons' effect).
+def _liquify_undo() -> None:
+    strokes = st.session_state.get("liquify_strokes")
+    if strokes:
+        strokes.pop()
+
+
+def _liquify_clear() -> None:
+    st.session_state.get("liquify_strokes", []).clear()
+
+
+def _crop_whole_photo() -> None:
+    for axis in ("x0", "y0", "x1", "y1"):
+        st.session_state[f"crop-free-{axis}"] = CONTROLS_BY_KEY[f"crop_free_{axis}"].default
+
+
 def liquify_section(ctx) -> None:
     """Liquify (F23): a mesh-warp brush. Strokes are parametric (app.liquify) -- kept in
     st.session_state["liquify_strokes"], part of the recipe (Undo/Redo, projects) but never synced
@@ -122,7 +138,10 @@ def liquify_section(ctx) -> None:
     def build_editor():
         return _liquify_editor_html(preview_image(mask_source, editor_box()), "liquify-editor", size / 100.0, liquify.MAX_POINTS)
 
-    show_component(build_editor, canvas_label="🌀 Liquify", slot_id="liquify")
+    show_component(build_editor, canvas_label="🌀 Liquify", slot_id="liquify", actions=(
+        CanvasAction("↶ Undo stroke", "cv-act-liq-undo", _liquify_undo, disabled=not strokes),
+        CanvasAction("✖ Clear", "cv-act-liq-clear", _liquify_clear, disabled=not strokes, help="Remove every Liquify stroke"),
+    ))
     with st.container(key="liquify-editor-hidden"):
         pending = st.text_area(t("Liquify stroke"), key="liquify-editor-data", label_visibility="collapsed")
     if consume_new_commit(pending, "liquify-editor-committed"):
@@ -186,7 +205,10 @@ def crop_section(ctx) -> None:
                 background = draw_guides_and_grid(background, crop_grid_type, crop_guides)
             return _crop_editor_html(background, "crop-editor", crop_box_fractional, mask_source.size, snap_x=snap_x, snap_y=snap_y)
 
-        show_component(build_editor, canvas_label="✂ Crop", slot_id="crop")
+        show_component(build_editor, canvas_label="✂ Crop", slot_id="crop", actions=(
+            CanvasAction("⛶ Whole photo", "cv-act-crop-all", _crop_whole_photo, disabled=crop_box_fractional == (0.0, 0.0, 1.0, 1.0),
+                         help="Reset the crop box to the whole photo"),
+        ))
         with st.container(key="crop-editor-hidden"):
             pending_crop = st.text_area(t("Free-form crop box"), key="crop-editor-data", label_visibility="collapsed")
         if consume_new_commit(pending_crop, "crop-editor-committed"):

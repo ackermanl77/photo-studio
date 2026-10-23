@@ -7,6 +7,33 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-23 -- Recent files, the bar over photo tools, Flip view, remembered layout
+
+The rest of the Photoshop review's list:
+
+- **🕘 Recent files** (`app/recent_files.py`; UI in `app/ui/project_io.py`): the start screen lists the
+  last 8 photos and projects opened, newest first, with thumbnails, like Photoshop's Home screen;
+  the open bar lists them while editing. An uploaded file has no path a browser app can reopen, so
+  a copy is kept in `user_data_dir()/recent/` (up to 120 MB each, 600 MB in all); a Library or
+  launcher file is remembered by its path (`_restored_source_path`) and drops off when moved. The
+  same bytes move to the top instead of repeating; a project's thumbnail is filled in once its photo
+  decodes; the sample isn't listed. **🗑️ Clear recent files** removes the list and the copies.
+- **The bar over a photo tool** (Photoshop's contextual task bar): `show_component(actions=...)` takes
+  `CanvasAction`s (button + callback), drawn in a bar with the tool's hint and **✓ Done** (back to the
+  photo). Liquify: Undo stroke / Clear; Crop: Whole photo; White Balance: Reset (through
+  `_pending_restore`). The editors' list is now `CanvasEditor`s.
+- **⇋ Flip the view** (Guides & Grid, `cv-mirror`): the canvas mirrored left to right, view-only, after
+  the guides are drawn so they stay on the same content; not at 100 %+, where a drag pans.
+- **Remembered layout** (`app/ui/layout_memory.py`): the open tool tab and sub-tabs, saved to
+  `settings.json` by their English labels and restored once per session before the tabs exist. The
+  sidebar width needed nothing: Streamlit keeps it (`sidebarWidth` in localStorage). The settings
+  file moved to `app/settings.py` (`read_settings()`/`save_setting()`), shared with the language.
+- Found while testing: an uploaded `.jpg`'s kept copy and its thumbnail had the same file name, so
+  the thumbnail overwrote the copy; thumbnails are now `<id>-thumb.jpg`.
+- Checked in Chrome: a Liquify stroke, Undo stroke in the bar (disabled again), Done back to the
+  photo; Flip view's caption; Local › Repair and a 560 px sidebar came back after a reload, and the
+  photo reopened from the start screen's Recent list (one entry, thumbnail shown).
+
 ## 2026-10-22 -- From a Photoshop review: Repair brush, Find a tool, profile notice, split direction, shortcuts
 
 A second look at Photoshop 2026 (its UI strings, read from its locale catalog, and its open

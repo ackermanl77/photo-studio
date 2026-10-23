@@ -40,6 +40,18 @@ expand it to open something else.
 **Opening a saved project:** expand "📁 Open a saved project (.photoproject)" above the uploader to
 reopen a `.photoproject` file you saved earlier (see [Projects](#projects) below).
 
+**🕘 Recent:** like Photoshop's Home screen, the start screen lists the last 8 photos and projects
+you opened, newest first, each with a thumbnail — click one to open it again. While you edit, the
+same list is in **📂 Open another photo or project**. A file opened through the uploader can't be
+found again on disk by a browser app, so Photo Studio keeps a copy of it for this list (in its data
+folder; files over 120 MB aren't listed); a photo opened from the Library or the desktop app's
+"Open with" is listed by its path, and drops off the list if it's moved or deleted. The bundled
+sample isn't listed. **🗑️ Clear recent files** forgets the list and those copies — your own files
+are never touched.
+
+**Your layout is remembered:** the tool tab (and sub-tab) you had open, and the sidebar's width,
+come back the next time you open Photo Studio.
+
 ---
 
 ## 2. The Workspace
@@ -84,9 +96,11 @@ Like Photoshop, the window belongs to the photo:
   Painting, the 🩹 Repair brush, 🪄 Magic Wand, 🎯 White Balance, the ✒ Pen and the mask and
   removal previews draw over the photo itself, at full size. When the open tab has one, a row
   **🖼 Photo | ✂ Crop | 🌀 Liquify …** appears above the image: pick a tool to work on the photo,
-  or **🖼 Photo** to go back to the normal view. A line under that row says what to do with the
-  tool and where its settings are. Each of these tools also has a **✏️ … on the photo** button
-  where it sits in the sidebar.
+  or **🖼 Photo** to go back to the normal view. Like Photoshop's contextual task bar, a bar over
+  the tool says what to do and where its settings are, offers its one-click actions (Liquify:
+  **↶ Undo stroke** / **✖ Clear**; Crop: **⛶ Whole photo**; White Balance: **↺ Reset**) and
+  **✓ Done**, which goes back to the photo. Each of these tools also has a **✏️ … on the photo**
+  button where it sits in the sidebar.
 
 On a narrow window (a phone) the sidebar starts hidden and opens over the photo, and the controls
 above the photo fold into a compact grid so the photo stays near the top of the screen.
@@ -569,6 +583,9 @@ Always visible above/below the preview, on every tab:
   View is active, since that already shows both).
 - **🧭 Guides & Grid** — a composition aid, purely visual: it's never sent through the processing
   backend and never appears in an exported file.
+  - **⇋ Flip the view (mirror)** — Photoshop's View › Flip Horizontal: shows the photo mirrored
+    left to right, a fresh look at a composition's balance. Only the view: the edit and the export
+    aren't flipped (for that, ⛶ Geometry › Flip horizontal). Not applied at 100 % and above.
   - **Grid overlay** — None, Rule of Thirds, Grid 4x4, or Golden Ratio.
   - **Custom guides** — add any number of horizontal or vertical guide lines at a chosen position
     (%), each removable individually.
