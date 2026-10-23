@@ -22,7 +22,7 @@ from app import fonts
 from app.layer_workspace import WorkspaceLayer, layers_to_json, render_image_layer, render_text_layer
 from app.major_features import BLEND_MODE_LABELS
 from app.professional_tools import preview_image
-from app.ui.state import consume_new_commit, hex_to_rgba, request_rerun, show_component, tab_visible
+from app.ui.state import consume_new_commit, editor_box, hex_to_rgba, request_rerun, show_component, tab_visible
 from app.ui_editors import _pen_editor_html
 from app.vector_shapes import SHAPE_TYPES, render_path_layer, render_shape_layer
 from app.i18n import t, t_format, t_option
@@ -396,7 +396,7 @@ def render_pen_path_editor(source: Image.Image, key_prefix: str, points: list[di
     possibly-updated (points, closed); the caller is responsible for writing that back into
     wherever it actually lives (a draft session_state pair, or this specific layer's own dict),
     since this helper has no way to know which."""
-    show_component(lambda: _pen_editor_html(preview_image(source, (480, 480)), key_prefix, points, closed))
+    show_component(lambda: _pen_editor_html(preview_image(source, editor_box()), key_prefix, points, closed), canvas_label="✒ Pen", slot_id=key_prefix)
     with st.container(key=f"{key_prefix}-hidden"):
         pending_points = st.text_area(t("Pen path points"), key=f"{key_prefix}-data", label_visibility="collapsed")
     if consume_new_commit(pending_points, f"{key_prefix}-committed"):
@@ -555,7 +555,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
                 )
                 request_rerun()
         elif new_layer_kind == "Pen":
-            st.caption(t('Click points on the photo below to trace a path, then "Add Path Layer" when done.'))
+            st.caption(t('Open ✒ Pen over the photo (the button below, or above the image), click points to trace a path, then "Add Path Layer" when done.'))
             # draft_closed itself needs no separate write-back: it's the "l-path-draft-closed"
             # checkbox's own widget key, already persisted by Streamlit the moment that widget
             # renders -- re-assigning it here would violate the "never write into an

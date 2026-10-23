@@ -21,7 +21,10 @@ from app.professional_color import clipping_warning_overlay
 from app.professional_tools import GRID_PRESETS, compute_histogram, compute_waveform, draw_guides_and_grid, draw_viewport_box, preview_image, zoom_preview, zoom_viewport
 from app.refine_preview import POLL_SECONDS as REFINE_POLL_SECONDS
 from app.ui.processing import refine_status_view
-from app.ui.state import RECIPE_DEFAULTS, build_recipe, consume_new_commit, request_rerun, run_fragment
+from app.ui.state import (
+    CANVAS_MODE_KEY, CANVAS_PHOTO, RECIPE_DEFAULTS, build_on_canvas, build_recipe, consume_new_commit, request_rerun,
+    run_fragment, take_canvas_editors,
+)
 from app.ui_editors import _before_after_html, _pan_viewer_html, _wand_picker_html
 from app.i18n import t, t_format, t_option
 
@@ -301,8 +304,36 @@ def scopes_panel(edited_image: Image.Image) -> None:
         )
 
 
+# The box an editor's background fits in when it is drawn over the photo: the page's width at
+# 1440 px with the sidebar open, and short enough to leave room for the editor's own buttons.
+CANVAS_EDITOR_BOX = (1000, 600)
+
+
+def canvas_editor_choice(editors: list) -> str:
+    """"On the photo": the photo itself, or one of the open tab's photo editors (crop, liquify,
+    paint, magic wand, pen...), drawn over the photo instead of at sidebar width -- Photoshop's
+    model, where a tool works on the document. Only rendered when the open tab offers an editor;
+    switching tabs (other editors) falls back to the photo."""
+    if not editors:
+        return CANVAS_PHOTO
+    options = [CANVAS_PHOTO] + [label for label, _build in editors]
+    if st.session_state.get(CANVAS_MODE_KEY) not in options:
+        st.session_state[CANVAS_MODE_KEY] = CANVAS_PHOTO
+    choice = st.segmented_control(
+        t("On the photo"), options, key=CANVAS_MODE_KEY, format_func=t_option, label_visibility="collapsed",
+        help=t("Work on the photo with one of this tab's tools, or just view it."),
+    )
+    return choice or CANVAS_PHOTO
+
+
 def render_canvas_column(ctx, oriented_source: Image.Image) -> None:
     canvas_header(ctx)
     guides_panel()
-    run_fragment(canvas_view, ctx.edited_image, oriented_source)
+    editors = take_canvas_editors()
+    choice = canvas_editor_choice(editors)
+    if choice == CANVAS_PHOTO:
+        run_fragment(canvas_view, ctx.edited_image, oriented_source)
+    else:
+        markup, height = build_on_canvas(dict(editors)[choice], CANVAS_EDITOR_BOX)
+        components.html(markup, height=height)
     run_fragment(scopes_panel, ctx.edited_image)

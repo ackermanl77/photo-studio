@@ -11,7 +11,7 @@ from app.image_processor import auto_enhance_recipe, scale_auto_enhance
 from app.professional_color import estimate_white_balance
 from app.professional_tools import preview_image
 from app.ui.processing import preset_thumbnails
-from app.ui.state import consume_new_commit, request_rerun, section_header, section_label, section_reset_button, show_component, tab_visible
+from app.ui.state import consume_new_commit, editor_box, request_rerun, section_header, section_label, section_reset_button, show_component, tab_visible
 from app.ui.widgets import render_control
 from app.ui_editors import _wand_picker_html
 from app.i18n import t
@@ -64,7 +64,7 @@ def color_section(ctx) -> None:
     section_reset_button("color", "Color")
     with st.expander(t("🎯 Pick White Balance"), expanded=False):
         st.caption(t("Click a spot in the photo that should be neutral gray or white -- Temperature and Tint above are set to whatever would neutralize it. A starting point to fine-tune from, not a guaranteed perfect result."))
-        show_component(lambda: _wand_picker_html(preview_image(ctx.mask_source, (480, 480)), "wb"))
+        show_component(lambda: _wand_picker_html(preview_image(ctx.mask_source, editor_box()), "wb"), canvas_label="🎯 White Balance", slot_id="wb")
         with st.container(key="wb-wand-hidden"):
             wb_click_raw = st.text_area(t("White balance click"), key="wb-wand-data", label_visibility="collapsed")
         if consume_new_commit(wb_click_raw, "wb-wand-committed"):

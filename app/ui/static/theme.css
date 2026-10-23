@@ -155,7 +155,7 @@ footer { visibility: hidden; }
 /* Streamlit DOM (.st-key-<key> classes): the hidden text_areas the on-canvas editors commit
    through (app/ui_editors.py) -- plumbing, never shown. The substring selectors cover the
    per-selection and per-layer ones, whose keys contain a uuid. */
-.st-key-curve-hidden, .st-key-crop-editor-hidden, .st-key-cv-nav-wand-hidden,
+.st-key-curve-hidden, .st-key-crop-editor-hidden, .st-key-liquify-editor-hidden, .st-key-cv-nav-wand-hidden,
 .st-key-m-wand-hidden, .st-key-rm-wand-hidden, .st-key-wb-wand-hidden,
 [class*="-paint-hidden"], [class*="l-path-"][class*="-hidden"] {
     display: none !important;
