@@ -186,7 +186,11 @@ on:
 1. The default footer stays hidden, the header is transparent and takes no clicks, and the page
    padding is unchanged; collapsing the tools sidebar leaves its expand button
    (`[data-testid="stExpandSidebarButton"]`, inside the header's toolbar) visible and working.
-2. The nine tool tabs wrap onto a second row instead of scrolling (`[data-testid="stTab(s)"]`).
+2. The nine tool tabs show as one row of icons, with the name on hover and under the row for the
+   open tab, while the sub-tabs keep their words (`icon_tabs_style()` in `app/ui/theme.py`:
+   `.st-key-tool-tab > div > [role="tablist"] > [data-testid="stTab"][data-key][aria-selected]`).
+   On a 390 px-wide window the controls above the photo wrap into a compact grid
+   (`.st-key-canvas-controls [data-testid="stHorizontalBlock"/"stColumn"]`).
 3. The tools sidebar is at least 420 px wide while open (`[data-testid="stSidebar"][aria-expanded="true"]`),
    can be dragged wider and collapsed, and the photo is capped to the window's height
    (`.st-key-canvas-stage [data-testid="stImage"] img`).

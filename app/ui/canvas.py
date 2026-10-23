@@ -120,47 +120,49 @@ def canvas_header(ctx) -> None:
     # Two rows above the image, like Photoshop's options bar (the tools live in the sidebar): the
     # file and the edit history, then the view. Each control has room for its label -- squeezed
     # into one row, the buttons shrank to ~30 px and the native shortcut hints printed over them.
-    top_c1, top_undo, top_redo, top_reset, top_snap = st.columns([1.7, 0.7, 0.7, 0.75, 0.8], gap="small", vertical_alignment="center")
-    with top_c1:
-        # html.escape(): the file name is user-controlled and lands in an attribute and in markup.
-        live_view_label = html.escape(f"{ctx.upload_name} ({ctx.output_size[0]}×{ctx.output_size[1]})")
-        st.markdown(
-            t("<div class=\"panel-header-title canvas-live-view\" title=\"{0}\">🖼️ Live View: <span>{1}</span></div>").format(t(live_view_label), t(live_view_label)),
-            unsafe_allow_html=True,
-        )
-    with top_undo:
-        if st.button(t("↶ Undo"), key="hist-undo-btn", disabled=not history.can_undo, help=t("Undo (Ctrl+Z)"), use_container_width=True, shortcut="Ctrl+Z"):
-            st.session_state["_pending_restore"] = history.undo() or {}
-            request_rerun()
-    with top_redo:
-        if st.button(t("↷ Redo"), key="hist-redo-btn", disabled=not history.can_redo, help=t("Redo (Ctrl+Shift+Z)"), use_container_width=True, shortcut="Ctrl+Shift+Z"):
-            st.session_state["_pending_restore"] = history.redo() or {}
-            request_rerun()
-    with top_reset:
-        # The same recipe fields Undo/Redo cover; layers and the opened photo stay.
-        if st.button(t("↺ Reset"), key="hist-reset-btn", help=t("Reset all adjustments to defaults"), use_container_width=True):
-            st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": [], "liquify_strokes": []}
-            request_rerun()
-    with top_snap:
-        _snapshots_popover(history)
+    # Keyed for the stylesheet: on a phone its columns wrap into a compact grid, not one per line.
+    with st.container(key="canvas-controls"):
+        top_c1, top_undo, top_redo, top_reset, top_snap = st.columns([1.7, 0.7, 0.7, 0.75, 0.8], gap="small", vertical_alignment="center")
+        with top_c1:
+            # html.escape(): the file name is user-controlled and lands in an attribute and in markup.
+            live_view_label = html.escape(f"{ctx.upload_name} ({ctx.output_size[0]}×{ctx.output_size[1]})")
+            st.markdown(
+                t("<div class=\"panel-header-title canvas-live-view\" title=\"{0}\">🖼️ Live View: <span>{1}</span></div>").format(t(live_view_label), t(live_view_label)),
+                unsafe_allow_html=True,
+            )
+        with top_undo:
+            if st.button(t("↶ Undo"), key="hist-undo-btn", disabled=not history.can_undo, help=t("Undo (Ctrl+Z)"), use_container_width=True, shortcut="Ctrl+Z"):
+                st.session_state["_pending_restore"] = history.undo() or {}
+                request_rerun()
+        with top_redo:
+            if st.button(t("↷ Redo"), key="hist-redo-btn", disabled=not history.can_redo, help=t("Redo (Ctrl+Shift+Z)"), use_container_width=True, shortcut="Ctrl+Shift+Z"):
+                st.session_state["_pending_restore"] = history.redo() or {}
+                request_rerun()
+        with top_reset:
+            # The same recipe fields Undo/Redo cover; layers and the opened photo stay.
+            if st.button(t("↺ Reset"), key="hist-reset-btn", help=t("Reset all adjustments to defaults"), use_container_width=True):
+                st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": [], "liquify_strokes": []}
+                request_rerun()
+        with top_snap:
+            _snapshots_popover(history)
 
-    # Keyboard shortcuts (native, F11): Z = 1:1 / Fit, B = before/after, G = grid. Ctrl+Z /
-    # Ctrl+Shift+Z are on Undo/Redo, Ctrl+E on the Save button.
-    zoom_c, key_c1, key_c2, key_c3, split_c, orig_c = st.columns([0.95, 0.85, 1.05, 0.7, 0.9, 0.85], gap="small", vertical_alignment="center")
-    with zoom_c:
-        # Fit shows the whole photo; 100 % is a true 1:1 view of its pixels (full resolution even
-        # for a proxy-previewed photo); 200 %/400 % enlarge those pixels.
-        st.selectbox(
-            t("Zoom View"), [0.0, 1.0, 2.0, 4.0], key="cv-zoom", label_visibility="collapsed",
-            format_func=t_format(lambda z: "🔍 Fit" if z < 1 else ("🔍 100% (1:1)" if z == 1 else f"🔍 {int(z * 100)}%")),
-        )
-    key_c1.button(t("🔍 1:1 / Fit"), key="kb-zoom-btn", on_click=_toggle_one_to_one, shortcut="Z", use_container_width=True, help=t("Toggle a true 1:1 view (Z)"))
-    key_c2.button(t("👁 Before / After"), key="kb-orig-btn", on_click=_toggle_original, shortcut="B", use_container_width=True, help=t("Show the original (B)"))
-    key_c3.button(t("# Grid"), key="kb-grid-btn", on_click=_toggle_grid, shortcut="G", use_container_width=True, help=t("Toggle the composition grid (G)"))
-    with split_c:
-        compare_mode = st.checkbox(t("⇄ Split View"), value=False, key="cv-split", help=t("Drag to compare before/after"))
-    with orig_c:
-        st.checkbox(t("👁️ Original"), value=False, key="cv-orig", disabled=compare_mode)
+        # Keyboard shortcuts (native, F11): Z = 1:1 / Fit, B = before/after, G = grid. Ctrl+Z /
+        # Ctrl+Shift+Z are on Undo/Redo, Ctrl+E on the Save button.
+        zoom_c, key_c1, key_c2, key_c3, split_c, orig_c = st.columns([0.95, 0.85, 1.05, 0.7, 0.9, 0.85], gap="small", vertical_alignment="center")
+        with zoom_c:
+            # Fit shows the whole photo; 100 % is a true 1:1 view of its pixels (full resolution even
+            # for a proxy-previewed photo); 200 %/400 % enlarge those pixels.
+            st.selectbox(
+                t("Zoom View"), [0.0, 1.0, 2.0, 4.0], key="cv-zoom", label_visibility="collapsed",
+                format_func=t_format(lambda z: "🔍 Fit" if z < 1 else ("🔍 100% (1:1)" if z == 1 else f"🔍 {int(z * 100)}%")),
+            )
+        key_c1.button(t("🔍 1:1 / Fit"), key="kb-zoom-btn", on_click=_toggle_one_to_one, shortcut="Z", use_container_width=True, help=t("Toggle a true 1:1 view (Z)"))
+        key_c2.button(t("👁 Before / After"), key="kb-orig-btn", on_click=_toggle_original, shortcut="B", use_container_width=True, help=t("Show the original (B)"))
+        key_c3.button(t("# Grid"), key="kb-grid-btn", on_click=_toggle_grid, shortcut="G", use_container_width=True, help=t("Toggle the composition grid (G)"))
+        with split_c:
+            compare_mode = st.checkbox(t("⇄ Split View"), value=False, key="cv-split", help=t("Drag to compare before/after"))
+        with orig_c:
+            st.checkbox(t("👁️ Original"), value=False, key="cv-orig", disabled=compare_mode)
 
     # Refine-on-pause status (P1): a fragment that polls only while a full-resolution render is
     # pending for a proxy preview, so a settled photo costs nothing.

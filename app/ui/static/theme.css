@@ -41,6 +41,22 @@ footer { visibility: hidden; }
     object-fit: contain;
 }
 
+/* Streamlit DOM: on a phone Streamlit stacks every column full width, so the controls above the
+   photo took ~530 px. Wrap them into a compact grid instead: the file name on its own line, the
+   buttons three to a line, their shortcut hints hidden (no keyboard). */
+@media (max-width: 640px) {
+    .st-key-canvas-controls [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: 0.35rem; }
+    .st-key-canvas-controls [data-testid="stColumn"] {
+        flex: 1 1 calc(33% - 0.35rem) !important;
+        width: auto !important;
+        min-width: 0 !important;
+    }
+    .st-key-canvas-controls [data-testid="stHorizontalBlock"]:has(.canvas-live-view) > [data-testid="stColumn"] { flex-basis: calc(25% - 0.35rem) !important; }
+    .st-key-canvas-controls [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.canvas-live-view) { flex-basis: 100% !important; }
+    .st-key-canvas-controls button { padding-left: 0.3rem; padding-right: 0.3rem; }
+    .st-key-canvas-controls kbd { display: none; }
+}
+
 /* Streamlit DOM: page padding and a tight vertical rhythm. */
 .block-container {
     max-width: 1800px;

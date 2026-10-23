@@ -29,7 +29,7 @@ from app.ui.context import EditorContext
 from app.ui.project_io import open_launch_file, open_project_bytes
 from app.ui.state import build_recipe, consume_rerun_request, restore_recipe_to_state, set_tab_visible, tab_open, take_canvas_editors
 from app.ui.tabs import basic, color, detail, geometry, layers_tab, library, local
-from app.ui.theme import inject_page_style
+from app.ui.theme import icon_tabs_style, inject_page_style
 from app.i18n import LANGUAGES, save_language, saved_language, set_language, t
 
 # A small bundled placeholder image (generated, not a real photo) so a first-time visitor can
@@ -182,6 +182,9 @@ take_canvas_editors()  # the open tab's photo editors register again below (an i
 
 with tools_col:
     st.markdown(t('<div class="panel-header-title">🛠️ Tool Workspace</div>'), unsafe_allow_html=True)
+    # The nine tool tabs as an icon strip (Photoshop's toolbar): one row in the sidebar, names on
+    # hover and under the strip. The labels themselves stay the tabs' values.
+    st.markdown(icon_tabs_style("tool-tab", [tuple(t(label).split(" ", 1)) for label in TOOL_TABS]), unsafe_allow_html=True)
     # on_change="rerun" + key: Streamlit reports which tab is on screen (`.open`), so hidden
     # tabs skip their display-only work. Switching tabs is a (cheap, cached) rerun.
     tabs = dict(zip(TOOL_TABS, st.tabs([t(_label) for _label in TOOL_TABS], key="tool-tab", on_change="rerun")))
