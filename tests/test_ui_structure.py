@@ -283,7 +283,7 @@ def test_every_editor_is_a_static_html_and_js_pair_with_no_python_built_script()
     from app import ui_editors
 
     names = {path.stem for path in ui_editors.EDITORS_DIR.glob("*.html")}
-    assert names == {"before_after", "curve", "paint", "picker", "crop", "pen", "pan", "liquify"}
+    assert names == {"before_after", "curve", "paint", "picker", "crop", "pen", "pan", "liquify", "looks"}
     assert all((ui_editors.EDITORS_DIR / f"{name}.js").is_file() for name in names)
     source = open(ui_editors.__file__, encoding="utf-8").read()
     assert "addEventListener" not in source and "getElementById" not in source
@@ -384,3 +384,30 @@ def test_shortcut_list_and_canvas_hints_cover_every_shortcut_and_photo_tool():
         assert shortcut in listed, shortcut
     labels = set(re.findall(r'canvas_label="([^"]+)"', source)) | {MASK_PREVIEW, REMOVAL_PREVIEW, "🩹 Repair brush"}
     assert labels <= set(CANVAS_HINTS), labels - set(CANVAS_HINTS)
+
+
+def test_page_scripts_are_installed_once_and_slider_tracks_name_real_sliders():
+    """UI3/UI4: the scripts for Streamlit's own markup load from one same-origin loader (one
+    </script>, both scripts in it), and every meaningful slider track names a registry slider."""
+    from app.controls import CONTROLS
+    from app.ui.theme import PAGE_SCRIPTS, _slider_tracks, page_scripts_loader, page_style, static_text
+
+    loader = page_scripts_loader()
+    assert loader.count("</script>") == 1 and "__psPageScripts" in loader
+    assert PAGE_SCRIPTS == ("a11y.js", "sliders.js") and all(static_text(name) for name in PAGE_SCRIPTS)
+    assert "__psA11yFixes" in loader and "__psSliderFills" in loader
+    sliders = {control.widget_key for control in CONTROLS if control.widget_key}
+    assert set(_slider_tracks()) <= sliders
+    assert ".st-key-c-temp " in page_style() and "--ps-track: 1" in page_style()
+
+
+def test_the_phone_layout_puts_the_photo_first_and_the_tools_in_a_bottom_sheet():
+    """UI10: the sidebar starts closed on a phone ("auto"), its 420 px minimum applies only above
+    phone width, and on a phone the open sidebar is a bottom sheet."""
+    entry = APP_PATH.read_text(encoding="utf-8")
+    css = (UI_DIR / "static" / "theme.css").read_text(encoding="utf-8")
+    assert 'initial_sidebar_state="auto"' in entry
+    wide = css[css.index("@media (min-width: 641px)"):]
+    assert wide.index("min-width: 420px") < wide.index("}")
+    phone = css[css.index("@media (max-width: 640px) {\n    [data-testid=\"stSidebar\"]"):]
+    assert "bottom: 0" in phone[:600] and "height: 58vh" in phone[:600]

@@ -19,6 +19,7 @@ import streamlit.components.v1 as components
 
 from app.controls import CONTROLS
 from app.i18n import t
+from app.ui.layout_memory import ESSENTIALS_HIDDEN_TABS, show_everything
 
 FIND_KEY = "find-tool"
 _SCROLL_KEY = "_find_scroll"
@@ -119,6 +120,8 @@ def jump_to(name: str) -> None:
     """Open the place called `name` (a key of PLACES) and scroll to it on the next run. Only from a
     callback: it sets the state of widgets that already exist."""
     place = PLACES[name]
+    if place.tab in ESSENTIALS_HIDDEN_TABS:
+        show_everything()
     st.session_state["tool-tab"] = t(place.tab)
     if place.sub_tab:
         st.session_state[place.sub_tab[0]] = t(place.sub_tab[1])

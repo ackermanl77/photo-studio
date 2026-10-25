@@ -3,6 +3,7 @@ Library Catalog, Batch Processor and System Health tools."""
 from __future__ import annotations
 
 import functools
+import json
 import uuid
 from io import BytesIO
 from pathlib import Path
@@ -23,11 +24,53 @@ from app.professional_tools import EXPORT_PROFILES
 from app.raw_import import uploader_types
 from app.recipe_options import without_per_photo_only_keys
 from app.reliability import image_digest
-from app.ui.processing import custom_preset_thumbnail
+from app.ui.processing import custom_preset_thumbnail, look_preview
 from app.ui.project_io import open_library_photo
-from app.ui.state import build_recipe, request_rerun, tab_visible
+from app.ui.state import build_recipe, consume_new_commit, request_rerun, tab_visible
 from app.ui.theme import static_text
+from app.ui_editors import _look_gallery_html
 from app.i18n import t, t_option
+
+
+def _look_title(name: str) -> str:
+    """A built-in look's name as words ("cinematic-soft" -> "Cinematic soft")."""
+    return t(name.replace("-", " ").capitalize())
+
+
+def look_gallery(ctx, p_store: PresetStore, p_names: list[str]) -> None:
+    """The built-in looks and the saved presets as a gallery (UI5, like Photoshop's Presets panel):
+    pointing at a card shows it on the photo, clicking applies it -- through _pending_restore, so it
+    is one history step. The previews are rendered only while this tab is on screen."""
+    with st.container(key="looks-hidden"):
+        pending = st.text_area(t("Look to apply"), key="looks-data", label_visibility="collapsed")
+    if consume_new_commit(pending, "looks-committed"):
+        try:
+            chosen = json.loads(pending)
+            kind, name = chosen["kind"], chosen["name"]
+        except (json.JSONDecodeError, TypeError, KeyError):
+            kind = name = None
+        if kind == "look" and name in ("None", *PRESETS):
+            st.session_state["_pending_restore"] = {"preset": name}
+            st.toast(t("Applied look '{0}'").format(_look_title(name)), icon="🎞️")
+            request_rerun()
+        elif kind == "preset" and name in p_names:
+            st.session_state["_pending_restore"] = without_per_photo_only_keys(p_store.get(name))
+            st.toast(t("Applied preset '{0}'").format(t(name)), icon="📂")
+            request_rerun()
+    if not tab_visible():
+        return
+    current = without_per_photo_only_keys(inline_painted_masks(build_recipe()))
+
+    def card(kind: str, name: str, title: str, recipe: dict, is_current: bool) -> dict:
+        thumb, preview = look_preview(ctx.source_digest, ctx.source, json.dumps(recipe, sort_keys=True, default=str))
+        return {"kind": kind, "name": name, "title": title, "thumb": thumb, "preview": preview, "current": is_current}
+
+    with st.spinner(t("Rendering the previews…")):
+        looks = [card("look", name, _look_title(name), {**current, "preset": name}, current.get("preset", "None") == name)
+                 for name in ("None", *sorted(PRESETS))]
+        presets = [card("preset", name, name, p_store.get(name), False) for name in p_names]
+    markup, height = _look_gallery_html([("Looks", looks), ("Your presets", presets)], "looks")
+    components.html(markup, height=height)
 
 
 def presets_section(ctx) -> None:
@@ -45,12 +88,11 @@ def presets_section(ctx) -> None:
             st.toast(t("Moved the unreadable file to {0}").format(t(backup.name)), icon="🗂️")
             request_rerun()
     ctx.preset_names = p_names
+    look_gallery(ctx, p_store, p_names)
     st.caption(t("Saved: {0}").format(t(', '.join(p_names) if p_names else 'None')))
     if p_names:
         st.markdown(t("**Load a Preset**"))
         p_load_name = st.selectbox(t("Preset to load"), p_names, key="p-load-sel", label_visibility="collapsed", format_func=t_option)
-        if tab_visible():
-            st.image(custom_preset_thumbnail(ctx.source_digest, ctx.source, p_store.get(p_load_name)), width=96, caption=p_load_name)
         p_load_col, p_delete_col = st.columns(2)
         if p_load_col.button(t("📂 Apply"), key="p-load-btn", use_container_width=True):
             # A preset is a recipe like any other: applied through _pending_restore. AI Upscale is

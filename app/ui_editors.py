@@ -93,6 +93,25 @@ def _image_view_html(image: Image.Image, label: str) -> tuple[str, int]:
     return editor_style() + markup, height + 20
 
 
+def _look_gallery_html(groups: list[tuple[str, list[dict]]], key_prefix: str) -> tuple[str, int]:
+    """The look gallery (UI5): `groups` are (title, cards); a card is {"kind", "name", "title",
+    "thumb", "preview", "current"} with base64 JPEGs. Hovering a card shows its preview on the
+    canvas, clicking applies it -- committed as {"kind", "name", "at"} into the hidden text_area in
+    st.container(key=f"{key_prefix}-hidden")."""
+    fields = {
+        "label_root": _tx("Looks and presets"), "label_grid": _tx("Show as a grid"), "label_list": _tx("Show as a list"),
+        "label_hint": _tx("Point at one to preview it on the photo; click to apply."),
+    }
+    config = {
+        "hiddenSelector": f".st-key-{key_prefix}-hidden", "previewLabel": t("Preview: {0}"),
+        "groups": [{"title": t(title), "cards": cards} for title, cards in groups if cards],
+    }
+    # Tall enough for the list view (the taller one past a few cards): a row each, plus titles.
+    count = sum(len(cards) for _title, cards in groups)
+    height = 40 + 30 * sum(1 for _title, cards in groups if cards) + max(84 * -(-count // 3), 50 * count)
+    return _render("looks", fields, config), height
+
+
 def _before_after_html(before: Image.Image, after: Image.Image) -> tuple[str, int]:
     """A draggable before/after comparison: a single range input (or a drag on the photo) drives a
     CSS clip-path on the "before" image layered over the "after" image, split side by side or top

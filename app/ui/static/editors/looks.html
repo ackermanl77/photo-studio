@@ -1,0 +1,25 @@
+<div id="looks-root" role="group" aria-label="{{label_root}}" style="font:12px system-ui;color:var(--ps-text);">
+  <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+    <span style="flex:1;color:var(--ps-text-muted);">{{label_hint}}</span>
+    <button type="button" class="view-btn" data-view="grid" title="{{label_grid}}" aria-label="{{label_grid}}">▦</button>
+    <button type="button" class="view-btn" data-view="list" title="{{label_list}}" aria-label="{{label_list}}">☰</button>
+  </div>
+  <div id="looks-groups"></div>
+</div>
+<style>
+  body { margin: 0; }
+  .view-btn { background:var(--ps-surface-soft); color:var(--ps-text); border:1px solid var(--ps-border-soft); border-radius:5px;
+              padding:2px 8px; font:13px system-ui; cursor:pointer; }
+  .view-btn.active { background:var(--ps-accent); color:var(--ps-on-accent); border-color:var(--ps-accent); }
+  .group-title { margin:8px 0 4px; font-weight:700; color:var(--ps-text-strong); }
+  .cards.grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+  .cards.list { display:flex; flex-direction:column; gap:4px; }
+  .card { display:flex; flex-direction:column; gap:3px; padding:4px; border-radius:6px; cursor:pointer; text-align:left;
+          background:var(--ps-surface-faint); border:1px solid var(--ps-border-soft); color:var(--ps-text); font:11px system-ui; }
+  .cards.list .card { flex-direction:row; align-items:center; gap:8px; }
+  .card:hover, .card:focus-visible { border-color:var(--ps-accent); outline:none; }
+  .card.current { border-color:var(--ps-brand); }
+  .card img { width:100%; aspect-ratio:3 / 2; object-fit:cover; border-radius:4px; display:block; }
+  .cards.list .card img { width:54px; flex:none; }
+  .card span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+</style>

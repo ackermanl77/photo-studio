@@ -12,6 +12,7 @@ Streamlit-free at import (app/ui_editors.py imports it); only inject_page_style(
 """
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -48,9 +49,48 @@ def static_text(name: str) -> str:
     return (STATIC_DIR / name).read_text(encoding="utf-8")
 
 
+def _slider_tracks() -> dict[str, str]:
+    """Sliders whose track shows what the value means (UI4, like Photoshop's Adjustments): widget
+    key -> CSS gradient. Data colours (a colour temperature, a hue), not interface colours, so they
+    are plain hsl() here rather than palette variables."""
+    from app.professional_color import HSL_BAND_HUES
+
+    def hue(degrees: float, saturation: int = 75, lightness: int = 55) -> str:
+        return f"hsl({degrees % 360:.0f} {saturation}% {lightness}%)"
+
+    tracks = {
+        "c-temp": f"linear-gradient(to right, {hue(212)}, hsl(0 0% 80%), {hue(46, 90)})",
+        "c-tint": f"linear-gradient(to right, {hue(120, 60, 45)}, hsl(0 0% 80%), {hue(305, 70)})",
+        "c-saturation": f"linear-gradient(to right, hsl(0 0% 55%), {hue(10, 85)})",
+        "c-vib": f"linear-gradient(to right, hsl(0 0% 55%), {hue(10, 85)})",
+        "t-ev": "linear-gradient(to right, hsl(0 0% 8%), hsl(0 0% 96%))",
+        "t-whites": "linear-gradient(to right, hsl(0 0% 55%), hsl(0 0% 98%))",
+        "t-blacks": "linear-gradient(to right, hsl(0 0% 2%), hsl(0 0% 45%))",
+        "rl-warmth": f"linear-gradient(to right, {hue(212)}, hsl(0 0% 80%), {hue(32, 90)})",
+    }
+    rainbow = ", ".join(hue(degrees) for degrees in range(0, 361, 60))
+    for prefix in ("cg-sh", "cg-mid", "cg-hi"):
+        tracks[f"{prefix}-hue"] = f"linear-gradient(to right, {rainbow})"
+    for band, center in HSL_BAND_HUES.items():
+        key = f"hsl-{band.lower()}"
+        # The hue slider turns the band up to 30 degrees either way (app.professional_color).
+        tracks[f"{key}-h"] = f"linear-gradient(to right, {hue(center - 30)}, {hue(center)}, {hue(center + 30)})"
+        tracks[f"{key}-s"] = f"linear-gradient(to right, hsl(0 0% 55%), {hue(center, 90)})"
+        tracks[f"{key}-l"] = f"linear-gradient(to right, {hue(center, 70, 12)}, {hue(center)}, {hue(center, 70, 88)})"
+    return tracks
+
+
+def slider_tracks_style() -> str:
+    """Streamlit DOM: the track is the first child of the slider's react-aria group. `--ps-track`
+    tells static/sliders.js to leave these tracks alone (no value fill over the meaning)."""
+    track = '[data-testid="stSlider"] [role="group"] > div > div:first-child'
+    return "\n".join(f".st-key-{key} {track} {{ background-image: {gradient} !important; --ps-track: 1; }}"
+                     for key, gradient in _slider_tracks().items())
+
+
 @lru_cache(maxsize=None)
 def page_style() -> str:
-    return f"<style>\n{css_variables()}\n{static_text('theme.css')}\n</style>"
+    return f"<style>\n{css_variables()}\n{static_text('theme.css')}\n{slider_tracks_style()}\n</style>"
 
 
 def editor_style() -> str:
@@ -87,7 +127,25 @@ def icon_tabs_style(tabs_key: str, tabs: list[tuple[str, str]]) -> str:
     return "<style>\n" + "\n".join(rules) + "\n</style>"
 
 
+# Scripts that work on Streamlit's own markup, in the page itself: accessibility fixes (UI3) and
+# slider fills from zero (UI4). Each guards itself, so installing one twice is a no-op.
+PAGE_SCRIPTS = ("a11y.js", "sliders.js")
+
+
+@lru_cache(maxsize=None)
+def page_scripts_loader() -> str:
+    """A one-shot same-origin script that installs PAGE_SCRIPTS in the page (the parent document),
+    where they outlive this iframe -- once per page load (window.__psPageScripts)."""
+    code = json.dumps("\n".join(static_text(name) for name in PAGE_SCRIPTS)).replace("</", "<\\/")  # never closes the <script> early
+    return ("<script>(function(){const w = window.parent; if (w.__psPageScripts) return; w.__psPageScripts = true;"
+            f"const s = w.document.createElement('script'); s.textContent = {code}; w.document.head.appendChild(s);}})();</script>")
+
+
 def inject_page_style() -> None:
+    """The stylesheet, and the scripts for Streamlit's own markup (PAGE_SCRIPTS)."""
     import streamlit as st
+    import streamlit.components.v1 as components
 
     st.markdown(page_style(), unsafe_allow_html=True)
+    with st.container(key="a11y-fixes"):
+        components.html(page_scripts_loader(), height=0)

@@ -1885,12 +1885,40 @@ def test_load_preset_section_shows_a_thumbnail_preview(monkeypatch, tmp_path):
     presets_path.write_text(json.dumps({"Warm": {"exposure": 1.3, "temperature": 40}}), encoding="utf-8")
 
     at = run_with_uploaded_image()
-    open_tab(at, "✦ Presets & Library", "✦ Presets")  # thumbnails only render in the visible tab (F1)
-    at.selectbox(key="p-load-sel").set_value("Warm")
+    open_tab(at, "✦ Presets & Library", "✦ Presets")  # previews only render in the visible tab (F1)
     at.run(timeout=30)
 
     assert not at.exception
-    assert any(img.captions and img.captions[0] == "Warm" for img in at.image)
+    # Now a card in the look gallery (UI5): its thumbnail and canvas-sized preview in the iframe.
+    gallery = next(frame.proto.srcdoc for frame in at.get("iframe") if "looks-groups" in frame.proto.srcdoc)
+    assert '"title": "Warm"' in gallery and '"kind": "preset"' in gallery and '"preview": "/9j/' in gallery
+
+
+def test_the_look_gallery_applies_a_look_or_a_preset_as_one_step(monkeypatch, tmp_path):
+    """UI5: a click in the gallery commits {kind, name}; a built-in look sets Preset Look, a saved
+    preset replaces the recipe -- both through _pending_restore, one Undo step each."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    presets_path = tmp_path / ".photo-studio" / "presets.json"
+    presets_path.parent.mkdir(parents=True)
+    presets_path.write_text(json.dumps({"Warm": {"exposure_ev": 1.0, "temperature": 40}}), encoding="utf-8")
+
+    at = run_with_uploaded_image()
+    open_tab(at, "✦ Presets & Library", "✦ Presets")
+    at.run(timeout=30)
+    look = sorted(PRESETS)[0]
+    at.text_area(key="looks-data").set_value(json.dumps({"kind": "look", "name": look, "at": 1}))
+    open_tab(at, "✦ Presets & Library", "✦ Presets")
+    at.run(timeout=30)
+    assert not at.exception and at.session_state["tone-preset"] == look
+
+    at.text_area(key="looks-data").set_value(json.dumps({"kind": "preset", "name": "Warm", "at": 2}))
+    open_tab(at, "✦ Presets & Library", "✦ Presets")
+    at.run(timeout=30)
+    assert at.session_state["c-temp"] == 40 and at.session_state["t-ev"] == 1.0
+    at.button(key="hist-undo-btn").click()
+    open_tab(at, "✦ Presets & Library", "✦ Presets")
+    at.run(timeout=30)
+    assert at.session_state["c-temp"] == 0 and at.session_state["tone-preset"] == look  # one step back
 
 
 def test_batch_processor_shows_a_thumbnail_preview_for_a_selected_custom_preset(monkeypatch, tmp_path):
@@ -2722,3 +2750,38 @@ def test_the_open_tool_tab_is_remembered_for_the_next_session():
 
     again = run_with_uploaded_image()
     assert again.session_state["tool-tab"] == "◉ Local" and again.session_state["local-tab"] == "🩹 Repair"
+
+
+def test_a_start_screen_tutorial_opens_the_sample_at_its_tool_with_its_steps():
+    """UI7: a "Learn by doing" button loads the sample photo, opens the tool it teaches and shows its
+    steps at the top of the sidebar until "Got it"."""
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    at.button(key="tutorial-crop").click()
+    at.run(timeout=30)
+    assert not at.exception
+    assert at.session_state["restored_source_name"] == "sample_photo.jpg"
+    assert at.session_state["tool-tab"] == "⛶ Geometry" and at.selectbox(key="crop-aspect").value == "4:5 Portrait"
+    assert any("4:5" in md.value for md in at.markdown)
+    at.button(key="tutorial-close-btn").click()
+    at.run(timeout=30)
+    assert "tutorial-close-btn" not in [button.key for button in at.button]
+
+
+def test_essentials_mode_hides_the_advanced_tabs_and_find_a_tool_brings_them_back():
+    """UI8: Essentials hides Curves & Color, Detail and Layers (they still run: their widgets keep
+    their state); jumping to one of their tools returns to Pro. The mode is remembered."""
+    from app.settings import read_settings
+
+    at = run_with_uploaded_image()
+    at.slider(key="c-p2").set_value(150)  # a Curves & Color control, set before hiding the tab
+    at.run(timeout=30)
+    at.button_group(key="ui-mode").set_value("Essentials")
+    at.run(timeout=30)
+    assert not at.exception and read_settings()["mode"] == "Essentials"
+    assert any('[data-key="1"]' in md.value and "display: none" in md.value for md in at.markdown)
+    assert at.slider(key="c-p2").value == 150  # still rendered, still set
+
+    at.selectbox(key="find-tool").set_value("RGB Tone Curve")
+    at.run(timeout=30)
+    assert at.session_state["ui-mode"] == "Pro" and at.session_state["tool-tab"] == "🎨 Curves & Color"
