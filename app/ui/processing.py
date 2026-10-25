@@ -94,6 +94,34 @@ def preset_thumbnails(digest: str, _source: Image.Image) -> dict[str, bytes]:
     return {name: png_bytes(thumb) for name, thumb in thumbnails.items()}
 
 
+LOOK_PREVIEW_EDGE = 640
+
+
+def _jpeg_b64(image: Image.Image, quality: int) -> str:
+    import base64
+
+    buffer = io.BytesIO()
+    image.convert("RGB").save(buffer, format="JPEG", quality=quality)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+@st.cache_data(show_spinner=False, max_entries=48)
+def look_preview(digest: str, _source: Image.Image, recipe_json: str) -> tuple[str, str]:
+    """A look gallery card (UI5): `recipe` applied to the photo, as base64 JPEGs -- a 160 px card
+    thumbnail and a 640 px preview the gallery shows over the canvas on hover. Rendered in-process
+    on a small copy, like custom_preset_thumbnail(): decorative only, the real edit goes through
+    the backend. Falls back to the plain photo if the recipe can't be rendered."""
+    base = _source.copy()
+    base.thumbnail((LOOK_PREVIEW_EDGE, LOOK_PREVIEW_EDGE), Image.Resampling.LANCZOS)
+    try:
+        preview = process_image(FileLike("preview.png", png_bytes(base)), recipe_to_options(sanitize_recipe(json.loads(recipe_json))))
+    except (KeyError, ValueError, OSError, RuntimeError, cv2.error):
+        preview = base
+    thumb = preview.copy()
+    thumb.thumbnail((160, 160), Image.Resampling.LANCZOS)
+    return _jpeg_b64(thumb, 80), _jpeg_b64(preview, 82)
+
+
 @st.cache_data(show_spinner=False, max_entries=THUMBNAIL_CACHE_ENTRIES)
 def custom_preset_thumbnail(digest: str, _source: Image.Image, recipe: dict) -> bytes:
     """A preview of one saved custom preset: a full recipe, so only the real pipeline (called

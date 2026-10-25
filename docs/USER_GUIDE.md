@@ -49,8 +49,12 @@ folder; files over 120 MB aren't listed); a photo opened from the Library or the
 sample isn't listed. **🗑️ Clear recent files** forgets the list and those copies — your own files
 are never touched.
 
-**Your layout is remembered:** the tool tab (and sub-tab) you had open, and the sidebar's width,
-come back the next time you open Photo Studio.
+**🎓 Learn by doing:** four short tutorials on the start screen — fix a flat photo, remove
+something, crop for a 4:5 post, try a look. Each opens the sample photo at the tool it teaches and
+lists its steps at the top of the tools; **✓ Got it** closes them.
+
+**Your layout is remembered:** the tool tab (and sub-tab) you had open, the Essentials/Pro choice
+and the sidebar's width come back the next time you open Photo Studio.
 
 ---
 
@@ -102,8 +106,18 @@ Like Photoshop, the window belongs to the photo:
   **✓ Done**, which goes back to the photo. Each of these tools also has a **✏️ … on the photo**
   button where it sits in the sidebar.
 
-On a narrow window (a phone) the sidebar starts hidden and opens over the photo, and the controls
-above the photo fold into a compact grid so the photo stays near the top of the screen.
+**🌱 Essentials / 🧰 Pro** (under the Tool Workspace heading): Essentials, like Photoshop's Assisted
+workspace, shows only the everyday tabs — Basic, Geometry, Local, Effects, Export and Presets — and
+hides Curves & Color, Detail and Layers. Nothing set there is lost, and **Find a tool** switches
+back to Pro when you look for one of their tools.
+
+**Sliders** show what they do: Temperature runs from blue to yellow, Tint from green to magenta,
+each Color Mixer band through its own hues, Exposure from dark to light; a slider that goes both
+ways (−100…+100) fills from its zero mark instead of from the left end.
+
+On a phone the photo comes first: the tools start closed, the round **»** button at the bottom
+opens them as a sheet over the lower part of the screen (the photo stays in view above it) and
+**«** closes it. The controls above the photo fold into a compact grid.
 
 Every control updates the same live preview — there's no separate "apply" step. Changing a slider
 sends the edit to the local processing backend and the canvas updates in place.
@@ -431,9 +445,11 @@ radius, and an invert checkbox.
 
 ## 12. Presets (✦ Presets & Library → ✦ Presets)
 
-- **Load a Preset** — pick a saved custom preset from the dropdown; a live thumbnail preview shows
-  what it would look like on your current photo before you apply it. **📂 Apply** loads it,
-  **🗑️ Delete** removes it.
+- **Looks and presets gallery** — like Photoshop's Presets panel: the built-in looks and your own
+  presets as cards (**▦** grid or **☰** list). Point at a card and the photo above shows it, labelled
+  "Preview: …", without applying anything; move away and your edit is back. Click to apply — one
+  Undo step. A look keeps the rest of your edit; your own preset replaces it.
+- **Load a Preset** — the same presets by name: **📂 Apply** loads one, **🗑️ Delete** removes it.
 - **Save Current Look as Preset** — type a name and save. This captures your *entire* current
   recipe (every Tone/Lens/Color/Detail/Mask setting), not just a handful of basic sliders — the one
   thing deliberately excluded is the layer overlay image itself, since a preset is a reusable style,

@@ -208,6 +208,11 @@ on:
    sidebar (`[data-testid="stSidebar"] .st-key-<key>`), opens an expander by clicking its `<summary>`
    and flashes the place; the ⌨️ button's icon isn't clipped.
 8. The `--ps-*` colours: header, canvas background, export footer, and the editors' panels/handles.
+   The page scripts (`app.ui.theme.PAGE_SCRIPTS`) still find what they fix: `[data-testid="stIconMaterial"]`,
+   the slider input's `aria-labelledby`, `stFileUploaderDropzoneInput`, iframes titled "st.iframe", and the
+   slider track (`[role="group"] > div > div:first-child`, also the meaningful tracks' selector); the look
+   gallery's hover still finds `.st-key-canvas-stage img`; on a 390 px window the sidebar starts closed and
+   opens as a bottom sheet from the floating button (the browser smoke test checks the first three).
 9. Then run the whole suite (AppTest catches API changes, not layout ones).
 
 Last upgrade: 1.64.0 -> 1.65.0 (2026-10-06, Dependabot #9). Checked headless in Chromium with a photo

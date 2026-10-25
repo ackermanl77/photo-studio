@@ -24,7 +24,28 @@ footer { visibility: hidden; }
 
 /* Streamlit DOM: the tools sidebar (Photoshop-style: the page is for the image). At least 420 px
    while open so the tool tabs and editors have room; drag its edge to widen it, or collapse it. */
-[data-testid="stSidebar"][aria-expanded="true"] { min-width: 420px; }
+@media (min-width: 641px) {
+    [data-testid="stSidebar"][aria-expanded="true"] { min-width: 420px; }
+}
+
+/* Streamlit DOM: on a phone the photo comes first (the sidebar starts closed: initial_sidebar_state
+   "auto"), and the open tools are a bottom sheet over the lower part of the screen, so the photo
+   stays in view above them (UI10). "»" at the top left opens it, "«" closes it. */
+@media (max-width: 640px) {
+    [data-testid="stSidebar"][aria-expanded="true"] {
+        position: fixed !important; top: auto !important; bottom: 0; left: 0;
+        width: 100vw !important; min-width: 100vw !important; max-width: 100vw !important; height: 58vh !important;
+        border-radius: 16px 16px 0 0; border-top: 1px solid var(--ps-border-soft);
+        box-shadow: 0 -8px 24px var(--ps-canvas);
+    }
+    [data-testid="stSidebar"][aria-expanded="true"] > div { height: 100%; }
+    /* The "open the tools" button floats at the bottom, where the sheet comes from. */
+    header[data-testid="stHeader"] [data-testid="stExpandSidebarButton"] {
+        position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) scale(1.25); z-index: 999992;
+        border-radius: 999px; background: var(--ps-accent); border-color: var(--ps-accent);
+    }
+    header[data-testid="stHeader"] [data-testid="stExpandSidebarButton"] * { color: var(--ps-on-accent) !important; }
+}
 [data-testid="stSidebarHeader"] { height: 2.2rem; padding-top: 0.4rem; padding-bottom: 0; }
 [data-testid="stSidebarUserContent"] { padding-top: 0.2rem; }
 [data-testid="stSidebar"] .top-header { padding-bottom: 0.35rem; margin-bottom: 0.4rem; }
@@ -173,7 +194,7 @@ footer { visibility: hidden; }
    through (app/ui_editors.py) -- plumbing, never shown. The substring selectors cover the
    per-selection and per-layer ones, whose keys contain a uuid. */
 .st-key-curve-hidden, .st-key-crop-editor-hidden, .st-key-liquify-editor-hidden, .st-key-cv-nav-wand-hidden,
-.st-key-m-wand-hidden, .st-key-rm-wand-hidden, .st-key-wb-wand-hidden,
+.st-key-m-wand-hidden, .st-key-rm-wand-hidden, .st-key-wb-wand-hidden, .st-key-looks-hidden,
 [class*="-paint-hidden"], [class*="l-path-"][class*="-hidden"] {
     display: none !important;
 }
@@ -184,9 +205,26 @@ footer { visibility: hidden; }
     padding-left: 0.3rem; padding-right: 0.3rem;
 }
 
+/* Streamlit DOM: a slider whose range spans zero fills from zero (static/sliders.js sets the fill
+   and --ps-zero), with a tick marking zero. */
+.ps-zero-track { position: relative; }
+.ps-zero-track::after {
+    content: ""; position: absolute; left: var(--ps-zero); top: -3px; width: 2px; height: 10px;
+    margin-left: -1px; border-radius: 1px; background: var(--ps-text-muted); pointer-events: none;
+}
+
+/* Streamlit DOM: the look gallery's hover preview (static/editors/looks.js) swaps the canvas photo
+   and labels it, so a preview is never mistaken for the edit. */
+.st-key-canvas-stage { position: relative; }
+.ps-look-badge {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 2; pointer-events: none;
+    padding: 0.2rem 0.7rem; border-radius: 999px; font-size: 0.8rem; font-weight: 700;
+    background: var(--ps-accent); color: var(--ps-on-accent);
+}
+
 /* Streamlit DOM: Find a tool (app/ui/tool_search.py) -- its one-shot scroll script's iframe takes no
    room (still loaded and run: not display:none), and the tool it jumped to flashes. */
-.st-key-find-scroll { position: absolute; width: 0; height: 0; overflow: hidden; }
+.st-key-find-scroll, .st-key-a11y-fixes { position: absolute; width: 0; height: 0; overflow: hidden; }
 .ps-find-flash { animation: ps-find-flash 1.8s ease-out; border-radius: 6px; }
 @keyframes ps-find-flash {
     0%, 40% { box-shadow: 0 0 0 2px var(--ps-accent); }
@@ -198,3 +236,15 @@ footer { visibility: hidden; }
 .st-key-hist-undo-btn kbd, .st-key-hist-redo-btn kbd {
     display: none;
 }
+
+/* Streamlit DOM: on the start screen (the uploader is in the page, not yet in the sidebar) the
+   uploader is a large drop target, like Photoshop's Home screen (UI7). */
+[data-testid="stMain"] [class*="st-key-main-upload-"] [data-testid="stFileUploaderDropzone"] {
+    min-height: 8.5rem;
+    border: 2px dashed var(--ps-border-soft);
+    background: var(--ps-surface-faint);
+    align-items: center;
+}
+
+/* Streamlit DOM: an open tutorial's steps (app/ui/tutorials.py) stand out from the tools. */
+.st-key-tutorial-card { border-color: var(--ps-accent) !important; }

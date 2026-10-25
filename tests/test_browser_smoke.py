@@ -247,3 +247,12 @@ def test_refine_on_pause_editor_drag_and_a_slider_in_a_real_browser(page):
         devtools.key("ArrowRight", "ArrowRight", 39)
     _wait(lambda: _canvas_src(devtools) not in ("", current), 120, "the canvas to re-render after Exposure")
     assert "Traceback" not in _text(devtools)
+
+    # 4. The page scripts (app.ui.theme.PAGE_SCRIPTS) keep Streamlit's markup fixed: icon ligatures
+    # hidden from screen readers, sliders named once (UI3), and a +/- slider filled from zero (UI4).
+    _wait(lambda: devtools.eval("""(() => window.__psA11yFixes && window.__psSliderFills
+        && !document.querySelector('[data-testid=stSlider] input[type=range][aria-labelledby]')
+        && [...document.querySelectorAll('[data-testid=stIconMaterial]')].every(i => i.getAttribute('aria-hidden') === 'true'))()"""),
+        30, "the accessibility fixes")
+    fill = devtools.eval("document.querySelector('.st-key-t-contrast [role=group] > div > div:first-child').style.backgroundImage")
+    assert "50%" in fill  # Contrast at 0: the fill starts and ends at zero, mid-track

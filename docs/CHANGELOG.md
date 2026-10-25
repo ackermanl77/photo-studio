@@ -7,6 +7,40 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-24 -- The rest of the UI audit: accessibility, slider tracks, look gallery, tutorials, Essentials, phone sheet
+
+The open rows of the 2026-10-22 UI REA audit (improvement report UI3-UI10):
+
+- **UI3 accessibility.** `static/a11y.js`, installed in the page itself by a one-shot loader in
+  `inject_page_style()` and kept applied by a MutationObserver: Material icon ligatures
+  ("keyboard_arrow_right", "upload") hidden from screen readers; sliders no longer named twice
+  (React Aria's `aria-labelledby` pointed at the input and its group as well as its `aria-label`);
+  the uploaders' file input named after its uploader instead of "file upload"; zero-size script
+  iframes hidden and an editor's iframe titled with its label (Streamlit titles them all
+  "st.iframe"); the app title is a level-1 heading. Checked with Playwright's aria snapshot; the
+  browser smoke test asserts the first two.
+- **UI4 slider tracks.** `theme.slider_tracks_style()`: Temperature blue to yellow, Tint green to
+  magenta, Saturation/Vibrance grey to colour, Exposure/Whites/Blacks by brightness, each Color
+  Mixer band through its own +/-30 degree hue range, saturation and lightness, the grading hues
+  through the spectrum. `static/sliders.js`: every other slider spanning zero fills from zero, in
+  Streamlit's own colours, with a tick there. (An editable number box per slider is still open --
+  Streamlit's slider has none.)
+- **UI5 look gallery** (Presets tab, `library.look_gallery()`, `static/editors/looks.*`): the built-in
+  looks and the saved presets as cards, grid or list. Pointing at one swaps the canvas photo for a
+  640 px preview rendered in-process (`processing.look_preview()`, cached) with a "Preview: ..."
+  badge; leaving restores it; a click applies it through `_pending_restore` -- one Undo step.
+  Rendered only while the tab is on screen.
+- **UI7 start screen.** A large dashed drop target, and four "Learn by doing" tutorials
+  (`app/ui/tutorials.py`) that open the sample at the tool they teach (Find a tool's `jump_to`) with
+  their steps in a card until "Got it". The sample photo's constants moved there.
+- **UI8 Essentials / Pro** (`layout_memory.mode_switch`, remembered): Essentials hides the Curves &
+  Color, Detail and Layers tab icons -- they still render, so nothing set there is lost; Find a tool
+  returns to Pro for their tools.
+- **UI10 phone.** The sidebar starts closed on a phone (`initial_sidebar_state="auto"`; it was
+  "expanded", and its 420 px minimum was wider than a 390 px screen, so the tools covered the photo);
+  the minimum now applies above 640 px, and on a phone the open sidebar is a bottom sheet (58 % of
+  the height) under the photo, opened from a floating button at the bottom.
+
 ## 2026-10-23 -- Recent files, the bar over photo tools, Flip view, remembered layout
 
 The rest of the Photoshop review's list:

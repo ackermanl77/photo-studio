@@ -24,18 +24,15 @@ from app.edit_history import EditHistory
 from app.geometry import orient
 from app.observability import configure_logging
 from app.raw_import import uploader_types
-from app.ui import canvas, export_panel, layout_memory, processing, tool_search
+from app.ui import canvas, export_panel, layout_memory, processing, tool_search, tutorials
 from app.ui.context import EditorContext
 from app.ui.project_io import open_launch_file, open_project_bytes, recent_files_section, remember_opened_file, remember_opened_project
+from app.ui.tutorials import SAMPLE_PHOTO_NAME, SAMPLE_PHOTO_PATH  # the bundled sample, also the tutorials'
 from app.ui.state import build_recipe, consume_rerun_request, restore_recipe_to_state, set_tab_visible, tab_open, take_canvas_editors
 from app.ui.tabs import basic, color, detail, geometry, layers_tab, library, local
 from app.ui.theme import icon_tabs_style, inject_page_style
 from app.i18n import LANGUAGES, save_language, saved_language, set_language, t
 
-# A small bundled placeholder image (generated, not a real photo) so a first-time visitor can
-# explore every tool; loaded through the same restored-source path a reopened project uses.
-SAMPLE_PHOTO_PATH = Path(__file__).resolve().parent / "assets" / "sample_photo.jpg"
-SAMPLE_PHOTO_NAME = "sample_photo.jpg"
 # The app icon (the browser tab and the header); the .exe's is photostudio.ico, rendered from the SVG.
 APP_ICON_PNG = Path(__file__).resolve().parent / "assets" / "photostudio.png"
 APP_ICON_SVG = Path(__file__).resolve().parent / "assets" / "photostudio.svg"
@@ -49,7 +46,7 @@ LIBRARY_TABS = ["✦ Presets", "☰ Library & Batch"]
 # The tab rows whose open tab is remembered between launches (app.ui.layout_memory).
 TAB_LISTS = {"tool-tab": TOOL_TABS, "local-tab": LOCAL_TABS, "library-tab": LIBRARY_TABS}
 
-st.set_page_config(page_title="Photo Studio Pro", page_icon=str(APP_ICON_PNG), layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Photo Studio Pro", page_icon=str(APP_ICON_PNG), layout="wide", initial_sidebar_state="auto")  # auto: open on a desktop, closed on a phone (UI10)
 # The Streamlit process's own log (R2: modules never configure logging on import). Idempotent.
 configure_logging("frontend")
 inject_page_style()
@@ -67,7 +64,7 @@ photo_open = bool(st.session_state.get(_upload_key)) or "restored_source_bytes" 
 _app_icon = base64.b64encode(APP_ICON_SVG.read_bytes()).decode("ascii")
 (st.sidebar if photo_open else st).markdown(f"""
 <div class="top-header">
-    <div class="brand-title">
+    <div class="brand-title" role="heading" aria-level="1">
         <img class="brand-icon" src="data:image/svg+xml;base64,{_app_icon}" alt="">
         <span>Photo Studio</span>
         <span class="brand-badge">CPU Pro</span>
@@ -145,7 +142,7 @@ open_bar.__exit__(None, None, None)
 
 if not uploaded and "restored_source_bytes" not in st.session_state:
     st.info(t("👆 Upload an image above, load a saved project, or click \"Try a sample photo\" to open the editing workspace."))
-    recent_files_section(compact=False)  # Photoshop's Home screen: the files opened lately
+    tutorials.start_screen_extras()  # Photoshop's Home screen: Recent files, hands-on tutorials
     st.stop()
 
 # A fresh upload wins; otherwise the photo a project/Library/launch file opened.
@@ -191,7 +188,9 @@ take_canvas_editors()  # the open tab's photo editors register again below (an i
 with tools_col:
     st.markdown(t('<div class="panel-header-title">🛠️ Tool Workspace</div>'), unsafe_allow_html=True)
     layout_memory.restore_tabs(TAB_LISTS)  # the tabs open last time, before they're created
+    layout_memory.mode_switch(TOOL_TABS)  # Essentials / Pro
     tool_search.find_tool_box()
+    tutorials.tutorial_panel()
     # The nine tool tabs as an icon strip (Photoshop's toolbar): one row in the sidebar, names on
     # hover and under the strip. The labels themselves stay the tabs' values.
     st.markdown(icon_tabs_style("tool-tab", [tuple(t(label).split(" ", 1)) for label in TOOL_TABS]), unsafe_allow_html=True)
