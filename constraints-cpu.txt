@@ -23,7 +23,7 @@ jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 lensfunpy==1.18.0
 MarkupSafe==3.0.4
-narwhals==2.26.0
+narwhals==2.27.1
 numpy==2.5.2
 opencv-python-headless==5.0.0.93
 packaging==26.3
