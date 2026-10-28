@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
@@ -44,20 +45,42 @@ def _import_changed_sidecar(catalog: PhotoCatalog, path: Path) -> None:
     sidecar_file = find_sidecar(path)
     if sidecar_file is None:
         return
-    try:
-        mtime = sidecar_file.stat().st_mtime
-    except OSError:
+    snapshot = _read_sidecar_snapshot(sidecar_file)
+    if snapshot is None:
         return
-    known = catalog.xmp_mtime(path)
-    if known is not None and known >= 0 and mtime > known:
-        sidecar = read_sidecar(path)
+    content, mtime = snapshot
+    fingerprint = hashlib.sha256(content).hexdigest()
+    state = catalog.xmp_state(path)
+    if state is None:
+        return
+    known, known_fingerprint = state
+    is_new_catalog_entry = known == 0 and not known_fingerprint
+    has_changed = mtime > known or bool(known_fingerprint and fingerprint != known_fingerprint)
+    if is_new_catalog_entry or (known >= 0 and has_changed):
+        sidecar = read_sidecar(path, content=content)
         if sidecar is not None:
             tags = sidecar["tags"] + ([REJECTED_TAG] if sidecar["rejected"] else [])
             catalog.upsert(path, rating=sidecar["rating"], tags=tags)
             label = sidecar.get("label", "")
             catalog.set_label(path, label if label in COLOR_LABELS else "")
-    if known != mtime:
-        catalog.set_xmp_mtime(path, mtime)
+    catalog.set_xmp_state(path, mtime, fingerprint)
+
+
+def _read_sidecar_snapshot(sidecar_file: Path) -> tuple[bytes, float] | None:
+    """Read one stable file snapshot so its parsed content and persisted hash cannot diverge."""
+    try:
+        with sidecar_file.open("rb") as source:
+            before = os.fstat(source.fileno())
+            content = source.read()
+            after = os.fstat(source.fileno())
+    except OSError:
+        return None
+    def signature(stat):
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+    if signature(before) != signature(after):
+        return None
+    return content, after.st_mtime
 
 
 def save_rating(catalog: PhotoCatalog, path: str | Path, rating: int, tags, write_xmp: bool = False,
@@ -80,7 +103,10 @@ def save_rating(catalog: PhotoCatalog, path: str | Path, rating: int, tags, writ
     sidecar_file = find_sidecar(path)
     if sidecar_file is not None:
         # Our own write isn't a change from another program: the next scan mustn't re-import it.
-        catalog.set_xmp_mtime(path, sidecar_file.stat().st_mtime)
+        snapshot = _read_sidecar_snapshot(sidecar_file)
+        if snapshot is not None:
+            content, mtime = snapshot
+            catalog.set_xmp_state(path, mtime, hashlib.sha256(content).hexdigest())
     return None
 
 

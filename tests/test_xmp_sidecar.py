@@ -125,6 +125,66 @@ def test_a_rescan_reads_a_sidecar_another_program_changed(tmp_path):
     assert sorted(catalog.get(jpeg)["tags"]) == ["beach", "family"]
 
 
+def test_a_rescan_detects_changed_sidecar_content_with_the_same_mtime(tmp_path):
+    import os
+
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    jpeg = _photo(folder, "a.jpg")
+    sidecar = write_sidecar(jpeg, 3, ["beach"])
+    database = tmp_path / "catalog.sqlite"
+    index_folder(folder, database, score=False)
+    catalog = PhotoCatalog(database)
+    catalog.upsert(jpeg, rating=1, tags=["mine"])
+    original_stat = sidecar.stat()
+
+    write_sidecar(jpeg, 5, ["family"])
+    os.utime(sidecar, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    assert sidecar.stat().st_mtime_ns == original_stat.st_mtime_ns
+    index_folder(folder, database, score=False)
+
+    assert catalog.get(jpeg)["rating"] == 5
+    assert catalog.get(jpeg)["tags"] == ["family"]
+
+
+def test_sidecar_hash_migration_baselines_legacy_rows_before_equal_mtime_changes(tmp_path):
+    import os
+    import sqlite3
+
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    jpeg = _photo(folder, "a.jpg")
+    sidecar = write_sidecar(jpeg, 3, ["beach"])
+    mtime = sidecar.stat().st_mtime
+    database = tmp_path / "catalog.sqlite"
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "CREATE TABLE photos (path TEXT PRIMARY KEY, rating INTEGER DEFAULT 0, "
+            "tags TEXT DEFAULT '', xmp_mtime REAL DEFAULT 0)"
+        )
+        connection.execute(
+            "INSERT INTO photos(path, rating, tags, xmp_mtime) VALUES (?, 1, 'mine', ?)",
+            (str(jpeg), mtime),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    index_folder(folder, database, score=False)
+    catalog = PhotoCatalog(database)
+    assert catalog.get(jpeg)["rating"] == 1
+    assert catalog.xmp_state(jpeg)[1]
+    original_stat = sidecar.stat()
+
+    write_sidecar(jpeg, 5, ["family"])
+    os.utime(sidecar, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    index_folder(folder, database, score=False)
+
+    assert catalog.get(jpeg)["rating"] == 5
+    assert catalog.get(jpeg)["tags"] == ["family"]
+
+
 def test_importing_a_sidecar_preserves_commas_in_tags(tmp_path):
     folder = tmp_path / "photos"
     folder.mkdir()
