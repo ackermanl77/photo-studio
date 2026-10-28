@@ -233,6 +233,30 @@ def test_custom_ratio_survives_switching_the_aspect_ratio():
     assert at.number_input(key="crop-custom-w").value == 7
 
 
+@pytest.mark.slow
+def test_a_slider_value_can_be_typed():
+    """UI4: every registry slider has a number box that follows it and, when typed into, moves it
+    (snapped to the slider's step and range)."""
+    at = run_with_uploaded_image()
+    at.slider(key="t-ev").set_value(0.5)
+    at.run(timeout=30)
+    assert at.number_input(key="t-ev-value").value == 0.5
+    at.number_input(key="t-ev-value").set_value(1.23)
+    at.run(timeout=30)
+    assert not at.exception
+    assert at.slider(key="t-ev").value == 1.25 and at.number_input(key="t-ev-value").value == 1.25
+    at.number_input(key="d-clar-value").set_value(-40)
+    at.run(timeout=30)
+    assert at.slider(key="d-clar").value == -40
+    assert "**Presence**" not in _markdowns(at)  # the typed value marks its section modified
+
+
+def test_slider_number_format_follows_the_step():
+    from app.ui.widgets import _number_format
+
+    assert _number_format(0.05) == "%.2f" and _number_format(0.1) == "%.1f" and _number_format(1.0) == "%.0f"
+
+
 # --- P5: painted masks stored once --------------------------------------------------------------
 
 def test_painted_masks_are_interned_and_inlined_again_for_files():

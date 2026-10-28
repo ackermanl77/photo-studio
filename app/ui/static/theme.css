@@ -248,3 +248,26 @@ footer { visibility: hidden; }
 
 /* Streamlit DOM: an open tutorial's steps (app/ui/tutorials.py) stand out from the tools. */
 .st-key-tutorial-card { border-color: var(--ps-accent) !important; }
+
+/* Streamlit DOM: a slider's number box (UI4, app.ui.widgets.render_control) sits at the right of
+   the slider's label row, like Photoshop's Adjustments, instead of taking a row of its own. Its
+   step buttons are hidden (the arrow keys still step), and so is the value over the thumb, which
+   the box now shows. */
+[class*="st-key-value-row-"] { position: relative; gap: 0; container-type: inline-size; }
+[class*="st-key-value-row-"] > [data-testid="stElementContainer"]:has([data-testid="stNumberInput"]) {
+    position: absolute; top: 0; right: 0; width: 4.4rem; z-index: 1;
+}
+[class*="st-key-value-row-"] [data-testid="stSlider"] [data-testid="stWidgetLabel"] { padding-right: 4.7rem; }
+[class*="st-key-value-row-"] [data-testid="stSliderThumbValue"] { display: none; }
+[class*="st-key-value-row-"] [data-testid="stNumberInputStepUp"],
+[class*="st-key-value-row-"] [data-testid="stNumberInputStepDown"] { display: none; }
+[class*="st-key-value-row-"] [data-testid="stNumberInputContainer"] { height: 1.6rem; }
+[class*="st-key-value-row-"] [data-testid="stNumberInput"] input {
+    padding: 0 0.35rem; font-size: 0.8rem; text-align: right; font-variant-numeric: tabular-nums;
+}
+/* In a narrow column (Color Grading's three) a slimmer box leaves the label room for a word. */
+@container (max-width: 160px) {
+    [data-testid="stElementContainer"]:has(> [data-testid="stNumberInput"]) { width: 2.7rem !important; }
+    [data-testid="stSlider"] [data-testid="stWidgetLabel"] { padding-right: 2.9rem !important; }
+    [data-testid="stNumberInput"] input { padding: 0 0.2rem !important; font-size: 0.75rem !important; }
+}

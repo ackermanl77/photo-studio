@@ -7,6 +7,19 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-27 -- A number box on every slider (UI4 done)
+
+- **Type a slider's value**, as in Photoshop's Adjustments. `widgets.render_control()` renders every
+  registry slider with a visible label inside a `value-row-<widget key>` container, followed by a
+  number box (`<widget key>-value`), and `static/theme.css` places the box at the right of the
+  slider's label row instead of on a row of its own. The value over the thumb and the box's +/-
+  buttons are hidden; the arrow keys still step. A container query gives narrow columns (Color
+  Grading's three) a slimmer box. The box is set from the slider before it renders; typing calls
+  `_value_typed()`, which snaps to the slider's step and range and sets the slider's key (a callback
+  runs before the script, as with the numeric crop fields). The new keys hold no saved state: the
+  slider keys stay the only ones Undo, presets and projects read. Checked in headless Chrome:
+  typing 1.5 into Exposure's box moves the real slider; 104 slider rows.
+
 ## 2026-10-24 -- The rest of the UI audit: accessibility, slider tracks, look gallery, tutorials, Essentials, phone sheet
 
 The open rows of the 2026-10-22 UI REA audit (improvement report UI3-UI10):
