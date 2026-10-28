@@ -50,14 +50,16 @@ def _descriptions(root: ET.Element) -> list[ET.Element]:
     return list(root.iter(_q(RDF_NS, "Description")))
 
 
-def read_sidecar(photo: str | Path) -> dict | None:
+def read_sidecar(photo: str | Path, content: bytes | None = None) -> dict | None:
     """``{"rating": 0-5, "rejected": bool, "tags": [...]}`` from ``photo``'s sidecar, or None when
-    there is none or it can't be read. A rating outside 0-5 other than -1 is clamped."""
+    there is none or it can't be read. `content`, when supplied, is the already-read sidecar
+    snapshot used by the catalog to fingerprint and parse the same bytes. A rating outside 0-5
+    other than -1 is clamped."""
     path = find_sidecar(photo)
     if path is None:
         return None
     try:
-        root = ET.parse(path).getroot()
+        root = ET.fromstring(content) if content is not None else ET.parse(path).getroot()
     except (ET.ParseError, OSError):
         return None
     rating = None

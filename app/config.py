@@ -45,6 +45,18 @@ EDIT_LANE_HEADER = "X-Edit-Lane"
 # re-uploading the whole lossless PNG (~76 MB at 24 MP).
 STAGE_HANDLE_HEADER = "X-Photo-Stage-Handle"
 STAGE_CACHE_ENTRIES = int(os.getenv("PHOTO_STAGE_CACHE_ENTRIES", "4"))
+# Stage results are bounded independently by pixel count and decoded pixel storage. Defaults derive
+# from the upload pixel limit (at most one 50 MP RGBA image at the default settings).
+_STAGE_CACHE_PIXEL_LIMIT = max(0, MAX_IMAGE_PIXELS)
+STAGE_CACHE_MAX_PIXELS = min(
+    _STAGE_CACHE_PIXEL_LIMIT,
+    max(0, int(os.getenv("PHOTO_STAGE_CACHE_MAX_PIXELS", str(_STAGE_CACHE_PIXEL_LIMIT)))),
+)
+_STAGE_CACHE_BYTE_LIMIT = _STAGE_CACHE_PIXEL_LIMIT * 4
+STAGE_CACHE_MAX_BYTES = min(
+    _STAGE_CACHE_BYTE_LIMIT,
+    max(0, int(os.getenv("PHOTO_STAGE_CACHE_MAX_BYTES", str(_STAGE_CACHE_BYTE_LIMIT)))),
+)
 # How many CPU-heavy steps (Non-Local Means denoise, dehaze) may run at once across all requests.
 MAX_HEAVY_JOBS = max(1, int(os.getenv("PHOTO_MAX_HEAVY_JOBS", "2")))
 

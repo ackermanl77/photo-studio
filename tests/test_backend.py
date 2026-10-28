@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
+import app.backend as backend_module
 from app.backend import app
 from app.config import MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES
 from app.image_processor import PhotoProcessor
@@ -453,6 +454,57 @@ def test_process_endpoint_preserves_icc_profile():
 
     assert response.status_code == 200
     assert Image.open(io.BytesIO(response.data)).info.get("icc_profile") == profile
+
+
+def test_stage_cache_evicts_to_respect_pixel_and_byte_budgets(monkeypatch):
+    monkeypatch.setattr(backend_module, "STAGE_CACHE_ENTRIES", 4)
+    monkeypatch.setattr(backend_module, "STAGE_CACHE_MAX_PIXELS", 8)
+    monkeypatch.setattr(backend_module, "STAGE_CACHE_MAX_BYTES", 24)
+    with backend_module._STAGE_CACHE_LOCK:
+        backend_module._STAGE_CACHE.clear()
+
+    first = backend_module._remember_stage(Image.new("RGB", (2, 2)))
+    second = backend_module._remember_stage(Image.new("RGB", (2, 2)))
+    third = backend_module._remember_stage(Image.new("RGB", (2, 2)))
+
+    assert first and second and third
+    assert backend_module._recall_stage(first) is None
+    assert backend_module._recall_stage(second) is not None
+    assert backend_module._recall_stage(third) is not None
+    assert sum(entry[1] for entry in backend_module._STAGE_CACHE.values()) <= 8
+    assert sum(entry[2] for entry in backend_module._STAGE_CACHE.values()) <= 24
+    with backend_module._STAGE_CACHE_LOCK:
+        backend_module._STAGE_CACHE.clear()
+
+
+def test_stage_cache_skips_images_over_the_configured_budget(monkeypatch):
+    monkeypatch.setattr(backend_module, "STAGE_CACHE_MAX_PIXELS", 3)
+    monkeypatch.setattr(backend_module, "STAGE_CACHE_MAX_BYTES", 24)
+    with backend_module._STAGE_CACHE_LOCK:
+        backend_module._STAGE_CACHE.clear()
+
+    handle = backend_module._remember_stage(Image.new("RGB", (2, 2)))
+
+    assert handle is None
+    assert not backend_module._STAGE_CACHE
+
+
+def test_stage_cache_enforces_byte_budget_separately_from_pixel_budget(monkeypatch):
+    monkeypatch.setattr(backend_module, "STAGE_CACHE_ENTRIES", 4)
+    monkeypatch.setattr(backend_module, "STAGE_CACHE_MAX_PIXELS", 100)
+    monkeypatch.setattr(backend_module, "STAGE_CACHE_MAX_BYTES", 12)
+    with backend_module._STAGE_CACHE_LOCK:
+        backend_module._STAGE_CACHE.clear()
+
+    first = backend_module._remember_stage(Image.new("RGB", (2, 2)))
+    second = backend_module._remember_stage(Image.new("RGB", (2, 2)))
+
+    assert first and second
+    assert backend_module._recall_stage(first) is None
+    assert backend_module._recall_stage(second) is not None
+    assert sum(entry[2] for entry in backend_module._STAGE_CACHE.values()) <= 12
+    with backend_module._STAGE_CACHE_LOCK:
+        backend_module._STAGE_CACHE.clear()
 
 
 def test_process_endpoint_normalizes_a_real_embedded_profile_to_srgb():

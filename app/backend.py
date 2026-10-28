@@ -17,8 +17,8 @@ from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from app.config import (
     BACKEND_HOST, BACKEND_PORT, EDIT_GENERATION_HEADER, EDIT_LANE_HEADER, EDIT_SESSION_HEADER, INTERNAL_STAGE_HEADER,
-    INTERNAL_STAGE_RESUME, MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES, STAGE_CACHE_ENTRIES, STAGE_HANDLE_HEADER, TOKEN_HEADER,
-    backend_token,
+    INTERNAL_STAGE_RESUME, MAX_IMAGE_PIXELS, MAX_UPLOAD_BYTES, STAGE_CACHE_ENTRIES, STAGE_CACHE_MAX_BYTES,
+    STAGE_CACHE_MAX_PIXELS, STAGE_HANDLE_HEADER, TOKEN_HEADER, backend_token,
 )
 from app.edit_schema import parse_options
 from app.export import FLOAT_FORMATS, encode_export
@@ -114,8 +114,24 @@ def _cancellation_check():
 # A `stop_after="detail"` result is kept here (a few entries, LRU) and its handle returned in
 # STAGE_HANDLE_HEADER; the frontend's Stage 2 then sends just the handle instead of re-uploading the
 # lossless PNG. A miss (evicted, or the backend restarted) is a 410 and the client re-uploads.
-_STAGE_CACHE: "OrderedDict[str, Image.Image]" = OrderedDict()
+_STAGE_CACHE: "OrderedDict[str, tuple[Image.Image, int, int]]" = OrderedDict()
 _STAGE_CACHE_LOCK = threading.Lock()
+
+_STAGE_BYTES_PER_PIXEL = {
+    "1": 0,
+    "L": 1,
+    "LA": 2,
+    "P": 1,
+    "RGB": 3,
+    "RGBX": 4,
+    "RGBA": 4,
+    "CMYK": 4,
+    "I;16": 2,
+    "I;16L": 2,
+    "I;16B": 2,
+    "I": 4,
+    "F": 4,
+}
 
 
 def _copy_with_info(image: Image.Image) -> Image.Image:
@@ -124,22 +140,50 @@ def _copy_with_info(image: Image.Image) -> Image.Image:
     return copy
 
 
-def _remember_stage(image: Image.Image) -> str:
+def _stage_image_cost(image: Image.Image) -> tuple[int, int] | None:
+    bytes_per_pixel = _STAGE_BYTES_PER_PIXEL.get(image.mode)
+    if bytes_per_pixel is None:
+        return None
+    pixels = image.width * image.height
+    byte_count = ((image.width + 7) // 8) * image.height if image.mode == "1" else pixels * bytes_per_pixel
+    return pixels, byte_count
+
+
+def _remember_stage(image: Image.Image) -> str | None:
+    cost = _stage_image_cost(image)
+    if cost is None:
+        return None
+    pixels, byte_count = cost
+    if (
+        STAGE_CACHE_ENTRIES <= 0
+        or pixels > STAGE_CACHE_MAX_PIXELS
+        or byte_count > STAGE_CACHE_MAX_BYTES
+    ):
+        return None
+
     handle = uuid.uuid4().hex
     with _STAGE_CACHE_LOCK:
-        _STAGE_CACHE[handle] = _copy_with_info(image)
-        while len(_STAGE_CACHE) > STAGE_CACHE_ENTRIES:
+        while _STAGE_CACHE:
+            cached_pixels = sum(entry[1] for entry in _STAGE_CACHE.values())
+            cached_bytes = sum(entry[2] for entry in _STAGE_CACHE.values())
+            if (
+                len(_STAGE_CACHE) < STAGE_CACHE_ENTRIES
+                and cached_pixels + pixels <= STAGE_CACHE_MAX_PIXELS
+                and cached_bytes + byte_count <= STAGE_CACHE_MAX_BYTES
+            ):
+                break
             _STAGE_CACHE.popitem(last=False)
+        _STAGE_CACHE[handle] = (_copy_with_info(image), pixels, byte_count)
     return handle
 
 
 def _recall_stage(handle: str) -> Image.Image | None:
     with _STAGE_CACHE_LOCK:
-        image = _STAGE_CACHE.get(handle)
-        if image is None:
+        entry = _STAGE_CACHE.get(handle)
+        if entry is None:
             return None
         _STAGE_CACHE.move_to_end(handle)
-        return _copy_with_info(image)
+        return _copy_with_info(entry[0])
 
 
 @app.after_request

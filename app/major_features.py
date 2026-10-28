@@ -218,13 +218,17 @@ class PhotoCatalog:
     def __init__(self, database: str | Path):
         self.database = str(database)
         with self._connect() as connection:
-            connection.execute("CREATE TABLE IF NOT EXISTS photos (path TEXT PRIMARY KEY, rating INTEGER DEFAULT 0, tags TEXT DEFAULT '', xmp_mtime REAL DEFAULT 0)")
+            connection.execute("CREATE TABLE IF NOT EXISTS photos (path TEXT PRIMARY KEY, rating INTEGER DEFAULT 0, tags TEXT DEFAULT '', xmp_mtime REAL DEFAULT 0, xmp_hash TEXT DEFAULT '')")
             columns = {row[1] for row in connection.execute("PRAGMA table_info(photos)")}
             if "xmp_mtime" not in columns:
                 # A catalog from before sidecar tracking: its photos' sidecars are "unknown" (-1), so
                 # the next scan only records their current time instead of re-importing them over
                 # ratings given in the app since. New rows are inserted with 0 explicitly.
                 connection.execute("ALTER TABLE photos ADD COLUMN xmp_mtime REAL DEFAULT -1")
+            if "xmp_hash" not in columns:
+                # The first scan after adding fingerprints records a baseline for existing rows
+                # without importing it over catalog edits made before this schema migration.
+                connection.execute("ALTER TABLE photos ADD COLUMN xmp_hash TEXT DEFAULT ''")
             if "tags_json" not in columns:
                 # Preserve legacy comma-delimited tags as-is; only new writes have an unambiguous
                 # structured representation because commas may be part of a tag.
@@ -290,6 +294,21 @@ class PhotoCatalog:
         with self._connect() as connection:
             row = connection.execute("SELECT xmp_mtime FROM photos WHERE path = ?", (str(path),)).fetchone()
         return None if row is None else float(row[0])
+
+    def xmp_state(self, path: str | Path) -> tuple[float, str] | None:
+        """Return the last observed sidecar modification time and SHA-256 fingerprint."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT xmp_mtime, xmp_hash FROM photos WHERE path = ?", (str(path),)
+            ).fetchone()
+        return None if row is None else (float(row[0]), str(row[1] or ""))
+
+    def set_xmp_state(self, path: str | Path, mtime: float, fingerprint: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE photos SET xmp_mtime = ?, xmp_hash = ? WHERE path = ?",
+                (float(mtime), fingerprint, str(path)),
+            )
 
     def set_xmp_mtime(self, path: str | Path, mtime: float) -> None:
         with self._connect() as connection:
