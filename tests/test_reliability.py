@@ -88,3 +88,13 @@ def test_project_archive_validation_rejects_invalid_json_manifest():
 
     with pytest.raises(ValueError, match="not valid JSON"):
         validate_project_archive(archive.getvalue())
+
+
+@pytest.mark.parametrize("manifest", ["[]", "null", '"manifest"'])
+def test_project_archive_validation_rejects_non_object_json_manifests(manifest):
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("project.json", manifest)
+
+    with pytest.raises(ValueError, match="must be an object"):
+        validate_project_archive(archive.getvalue())

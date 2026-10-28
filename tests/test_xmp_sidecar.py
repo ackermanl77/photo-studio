@@ -125,6 +125,38 @@ def test_a_rescan_reads_a_sidecar_another_program_changed(tmp_path):
     assert sorted(catalog.get(jpeg)["tags"]) == ["beach", "family"]
 
 
+def test_importing_a_sidecar_preserves_commas_in_tags(tmp_path):
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    jpeg = _photo(folder, "a.jpg")
+    write_sidecar(jpeg, 3, ["bird, perched"])
+    database = tmp_path / "catalog.sqlite"
+
+    index_folder(folder, database)
+
+    assert PhotoCatalog(database).get(jpeg)["tags"] == ["bird, perched"]
+
+
+def test_rescan_clears_a_catalog_label_removed_from_the_sidecar(tmp_path):
+    import os
+
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    jpeg = _photo(folder, "a.jpg")
+    sidecar = write_sidecar(jpeg, 3, [], label="Red")
+    database = tmp_path / "catalog.sqlite"
+    index_folder(folder, database)
+    catalog = PhotoCatalog(database)
+    assert catalog.get(jpeg)["label"] == "Red"
+
+    write_sidecar(jpeg, 3, [], label="")
+    stat = sidecar.stat()
+    os.utime(sidecar, (stat.st_atime + 10, stat.st_mtime + 10))
+    index_folder(folder, database)
+
+    assert catalog.get(jpeg)["label"] == ""
+
+
 def test_the_apps_own_sidecar_writes_are_not_reimported(tmp_path):
     folder = tmp_path / "photos"
     folder.mkdir()

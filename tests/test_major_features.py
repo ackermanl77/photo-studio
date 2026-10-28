@@ -150,6 +150,34 @@ def test_photo_catalog_supports_rating_tags_and_search(tmp_path):
     assert [{k: r[k] for k in ("path", "rating", "tags")} for r in results] == [{"path": "portraits/one.jpg", "rating": 5, "tags": ["favorite", "portrait"]}]
 
 
+def test_photo_catalog_preserves_commas_inside_tags(tmp_path):
+    catalog = PhotoCatalog(tmp_path / "photos.sqlite")
+    catalog.upsert("birds/one.jpg", tags=["bird, perched", "bird"])
+
+    assert catalog.get("birds/one.jpg")["tags"] == ["bird", "bird, perched"]
+    assert [entry["path"] for entry in catalog.search("bird, perched")] == ["birds/one.jpg"]
+
+
+def test_photo_catalog_migrates_legacy_comma_delimited_tags(tmp_path):
+    database = tmp_path / "photos.sqlite"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE photos (path TEXT PRIMARY KEY, rating INTEGER DEFAULT 0, tags TEXT DEFAULT '')")
+        connection.execute("INSERT INTO photos(path, rating, tags) VALUES (?, ?, ?)", ("birds/one.jpg", 2, "bird,perched"))
+
+    catalog = PhotoCatalog(database)
+
+    assert catalog.get("birds/one.jpg")["tags"] == ["bird", "perched"]
+
+
+def test_photo_catalog_search_treats_like_wildcards_literally(tmp_path):
+    catalog = PhotoCatalog(tmp_path / "photos.sqlite")
+    catalog.upsert("photos/100%_crop.jpg", tags=["literal_%_tag"])
+    catalog.upsert("photos/100xxcrop.jpg", tags=["literal_x_tag"])
+
+    assert [entry["path"] for entry in catalog.search("100%_crop")] == ["photos/100%_crop.jpg"]
+    assert [entry["path"] for entry in catalog.search("literal_%_tag")] == ["photos/100%_crop.jpg"]
+
+
 def test_photo_catalog_get_returns_a_default_for_an_unseen_path(tmp_path):
     catalog = PhotoCatalog(tmp_path / "photos.sqlite")
     catalog.upsert("portraits/one.jpg", rating=4, tags=["favorite"])

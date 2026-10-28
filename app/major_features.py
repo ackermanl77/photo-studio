@@ -225,6 +225,10 @@ class PhotoCatalog:
                 # the next scan only records their current time instead of re-importing them over
                 # ratings given in the app since. New rows are inserted with 0 explicitly.
                 connection.execute("ALTER TABLE photos ADD COLUMN xmp_mtime REAL DEFAULT -1")
+            if "tags_json" not in columns:
+                # Preserve legacy comma-delimited tags as-is; only new writes have an unambiguous
+                # structured representation because commas may be part of a tag.
+                connection.execute("ALTER TABLE photos ADD COLUMN tags_json TEXT")
             # Colour label (xmp:Label, F21) and culling scores (app.culling, F20; -1 = not scored),
             # added to older catalogs in place.
             for column, declaration in (("label", "TEXT DEFAULT ''"), ("focus", "REAL DEFAULT -1"),
@@ -262,9 +266,15 @@ class PhotoCatalog:
 
     def upsert(self, path: str | Path, rating: int = 0, tags: list[str] | None = None) -> None:
         rating = max(0, min(5, int(rating)))
-        tag_text = ",".join(sorted({tag.strip() for tag in (tags or []) if tag.strip()}))
+        normalized_tags = sorted({tag.strip() for tag in (tags or []) if tag.strip()})
+        tag_text = ",".join(normalized_tags)
+        tags_json = json.dumps(normalized_tags, ensure_ascii=False)
         with self._connect() as connection:
-            connection.execute("INSERT INTO photos(path, rating, tags, xmp_mtime) VALUES (?, ?, ?, 0) ON CONFLICT(path) DO UPDATE SET rating=excluded.rating, tags=excluded.tags", (str(path), rating, tag_text))
+            connection.execute(
+                "INSERT INTO photos(path, rating, tags, tags_json, xmp_mtime) VALUES (?, ?, ?, ?, 0) "
+                "ON CONFLICT(path) DO UPDATE SET rating=excluded.rating, tags=excluded.tags, tags_json=excluded.tags_json",
+                (str(path), rating, tag_text, tags_json),
+            )
 
     def ensure(self, path: str | Path) -> bool:
         """Add `path` unrated if it isn't catalogued yet -- a rescan must not reset the ratings and
@@ -285,13 +295,22 @@ class PhotoCatalog:
         with self._connect() as connection:
             connection.execute("UPDATE photos SET xmp_mtime = ? WHERE path = ?", (float(mtime), str(path)))
 
-    _COLUMNS = "path, rating, tags, label, focus, highlights, shadows"
+    _COLUMNS = "path, rating, tags, tags_json, label, focus, highlights, shadows"
 
     @staticmethod
     def _entry(row) -> dict[str, object]:
-        path, rating, tags, label, focus, highlights, shadows = row
+        path, rating, tags, tags_json, label, focus, highlights, shadows = row
+        try:
+            structured_tags = json.loads(tags_json) if tags_json is not None else None
+        except (TypeError, json.JSONDecodeError):
+            structured_tags = None
+        tag_list = (
+            [tag for tag in structured_tags if isinstance(tag, str)]
+            if isinstance(structured_tags, list)
+            else tags.split(",") if tags else []
+        )
         return {
-            "path": path, "rating": rating, "tags": tags.split(",") if tags else [], "label": label or "",
+            "path": path, "rating": rating, "tags": tag_list, "label": label or "",
             "focus": None if focus is None or focus < 0 else focus,
             "highlights": None if highlights is None or highlights < 0 else highlights,
             "shadows": None if shadows is None or shadows < 0 else shadows,
@@ -340,8 +359,12 @@ class PhotoCatalog:
                collection: str | None = None) -> list[dict[str, object]]:
         """Photos whose path or tags contain `text`, rated at least `minimum_rating`. `label`: None =
         any, "" = no label, or one colour. `sort`: one of SEARCH_SORTS. `collection`: only its photos."""
-        pattern = f"%{text}%"
-        where, params = "rating >= ? AND (path LIKE ? OR tags LIKE ?)", [minimum_rating, pattern, pattern]
+        escaped_text = text.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        pattern = f"%{escaped_text}%"
+        where, params = (
+            "rating >= ? AND (path LIKE ? ESCAPE '!' OR COALESCE(tags_json, tags) LIKE ? ESCAPE '!')",
+            [minimum_rating, pattern, pattern],
+        )
         if label is not None:
             where += " AND label = ?"
             params.append(label)
