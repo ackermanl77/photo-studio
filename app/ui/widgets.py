@@ -12,6 +12,28 @@ from app.controls import CONTROLS_BY_KEY
 from app.i18n import t, t_format, t_option
 
 _UNSET = object()
+# Container key prefix of a slider and its number box (static/theme.css styles these rows).
+VALUE_ROW_PREFIX = "value-row-"
+
+
+def _number_format(step: float) -> str:
+    text = f"{step:g}"
+    return f"%.{len(text.split('.')[1])}f" if "." in text else "%.0f"
+
+
+def _value_typed(key: str, on_change=None) -> None:
+    """on_change of a slider's number box: move the slider to the typed value, snapped to its step.
+    A callback runs before the script, so the slider isn't instantiated yet and its key may be set."""
+    control = CONTROLS_BY_KEY[key]
+    typed = st.session_state.get(f"{control.widget_key}-value")
+    if typed is None:
+        return
+    step = control.step or (0.01 if control.kind == "float" else 1)
+    snapped = control.minimum + round((float(typed) - control.minimum) / step) * step
+    snapped = min(max(snapped, control.minimum), control.maximum)
+    st.session_state[control.widget_key] = round(snapped, 6) if control.kind == "float" else int(round(snapped))
+    if on_change is not None:
+        on_change()
 
 
 def render_control(key: str, container=None, *, label: str | None = None, disabled: bool = False,
@@ -33,7 +55,21 @@ def render_control(key: str, container=None, *, label: str | None = None, disabl
         args = (text, control.minimum, control.maximum, control.default)
         if control.step is not None:
             kwargs["step"] = control.step
-        return target.slider(*args, **kwargs)
+        if label_visibility != "visible":
+            return target.slider(*args, **kwargs)
+        # UI4: a number box in the slider's label row (static/theme.css places it), for typing an
+        # exact value as in Photoshop's Adjustments. Set from the slider before it renders, so it
+        # always shows the slider's value; typing calls _value_typed().
+        row = target.container(key=f"{VALUE_ROW_PREFIX}{control.widget_key}")
+        value = row.slider(*args, **kwargs)
+        value_key = f"{control.widget_key}-value"
+        st.session_state[value_key] = value
+        number = float if control.kind == "float" else int
+        step = number(control.step or (0.01 if number is float else 1))
+        row.number_input(text, min_value=number(control.minimum), max_value=number(control.maximum), step=step,
+                         format=_number_format(step) if number is float else "%d",
+                         key=value_key, disabled=disabled, label_visibility="collapsed", on_change=_value_typed, args=(key, on_change))
+        return value
     if widget == "checkbox":
         return target.checkbox(text, value=control.default, **kwargs)
     if widget == "selectbox" and control.kind == "lut":

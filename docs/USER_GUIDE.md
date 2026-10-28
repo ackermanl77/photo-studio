@@ -113,7 +113,9 @@ back to Pro when you look for one of their tools.
 
 **Sliders** show what they do: Temperature runs from blue to yellow, Tint from green to magenta,
 each Color Mixer band through its own hues, Exposure from dark to light; a slider that goes both
-ways (−100…+100) fills from its zero mark instead of from the left end.
+ways (−100…+100) fills from its zero mark instead of from the left end. The box at the right of
+each slider's name shows its value: click it, type an exact value and press Enter (or use the arrow
+keys) to move the slider there.
 
 On a phone the photo comes first: the tools start closed, the round **»** button at the bottom
 opens them as a sheet over the lower part of the screen (the photo stays in view above it) and
