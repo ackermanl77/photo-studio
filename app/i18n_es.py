@@ -1160,4 +1160,11 @@ ES = {
     '🧰 Pro': '🧰 Pro',
     '🌱 Essentials': '🌱 Esenciales',
     'Essentials shows the everyday tools only (Basic, Geometry, Local, Effects, Export, Presets); Pro shows every tool. Nothing you set is lost when switching.': 'Esenciales muestra solo las herramientas de cada día (Básico, Geometría, Local, Efectos, Exportar, Ajustes); Pro las muestra todas. Al cambiar no se pierde nada de lo ajustado.',
+    'AI Denoise': 'Reducir ruido con IA',
+    'AI Denoise amount': 'Cantidad de reducción de ruido con IA',
+    'A neural denoiser (SCUNet) trained on real camera noise: removes noise while keeping fine detail better than Denoise. Needs the GPU pack; runs once per photo, then every edit reuses it.': 'Un reductor de ruido neuronal (SCUNet) entrenado con ruido real de cámara: elimina el ruido conservando el detalle fino mejor que Reducir ruido. Necesita el paquete GPU; se ejecuta una vez por foto y cada edición posterior lo reutiliza.',
+    'How much of the denoised result to use: 100 is all of it, lower blends back some of the original grain.': 'Cuánto del resultado sin ruido se usa: 100 es todo; menos devuelve parte del grano original.',
+    'AI Denoise needs the optional GPU pack (requirements-gpu.txt in a source checkout); without it, the classical Denoise is used instead.': 'Reducir ruido con IA necesita el paquete GPU opcional (requirements-gpu.txt en una copia del código fuente); sin él se usa en su lugar el Reducir ruido clásico.',
+    'The first use downloads the model ({0}). ': 'El primer uso descarga el modelo ({0}). ',
+    'It runs once per photo (under a second per megapixel with a CUDA GPU, about 10 s without); every later edit reuses it.': 'Se ejecuta una vez por foto (menos de un segundo por megapíxel con una GPU CUDA, unos 10 s sin ella); cada edición posterior lo reutiliza.',
 }

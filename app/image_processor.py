@@ -613,9 +613,8 @@ class PhotoProcessor:
 
     def apply_denoise(self, radius: int = 3, color_radius: int = 0) -> "PhotoProcessor":
         """Edge-aware denoising via OpenCV's Non-Local Means (`cv2.fastNlMeansDenoisingColored`).
-        Classical, not a neural network -- this app is explicitly CPU-first with no GPU dependency
-        and avoids heavy new dependencies (see docs/PROJECT_STATUS.md), and a real learned denoiser
-        needs both (a several-MB-plus model file, and a slow-without-a-GPU inference pass). Still a
+        Classical, not a neural network: it runs anywhere, fast, with no model file. The learned
+        option is the separate, optional AI Denoise (apply_ai_denoise, app.ai_denoise). Still a
         meaningful upgrade over the flat `ImageFilter.MedianFilter` this used to be: Non-Local Means
         looks for similar patches across the whole search window instead of just averaging pixels
         in a fixed neighborhood, so it smooths noise while preserving edges/detail far better than a
@@ -638,6 +637,22 @@ class PhotoProcessor:
         array = np.array(self.image.convert("RGB"))
         denoised = cv2.fastNlMeansDenoisingColored(array, None, strength, color_strength, 7, 21)
         self.image = Image.fromarray(denoised, mode="RGB")
+        return self
+
+    def apply_ai_denoise(self, amount: float = 100, between_tiles=None) -> "PhotoProcessor":
+        """AI Denoise (app.ai_denoise): the SCUNet result blended in by `amount` (0-100), on the float
+        data in high-precision mode, so a 16-bit source keeps its precision. Requires torch; the
+        pipeline checks app.ai_denoise.ai_denoise_available() first and falls back otherwise."""
+        from app.ai_denoise import blend, denoise
+        from app.high_bit import from_image, quantize8
+
+        if self.hdr is not None:
+            return self._set_hdr(blend(self.hdr, denoise(self.hdr, between_tiles), amount))
+        rgb = from_image(self.image)
+        result = Image.fromarray(quantize8(blend(rgb, denoise(rgb, between_tiles), amount)), mode="RGB")
+        if self.image.mode == "RGBA":
+            result.putalpha(self.image.getchannel("A"))
+        self.image = result
         return self
 
     def apply_sharpen(self, radius: float = 1.0, percent: float = 150.0) -> "PhotoProcessor":

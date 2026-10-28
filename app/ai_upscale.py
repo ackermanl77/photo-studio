@@ -17,7 +17,6 @@ a GPU that supports it; float32 is the safe, universally-supported fallback for 
 which Real-ESRGAN still supports, just much slower).
 """
 
-import hashlib
 import importlib.util
 import logging
 import threading
@@ -74,12 +73,12 @@ def ai_upscale_install_hint() -> str:
 
 def weights_dir():
     """Where Real-ESRGAN's downloaded model weights live: the per-user app data folder
-    (app.config.user_data_dir()). RealESRGANer's own default is a "weights" folder inside the
-    installed realesrgan package -- in the packaged desktop build that's under _internal/, i.e.
-    inside Program Files, which a normal user can't write to, so the first AI Upscale failed there."""
-    from app.config import user_data_dir
+    (app.model_weights). RealESRGANer's own default is a "weights" folder inside the installed
+    realesrgan package -- in the packaged desktop build that's under _internal/, i.e. inside
+    Program Files, which a normal user can't write to, so the first AI Upscale failed there."""
+    from app.model_weights import weights_dir as shared_weights_dir
 
-    return user_data_dir() / "weights"
+    return shared_weights_dir()
 
 
 @lru_cache(maxsize=1)
@@ -146,14 +145,6 @@ def weights_path():
     return weights_dir() / f"{_MODEL_NAME}.pth"
 
 
-def _sha256(path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def weights_present() -> bool:
     """True when the model file is already on disk at its expected size (no network needed to
     upscale). Cheap -- the full hash is checked when the model actually loads."""
@@ -162,56 +153,19 @@ def weights_present() -> bool:
 
 
 def download_weights(progress=None, url: str | None = None, opener=None):
-    """Download the Real-ESRGAN weights into weights_dir(), verifying their SHA-256, and return the
-    path. `progress(done_bytes, total_bytes)` is called as data arrives (the Export panel's
-    "Download model" button drives an st.progress bar with it). Written to a temporary file and
-    renamed only after the hash matches, so an interrupted or tampered download never leaves a
-    file that looks complete. `opener` (a urllib-style callable) exists for tests."""
-    import os
-    import tempfile
-    import urllib.request
+    """Download the Real-ESRGAN weights into weights_dir(), verifying their SHA-256 (app.model_weights),
+    and return the path. `progress(done_bytes, total_bytes)` is called as data arrives (the Export
+    panel's "Download model" button drives an st.progress bar with it)."""
+    from app.model_weights import download_verified
 
-    target = weights_path()
-    if weights_present() and _sha256(target) == WEIGHTS_SHA256:
-        return target
-    target.parent.mkdir(parents=True, exist_ok=True)
-    handle, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".part", dir=target.parent)
-    digest = hashlib.sha256()
-    done = 0
-    try:
-        with os.fdopen(handle, "wb") as out, (opener or urllib.request.urlopen)(url or _WEIGHTS_URL) as response:
-            total = int(response.headers.get("Content-Length") or WEIGHTS_SIZE_BYTES)
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                out.write(chunk)
-                digest.update(chunk)
-                done += len(chunk)
-                if progress:
-                    progress(done, total)
-        if digest.hexdigest() != WEIGHTS_SHA256:
-            raise RuntimeError("The downloaded AI Upscale model failed its checksum -- try again (the file was discarded).")
-        os.replace(temp_name, target)
-    except BaseException:
-        try:
-            os.unlink(temp_name)
-        except OSError:
-            pass
-        raise
-    return target
+    return download_verified(url or _WEIGHTS_URL, weights_path(), WEIGHTS_SHA256, WEIGHTS_SIZE_BYTES, progress=progress, opener=opener,
+                             failure="The downloaded AI Upscale model failed its checksum -- try again (the file was discarded).")
 
 
 def _verified_weights():
-    """The local weights file, downloading it (verified) on first use when missing. A file on disk
-    whose hash doesn't match (e.g. a partial copy from an older build's unverified download) is
-    replaced rather than loaded."""
-    path = weights_path()
-    if path.is_file() and _sha256(path) == WEIGHTS_SHA256:
-        return path
-    if path.is_file():
-        path.unlink()
-    return download_weights()
+    from app.model_weights import verified_weights
+
+    return verified_weights(_WEIGHTS_URL, weights_path(), WEIGHTS_SHA256, WEIGHTS_SIZE_BYTES)
 
 
 def _tile_size(device: str) -> int:

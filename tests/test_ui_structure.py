@@ -29,7 +29,7 @@ PINNED_WIDGET_KEYS = {
     "crop_free_y0": "crop-free-y0", "crop_free_y1": "crop-free-y1", "crop_swap": "crop-swap",
     "curve_black": "c-p0", "curve_enabled": "c-curve-en", "curve_highlights": "c-p3",
     "curve_mid": "c-p2", "curve_shadows": "c-p1", "curve_white": "c-p4", "dehaze": "d-haze",
-    "denoise": "d-den", "denoise_color": "d-den-color", "effects_grain_amount": "fx-grain-amt",
+    "denoise": "d-den", "denoise_color": "d-den-color", "ai_denoise": "d-ai-den", "ai_denoise_amount": "d-ai-den-amt", "effects_grain_amount": "fx-grain-amt",
     "effects_vignette_amount": "fx-vignette-amt", "effects_vignette_midpoint": "fx-vignette-mid",
     "exposure_ev": "t-ev", "flip_horizontal": "geo-flip-h", "flip_vertical": "geo-flip-v",
     "highlights": "t-high", "lens_chromatic_aberration": "lens-ca",

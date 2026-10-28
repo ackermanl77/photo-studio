@@ -11,11 +11,27 @@ from app.i18n import t
 def detail_section(ctx) -> None:
     section_header("Noise Reduction & Sharpening", "detail")
     values = ctx.values
+    ai_denoise_section(values)
     values["denoise"] = render_control("denoise")
     values["denoise_color"] = render_control("denoise_color", disabled=values["denoise"] == 0)
     values["sharpen"] = render_control("sharpen")
     section_reset_button("detail", "Detail")
     st.caption(t("Texture, Clarity and Dehaze are in **☼ Basic → Presence**; output sharpening for a delivery size is in **⬇ Export**."))
+
+
+def ai_denoise_section(values: dict) -> None:
+    """AI Denoise (app.ai_denoise). Always rendered (widget state); off and disabled without torch,
+    unless a restored recipe turned it on -- then it can still be switched off."""
+    from app import ai_denoise
+
+    installed = ai_denoise.ai_denoise_installed()
+    values["ai_denoise"] = render_control("ai_denoise", disabled=not installed and not st.session_state.get("d-ai-den"))
+    values["ai_denoise_amount"] = render_control("ai_denoise_amount", disabled=not values["ai_denoise"])
+    if not installed:
+        st.caption(t("AI Denoise needs the optional GPU pack (requirements-gpu.txt in a source checkout); without it, the classical Denoise is used instead."))
+    elif values["ai_denoise"]:
+        download = "" if ai_denoise.weights_present() else t("The first use downloads the model ({0}). ").format(ai_denoise.WEIGHTS_DOWNLOAD)
+        st.caption(download + t("It runs once per photo (under a second per megapixel with a CUDA GPU, about 10 s without); every later edit reuses it."))
 
 
 def effects_section(ctx) -> None:

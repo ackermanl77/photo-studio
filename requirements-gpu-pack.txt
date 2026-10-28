@@ -1,6 +1,7 @@
 # Optional GPU packages on their own -- the optional GPU pack (scripts/build_release.ps1 -GpuPack
 # installs exactly these, plus their dependencies, into release-gpu-pack/gpu-pack/site-packages).
 # CUDA-enabled torch also powers the opt-in export resize/sharpen path (app/gpu_export.py);
+# torch alone also runs AI Denoise (app/ai_denoise.py) and the AI masks (with torchvision).
 # Real-ESRGAN and basicsr are only needed for AI Upscale.
 # requirements-gpu.txt = requirements.txt + this file; read its header for the CUDA torch index
 # and the basicsr patch both need.

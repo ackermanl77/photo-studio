@@ -93,7 +93,7 @@ DEFAULT_EXPORT_SETTINGS = {
     "color_space": "sRGB",
     "ai_tools": (),
 }
-AI_TOOLS = ("AI Upscale", "AI mask", "AI background")
+AI_TOOLS = ("AI Denoise", "AI Upscale", "AI mask", "AI background")
 DIGITAL_SOURCE_TYPE_AI_COMPOSITE = "http://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia"
 # Formats that can hold 16 bits per channel (the user picks 8 or 16).
 HIGH_BIT_FORMATS = ("PNG", "TIFF")

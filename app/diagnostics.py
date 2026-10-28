@@ -42,6 +42,12 @@ def check_environment(storage_path: str | Path | None = None) -> list[Check]:
         checks.append(Check("AI Upscale", "ok", f"GPU pack at {pack['path']}" if pack["active"] else "torch / Real-ESRGAN installed"))
     else:
         checks.append(Check("AI Upscale", "warning" if pack["problem"] else "optional", ai_upscale_install_hint()))
+    from app.ai_denoise import ai_denoise_installed, weights_present
+
+    if ai_denoise_installed():
+        checks.append(Check("AI Denoise", "ok", "torch installed; model " + ("downloaded" if weights_present() else "downloads on first use")))
+    else:
+        checks.append(Check("AI Denoise", "warning" if pack["problem"] else "optional", "Needs the GPU pack; the classical Denoise stands in."))
     if storage_path is None:
         from app.config import user_data_dir
 

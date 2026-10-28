@@ -157,6 +157,12 @@ REFINE_LANE = "refine"
 REFINE_REQUEST_TIMEOUT_S = 300
 
 
+def refine_timeout(options: dict) -> float:
+    """AI Denoise without CUDA runs ~10 s per megapixel: a large photo's first full-resolution render
+    needs the export budget."""
+    return EXPORT_REQUEST_TIMEOUT_S if options.get("ai_denoise") else REFINE_REQUEST_TIMEOUT_S
+
+
 def _lane(request_options: dict) -> str:
     if request_options.get("export"):
         return "export"
@@ -309,9 +315,10 @@ def process_via_backend(
 
     # AI Upscale's first request loads torch and downloads its ~64 MB model before inferring --
     # measured at ~20 s on a fast connection in the packaged build, so the normal 30 s budget
-    # would time out on a slower one. Every other request keeps the short timeout.
+    # would time out on a slower one. AI Denoise likewise (a ~72 MB model, and ~10 s per megapixel
+    # without CUDA). Every other request keeps the short timeout.
     if timeout is None:
-        timeout = AI_UPSCALE_REQUEST_TIMEOUT_S if request_options.get("ai_upscale") else REQUEST_TIMEOUT_S
+        timeout = AI_UPSCALE_REQUEST_TIMEOUT_S if request_options.get("ai_upscale") or request_options.get("ai_denoise") else REQUEST_TIMEOUT_S
     response = _post_process(image_bytes, filename, request_options, local_mask_bytes, layers_bytes, removal_mask_bytes, timeout, stage_handle, local_masks_bytes, lane)
     content = response.content
     try:
