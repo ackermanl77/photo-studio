@@ -99,6 +99,8 @@ def validate_project_archive(content: bytes, max_entries: int = 200, max_uncompr
             manifest = json.loads(archive.read("project.json"))
         except json.JSONDecodeError as error:
             raise ValueError("Project manifest is not valid JSON") from error
+        if not isinstance(manifest, dict):
+            raise ValueError("Project manifest must be an object")
         if manifest.get("version") not in (1, 2) or not isinstance(manifest.get("files"), dict):
             raise ValueError("Unsupported project manifest")
 

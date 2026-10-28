@@ -54,8 +54,8 @@ def _import_changed_sidecar(catalog: PhotoCatalog, path: Path) -> None:
         if sidecar is not None:
             tags = sidecar["tags"] + ([REJECTED_TAG] if sidecar["rejected"] else [])
             catalog.upsert(path, rating=sidecar["rating"], tags=tags)
-            if sidecar.get("label") in COLOR_LABELS:
-                catalog.set_label(path, sidecar["label"])
+            label = sidecar.get("label", "")
+            catalog.set_label(path, label if label in COLOR_LABELS else "")
     if known != mtime:
         catalog.set_xmp_mtime(path, mtime)
 
