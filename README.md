@@ -111,6 +111,14 @@ The release script is its own preflight: it builds from a clean, pinned venv and
 
 See `docs/PROJECT_STATUS.md`'s "Known Issues" for the current gaps.
 
+## Privacy
+
+Photo Studio edits on your computer; your photos are never uploaded. It connects to the
+internet only to download AI model weights the first time you use a feature that needs them:
+AI Denoise (SCUNet, from github.com/cszn/KAIR), AI Upscale (Real-ESRGAN, from
+github.com/xinntao/Real-ESRGAN) and AI masks (from the Hugging Face Hub). Those downloads
+reveal your IP address to the host, nothing else. A release may switch on the update check: once per launch it downloads a small version file from the release site and sends nothing but the app's name and version. There is no telemetry.
+
 ## Test
 
 ```powershell

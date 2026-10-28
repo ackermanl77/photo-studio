@@ -224,6 +224,9 @@ try {
         & $VenvPython -m pip install @headless
         if ($LASTEXITCODE -ne 0) { throw "Reinstalling opencv-python-headless failed (exit code $LASTEXITCODE)." }
     }
+    # THIRD_PARTY_NOTICES.md lists the packages actually being bundled; the spec ships it.
+    & $VenvPython scripts\third_party_notices.py
+    if ($LASTEXITCODE -ne 0) { throw "Writing THIRD_PARTY_NOTICES.md failed (exit code $LASTEXITCODE)." }
     & $VenvPython -m PyInstaller --noconfirm --distpath $Dist --workpath $Build PhotoStudio.spec
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed (exit code $LASTEXITCODE)." }
 

@@ -6,7 +6,8 @@ import sys
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
-datas = []
+# The license and third-party notices travel with every build (scripts/third_party_notices.py).
+datas = [("LICENSE", "."), ("THIRD_PARTY_NOTICES.md", ".")]
 binaries = []
 # app.frontend was renamed to app.frontend_unified_app when the specialized Streamlit frontends
 # were consolidated into one; streamlit_drawable_canvas was removed as an unused dependency (see

@@ -1167,4 +1167,6 @@ ES = {
     'AI Denoise needs the optional GPU pack (requirements-gpu.txt in a source checkout); without it, the classical Denoise is used instead.': 'Reducir ruido con IA necesita el paquete GPU opcional (requirements-gpu.txt en una copia del código fuente); sin él se usa en su lugar el Reducir ruido clásico.',
     'The first use downloads the model ({0}). ': 'El primer uso descarga el modelo ({0}). ',
     'It runs once per photo (under a second per megapixel with a CUDA GPU, about 10 s without); every later edit reuses it.': 'Se ejecuta una vez por foto (menos de un segundo por megapíxel con una GPU CUDA, unos 10 s sin ella); cada edición posterior lo reutiliza.',
+    'Photo Studio {0} is available.': 'Ya está disponible Photo Studio {0}.',
+    'Download the update': 'Descargar la actualización',
 }

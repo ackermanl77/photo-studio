@@ -24,7 +24,7 @@ from app.edit_history import EditHistory
 from app.geometry import orient
 from app.observability import configure_logging
 from app.raw_import import uploader_types
-from app.ui import canvas, export_panel, layout_memory, processing, tool_search, tutorials
+from app.ui import canvas, export_panel, layout_memory, processing, tool_search, tutorials, update_notice
 from app.ui.context import EditorContext
 from app.ui.project_io import open_launch_file, open_project_bytes, recent_files_section, remember_opened_file, remember_opened_project
 from app.ui.tutorials import SAMPLE_PHOTO_NAME, SAMPLE_PHOTO_PATH  # the bundled sample, also the tutorials'
@@ -99,6 +99,7 @@ with language_col:
         help=t("Interface language. Remembered for the next launch."),
         on_change=lambda: save_language(st.session_state["ui-language"]),
     )
+    update_notice.render_update_notice()  # a newer release, if the background check found one
 with upload_col1:
     # Keyed by a generation counter: a file_uploader can't be cleared through session_state, so
     # opening a project/Library photo empties it by re-keying it (the opened file must win).

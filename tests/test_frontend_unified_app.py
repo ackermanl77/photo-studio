@@ -2785,3 +2785,22 @@ def test_essentials_mode_hides_the_advanced_tabs_and_find_a_tool_brings_them_bac
     at.selectbox(key="find-tool").set_value("RGB Tone Curve")
     at.run(timeout=30)
     assert at.session_state["ui-mode"] == "Pro" and at.session_state["tool-tab"] == "🎨 Curves & Color"
+
+
+def test_an_available_update_is_shown_and_nothing_otherwise(monkeypatch):
+    import streamlit as st
+
+    from app import update_check
+
+    st.cache_resource.clear()  # _update_watch() runs once per process
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    assert not any("is available" in info.value for info in at.info)
+
+    info = update_check.UpdateInfo("9.0.0", "https://example.com/get")
+    monkeypatch.setattr(update_check, "check_in_background", lambda version, on_update: on_update(info))
+    st.cache_resource.clear()
+    at = AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+    st.cache_resource.clear()
+    assert any("Photo Studio 9.0.0 is available." in message.value for message in at.info)

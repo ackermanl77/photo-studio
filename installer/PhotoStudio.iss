@@ -67,6 +67,8 @@ Root: HKA; Subkey: "Software\Classes\PhotoStudio.Project\shell\open\command"; Va
 ; WebView2Runtime -- packaging that left the installed app unable to open its window on any PC
 ; without the Evergreen WebView2 Runtime, the exact case the bundled copy exists for.
 Source: "..\release\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 #ifdef WithGpuPack
 ; Lands as {app}\gpu-pack, where the app looks for it (app/gpu_pack.py).
 Source: "..\release-gpu-pack\gpu-pack\*"; DestDir: "{app}\gpu-pack"; Components: gpupack; Flags: recursesubdirs createallsubdirs ignoreversion
