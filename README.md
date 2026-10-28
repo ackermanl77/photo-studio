@@ -117,7 +117,7 @@ Photo Studio edits on your computer; your photos are never uploaded. It connects
 internet only to download AI model weights the first time you use a feature that needs them:
 AI Denoise (SCUNet, from github.com/cszn/KAIR), AI Upscale (Real-ESRGAN, from
 github.com/xinntao/Real-ESRGAN) and AI masks (from the Hugging Face Hub). Those downloads
-reveal your IP address to the host, nothing else. A release may switch on the update check: once per launch it downloads a small version file from the release site and sends nothing but the app's name and version. There is no telemetry.
+reveal your IP address to the host, nothing else. Once per launch the app checks for a newer release: it downloads a small version file (update.json) from this project's GitHub Releases and sends nothing but the app's name and version. To turn that off, set the environment variable PHOTO_STUDIO_UPDATE_FEED_URL to off. There is no telemetry.
 
 ## Test
 

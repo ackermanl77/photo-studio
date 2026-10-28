@@ -4,9 +4,11 @@ Each release publishes a file like this somewhere users can reach:
 
     {"version": "0.3.0", "url": "https://example.com/download", "notes": "What changed"}
 
-UPDATE_FEED_URL is empty until there is such a place (the GitHub repository is private),
-and while it is empty the app never checks. Set it when cutting a release; the
-PHOTO_STUDIO_UPDATE_FEED_URL environment variable overrides it (for testing a feed). Only https feeds and
+UPDATE_FEED_URL is the update.json every release workflow attaches to its GitHub Release;
+the releases/latest/download/ address always redirects to the newest one. Before the first
+release has one, the request fails and the app says nothing. The PHOTO_STUDIO_UPDATE_FEED_URL environment
+variable overrides it (for testing a feed), and PHOTO_STUDIO_UPDATE_FEED_URL=off turns the check off (the tests
+do). Only https feeds and
 download links are accepted, the reply is capped at 64 KB, and the request carries nothing
 but a User-Agent naming the app and version: no identifiers, no telemetry.
 """
@@ -22,7 +24,7 @@ from dataclasses import dataclass
 
 from app.observability import get_logger
 
-UPDATE_FEED_URL = ""
+UPDATE_FEED_URL = "https://github.com/ackermanl77/photo-studio/releases/latest/download/update.json"
 ENV_VAR = "PHOTO_STUDIO_UPDATE_FEED_URL"
 APP_NAME = "PhotoStudio"
 TIMEOUT_SECONDS = 5
@@ -39,8 +41,11 @@ class UpdateInfo:
 
 
 def feed_url() -> str:
-    """The configured feed, or "" when update checks are off."""
-    return (os.environ.get(ENV_VAR) or UPDATE_FEED_URL).strip()
+    """The configured feed, or "" when update checks are off (ENV_VAR set to "off")."""
+    override = os.environ.get(ENV_VAR, "").strip()
+    if override.lower() == "off":
+        return ""
+    return override or UPDATE_FEED_URL.strip()
 
 
 def parse_version(text: str) -> tuple[int, ...]:

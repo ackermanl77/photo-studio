@@ -16,9 +16,10 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
   both in the install folder.
 - **`app/update_check.py`** + **`app/ui/update_notice.py`**: one background check per server
   process against a JSON release feed, shown under the language picker when a newer version
-  exists. `UPDATE_FEED_URL` is empty (the repository is private), so nothing is checked until a
-  feed is published; `PHOTO_STUDIO_UPDATE_FEED_URL` overrides it for testing. https only, 64 KB
-  cap, no identifiers.
+  exists. The feed is the `update.json` the release workflow attaches to every GitHub Release
+  (`.../releases/latest/download/update.json`; v0.1.0 has one too). `PHOTO_STUDIO_UPDATE_FEED_URL`
+  overrides it for testing, and `=off` turns it off (the tests do). https only, 64 KB cap, no
+  identifiers.
 - **CI**: an `audit` job runs `pip-audit` over `requirements.txt` and `requirements-desktop.txt`;
   `.github/dependabot.yml` opens weekly update PRs (pip and GitHub Actions).
 - **`SECURITY.md`** and a Privacy section in the README (what goes online: model weights on

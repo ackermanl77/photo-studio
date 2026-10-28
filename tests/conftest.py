@@ -16,6 +16,8 @@ os.environ.setdefault("PHOTO_STUDIO_DATA_DIR", tempfile.mkdtemp(prefix="photo-st
 
 
 os.environ.pop("PHOTO_BACKEND_TOKEN", None)
+# Never ask GitHub for a newer release during the tests (update_check.py).
+os.environ["PHOTO_STUDIO_UPDATE_FEED_URL"] = "off"
 
 
 @pytest.fixture(autouse=True)
