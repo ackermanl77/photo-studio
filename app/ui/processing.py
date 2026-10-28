@@ -323,7 +323,7 @@ def render_full_resolution_image(
     return backend_client.process_via_backend(
         content, filename, options, local,
         _producer_layers(mask_source, layers_signature, layers_canvas, painted), removal,
-        lane=backend_client.REFINE_LANE, timeout=backend_client.REFINE_REQUEST_TIMEOUT_S, **extra,
+        lane=backend_client.REFINE_LANE, timeout=backend_client.refine_timeout(options), **extra,
     )
 
 

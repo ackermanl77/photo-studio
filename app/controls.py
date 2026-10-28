@@ -163,6 +163,12 @@ CONTROLS: tuple[Control, ...] = (
             help="Smooths luminance noise/grain -- higher removes more noise but can soften fine detail."),
     _slider("denoise_color", "d-den-color", "Color Noise", 0, 9, step=2, section="detail", option=True, stage=_D, option_kind="int", option_domain=(0, 20),
             help="Independent chroma (color speckle) denoising strength, on top of Denoise's luminance/detail smoothing -- push higher than Denoise to clean up color blotches without softening detail as much. Has no effect while Denoise is 0."),
+    # AI Denoise (app.ai_denoise): applied first in the pipeline, before Geometry; the classical
+    # Denoise above still runs in the Detail group if it is also set.
+    _check("ai_denoise", "d-ai-den", "AI Denoise", section="detail", option=True, stage=_D,
+           help="A neural denoiser (SCUNet) trained on real camera noise: removes noise while keeping fine detail better than Denoise. Needs the GPU pack; runs once per photo, then every edit reuses it."),
+    _slider("ai_denoise_amount", "d-ai-den-amt", "AI Denoise amount", 0, 100, 100, section="detail", option=True, stage=_D,
+            help="How much of the denoised result to use: 100 is all of it, lower blends back some of the original grain."),
     _check("sharpen", "d-sharp", "Sharpen (Unsharp Mask)", section="detail", option=True, stage=_D,
            help="Increases edge contrast to make the image look crisper -- applied last in the Detail group, after Texture/Clarity/Denoise."),
     # --- Effects (after the crop) -----------------------------------------------------------------

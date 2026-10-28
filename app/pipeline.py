@@ -7,7 +7,7 @@ into a different order with fewer steps (contrast/saturation before exposure, te
 temperature, denoise/sharpen after local masks, no ICC/lens/vibrance/HSL/grading/dehaze/effects),
 so the same flags gave a different image than the GUI. The order, in one place:
 
-    ICC -> sRGB, Geometry (rotate/flip, Lens, straighten, constrain crop), Tone (+ preset), Color,
+    ICC -> sRGB, AI Denoise, Geometry (rotate/flip, Lens, straighten, constrain crop), Tone (+ preset), Color,
     Detail | Repair, Layers, Masks, Portrait, Crop, Effects, AI Upscale
 
 The "|" is the split the frontend's two-stage cache is built on (`stop_after="detail"` /
@@ -28,6 +28,7 @@ from app.geometry import geometry_output_size
 from app.high_bit import attach, attached, decode_high_bit, to_image
 from app.image_processor import PhotoProcessor
 from app.layer_workspace import LayerWorkspace, WorkspaceLayer
+from app.observability import get_logger
 from app.icc_float import to_srgb_float
 from app.portrait_tools import detect_faces, smooth_skin, smooth_skin_float
 from app.presets import apply_preset
@@ -40,6 +41,7 @@ from app.raw_import import is_raw_path
 from app.reliability import check_pixel_count, validate_image_bytes
 
 # Skin smoothing's blur radius at full resolution (see app.portrait_tools.smooth_skin).
+_logger = get_logger("pipeline")
 _SKIN_BLUR_RADIUS = 2.0
 
 # The Black & White mixer's option per colour band (spelled out: tests/test_parity_golden.py checks
@@ -252,6 +254,20 @@ def run_pipeline(
                     source_icc = srgb_icc_bytes()
                 except ICC_TRANSFORM_ERRORS:
                     pass
+
+        # AI Denoise (app.ai_denoise) -- on the photo as shot, before any resampling or tone change
+        # shapes its noise. One inference per input (cached), so later edits only re-blend. Without
+        # torch, the classical Denoise stands in, so a recipe asking for it renders anywhere.
+        if options.get("ai_denoise") and options.get("ai_denoise_amount", 100) > 0:
+            checkpoint()
+            from app.ai_denoise import FALLBACK_DENOISE, ai_denoise_available
+
+            with HEAVY_STEP_SEMAPHORE:
+                if ai_denoise_available():
+                    processor.apply_ai_denoise(options.get("ai_denoise_amount", 100), between_tiles=checkpoint)
+                else:
+                    _logger.warning("AI Denoise requested but torch isn't available: using the classical Denoise")
+                    processor.apply_denoise(FALLBACK_DENOISE)
 
         # Geometry -- rotate/flip, Lens corrections, straighten, constrain crop (app.geometry):
         # first, before anything else touches pixel positions, and before Crop so the user frames
@@ -474,6 +490,11 @@ def ai_tools_for(options: dict) -> list[str]:
     use: AI Upscale, and a Background whose subject mask comes from the AI model (app.background).
     AI-made selections travel as plain masks, so the caller adds "AI mask" itself."""
     tools = []
+    if options.get("ai_denoise") and options.get("ai_denoise_amount", 100) > 0:
+        from app.ai_denoise import ai_denoise_installed
+
+        if ai_denoise_installed():
+            tools.append("AI Denoise")
     if options.get("ai_upscale"):
         tools.append("AI Upscale")
     if (options.get("background_mode") or "None") != "None":

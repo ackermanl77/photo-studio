@@ -7,6 +7,41 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-27 -- AI Denoise (optional, GPU pack)
+
+AI Denoise had been "won't do" (a neural model in the edit pipeline went against the classical,
+CPU-first design). Since the AI masks became a second GPU-pack exception, it follows the same
+rules instead: optional, never needed to open a recipe, marked in the export's provenance.
+
+- **`app/ai_denoise.py`**: SCUNet (Zhang et al. 2023, Apache-2.0), the KAIR release's
+  `scunet_color_real_psnr` weights (72 MB, SHA-256 pinned), a blind denoiser trained on
+  synthesized camera noise, so it needs no noise level. The network is written in plain torch
+  (KAIR's einops/timm helpers spelled out; strict `load_state_dict` against the 540 released
+  tensors), so the GPU pack gains no package. Tiled inference: full-size 512 px tiles (the last one
+  shifted inward, not cut short) whose overlaps split at the middle, over a reflect-padded copy of
+  the photo. The first version's thin edge tiles and the network's replicate padding left a visibly
+  noisy rim and strip (3x the residual error at the right edge); now the tiled result matches a
+  single pass. Measured on a synthetic photo: +9 dB PSNR on Gaussian noise (sigma 15), +12.5 dB on
+  shot noise; 0.4 s per megapixel on an RTX 5080, ~10 s on a 12-thread CPU.
+- **Pipeline**: right after the ICC conversion, before Geometry (it sees the noise as shot, before
+  any resampling or tone change). Results are cached per input (`denoise()`, 3 entries), so later
+  edits, the Amount and the flips/crops reuse one inference per photo and preview size. Without
+  torch the classical Denoise (strength 5) stands in, with a warning in the log, so a preset or
+  project that uses it renders anywhere.
+- **Controls**: 🔬 Detail → AI Denoise (`d-ai-den`) and AI Denoise amount (`d-ai-den-amt`, 0-100,
+  a blend with the original), disabled without torch unless a restored recipe turned it on. CLI
+  `--ai-denoise AMOUNT`. System Health reports it.
+- **Provenance** (F34): "AI Denoise" joins `export.AI_TOOLS`, written when it is on and torch is
+  installed.
+- **Downloads**: `app/model_weights.py` holds the verified download that AI Upscale had (temp file,
+  SHA-256, rename), now shared, with a 60 s socket timeout (a stalled connection used to hang).
+- **Timeouts**: interactive requests with AI Denoise get AI Upscale's 300 s budget, and a refine
+  render the export's 900 s (a 24 MP photo is ~4 min on a CPU).
+- Checked in headless Chrome: ticking AI Denoise on a noisy 1600x1067 photo downloads the model
+  and shows the denoised canvas within 3-6 s on the RTX 5080. Tests: `tests/test_ai_denoise.py`
+  (the real-model check is opt-in, `PHOTO_AI_MODEL_TESTS=1`, with `PHOTO_AI_DENOISE_WEIGHTS` for a
+  local copy).
+
 ## 2026-10-27 -- A number box on every slider (UI4 done)
 
 - **Type a slider's value**, as in Photoshop's Adjustments. `widgets.render_control()` renders every

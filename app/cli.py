@@ -94,6 +94,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mask-saturation", type=float, help="Masked saturation multiplier")
     parser.add_argument("--denoise", type=int, help="Non-Local Means denoise strength, 0-9 like the GUI slider (default: 0)")
     parser.add_argument("--denoise-color", type=int, help="Separate color-noise strength for --denoise (default: same as --denoise)")
+    parser.add_argument(
+        "--ai-denoise", type=int, metavar="AMOUNT", default=None,
+        help="AI Denoise (SCUNet) at AMOUNT 0-100 -- optional, uses torch from requirements-gpu.txt / the GPU pack "
+        "(downloads a ~72 MB model on first use); without torch the classical denoise stands in",
+    )
     parser.add_argument("--sharpen", action="store_true", default=None, help="Apply sharpening")
     parser.add_argument("--auto-enhance", action="store_true", help="Apply the GUI's Auto Enhance values (exposure/contrast/saturation/denoise/sharpen)")
     parser.add_argument("--preset", choices=sorted(PRESETS), help="Apply a named editing preset")
@@ -183,6 +188,9 @@ def options_from_args(args: argparse.Namespace) -> dict:
         options["lut"] = import_lut(lut_path.read_bytes(), lut_path.name) if lut_path.suffix.lower() == ".cube" and lut_path.is_file() else args.lut
     if getattr(args, "lut_amount", None) is not None:
         options["lut_amount"] = args.lut_amount
+    if getattr(args, "ai_denoise", None) is not None:
+        options["ai_denoise"] = args.ai_denoise > 0
+        options["ai_denoise_amount"] = args.ai_denoise
     if args.ai_upscale:
         options["ai_upscale"] = True
         options["ai_upscale_factor"] = args.ai_upscale

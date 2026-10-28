@@ -267,6 +267,14 @@ tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color
   flat blur).
 - **Color Noise** — an independent chroma-only denoise boost on top of Denoise, for cleaning up
   color speckle without softening detail as much. Has no effect while Denoise is 0.
+- **AI Denoise** (needs the GPU pack) — a neural denoiser trained on real camera noise; it keeps
+  fine detail better than Denoise. The first use downloads the model (72 MB). It runs once per
+  photo — under a second per megapixel with an NVIDIA GPU, about 10 s per megapixel without — and
+  every later edit reuses the result. **AI Denoise amount** blends back some of the original grain.
+  It runs before everything else, on the photo as shot. Judge it at 1:1 (the fitted view of a large
+  photo is a smaller proxy until the full-resolution view arrives). Exports it touched are marked as
+  AI-assisted. On a computer without the GPU pack, a preset or project that uses it falls back to
+  the classical Denoise.
 - **Sharpen (Unsharp Mask)** — a checkbox to enable output sharpening.
 - **✨ Effects** (its own tab):
   - **Post-Crop Vignette** — a creative vignette applied to the final, already-cropped frame
@@ -690,7 +698,7 @@ selections — into one `.photoproject` file you can reopen later:
 
 ## AI Upscale and the GPU pack
 
-AI Upscale (Real-ESRGAN, 2x/4x on export) needs PyTorch, which is large, so the desktop release
+AI Upscale (Real-ESRGAN, 2x/4x on export), AI Denoise (🔬 Detail) and the Subject/Person AI masks need PyTorch, which is large, so the desktop release
 ships it separately:
 
 - **PhotoStudio-<version>-Windows.7z** — the CPU base app, with no PyTorch dependency.

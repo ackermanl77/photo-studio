@@ -7,9 +7,9 @@ Guidance for Claude Code in this repository. Details: [docs/ARCHITECTURE.md](doc
 
 A CPU-first Python photo editor: Streamlit UI (`app/frontend_unified_app.py` + `app/ui/`), Flask
 processing backend (`app/backend.py`), optional pywebview/PyInstaller desktop build. No ML in the edit
-pipeline; the only optional exceptions need PyTorch from the GPU pack: AI Upscale
-(`app/ai_upscale.py`), AI masks (`app/ai_masks.py`) and the opt-in CUDA export resize/sharpen
-(`app/gpu_export.py`, CPU fallback).
+pipeline; the only optional exceptions need PyTorch from the GPU pack: AI Denoise
+(`app/ai_denoise.py`, classical Denoise fallback), AI Upscale (`app/ai_upscale.py`), AI masks
+(`app/ai_masks.py`) and the opt-in CUDA export resize/sharpen (`app/gpu_export.py`, CPU fallback).
 
 ## Commands
 

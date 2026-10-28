@@ -203,7 +203,7 @@ def test_ai_tools_setting_is_validated_and_derived_from_the_options(monkeypatch)
     assert validate_export_settings({"ai_tools": ["AI mask", "AI Upscale"]})["ai_tools"] == ("AI Upscale", "AI mask")
     with pytest.raises(ValueError):
         validate_export_settings({"ai_tools": ["Magic"]})
-    assert set(AI_TOOLS) == {"AI Upscale", "AI mask", "AI background"}
+    assert set(AI_TOOLS) == {"AI Denoise", "AI Upscale", "AI mask", "AI background"}
     monkeypatch.setattr(background, "_model_available", lambda: True)
     assert ai_tools_for({"ai_upscale": True, "background_mode": "Blur"}) == ["AI Upscale", "AI background"]
     monkeypatch.setattr(background, "_model_available", lambda: False)
