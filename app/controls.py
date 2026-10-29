@@ -125,6 +125,8 @@ CONTROLS: tuple[Control, ...] = (
             help="Sets the white point -- positive pushes the brightest tones toward pure white, negative pulls them down. Midtones barely move."),
     _slider("blacks", "t-blacks", "Blacks", -100, 100, section="tone", option=True, stage=_D,
             help="Sets the black point -- negative deepens the darkest tones toward pure black, positive lifts them. Midtones barely move."),
+    _check("invert", "tone-invert", "Invert", section="tone", option=True, stage=_D,
+           help="Invert each colour channel without changing the original photo."),
     # --- Color ------------------------------------------------------------------------------------
     _slider("temperature", "c-temp", "Temperature (Cool/Warm)", -100, 100, section="color", option=True, stage=_D,
             help="Shifts the overall white balance -- negative cools the image toward blue, positive warms it toward orange."),

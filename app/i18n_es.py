@@ -106,6 +106,9 @@ ES = {
     "Convert to Black & White": "Convertir a blanco y negro",
     "Converts the photo to black and white. The sliders below brighten or darken the gray of each original colour.":
         "Convierte la foto a blanco y negro. Los controles de abajo aclaran u oscurecen el gris de cada color original.",
+    "Invert": "Invertir",
+    "Invert each colour channel without changing the original photo.":
+        "Invierte cada canal de color sin modificar la foto original.",
     "Enable RGB Curve": "Activar curva RGB",
     "Texture": "Textura",
     "Enhances or softens fine surface detail (skin pores, fabric, foliage) without affecting large tonal shapes.":

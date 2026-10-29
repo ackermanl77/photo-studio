@@ -7,6 +7,11 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-29 -- Invert adjustment
+
+- **Tone → Invert**: a reversible recipe control that inverts RGB channels in the shared processing
+  pipeline and retains float precision for 16-bit exports.
+
 ## 2026-10-28 -- Photoshop filter plug-ins (.8bf)
 
 - **`tools/filter_host/`**: `PhotoStudio.FilterHost.exe`, a .NET Framework 4.8 console helper on

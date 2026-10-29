@@ -24,7 +24,7 @@ PINNED_WIDGET_KEYS = {
     "cg_highlights_intensity": "cg-hi-int", "cg_midtones_hue": "cg-mid-hue",
     "cg_midtones_intensity": "cg-mid-int", "cg_shadows_hue": "cg-sh-hue",
     "cg_shadows_intensity": "cg-sh-int", "clarity": "d-clar", "constrain_crop": "geo-constrain",
-    "contrast_amount": "t-contrast", "crop_aspect": "crop-aspect", "crop_custom_h": "crop-custom-h",
+    "contrast_amount": "t-contrast", "invert": "tone-invert", "crop_aspect": "crop-aspect", "crop_custom_h": "crop-custom-h",
     "crop_custom_w": "crop-custom-w", "crop_free_x0": "crop-free-x0", "crop_free_x1": "crop-free-x1",
     "crop_free_y0": "crop-free-y0", "crop_free_y1": "crop-free-y1", "crop_swap": "crop-swap",
     "curve_black": "c-p0", "curve_enabled": "c-curve-en", "curve_highlights": "c-p3",

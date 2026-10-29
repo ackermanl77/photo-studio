@@ -61,6 +61,7 @@ def tone_section(ctx) -> None:
     section_header("Tone", "tone")
     for key in ("exposure_ev", "contrast_amount", "highlights", "shadows", "whites", "blacks"):
         values[key] = render_control(key)
+    values["invert"] = render_control("invert")
     section_reset_button("tone", "Tone")
 
 

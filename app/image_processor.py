@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import cv2
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 from app.ai_upscale import upscale as ai_upscale
 from app.dehaze import apply_dehaze, dehaze_float
@@ -295,6 +295,12 @@ class PhotoProcessor:
             return self._set_hdr(gray + float(value) * (self.hdr - gray))
         enhancer = ImageEnhance.Color(self.image)
         self.image = enhancer.enhance(value)
+        return self
+
+    def apply_invert(self) -> "PhotoProcessor":
+        if self.hdr is not None:
+            return self._set_hdr(1.0 - self.hdr)
+        self.image = ImageOps.invert(self.image.convert("RGB"))
         return self
 
     def apply_exposure(self, value: float) -> "PhotoProcessor":

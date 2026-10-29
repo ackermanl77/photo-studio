@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from app.cli import build_parser, options_from_args, parse_black_white
-from app.image_processor import whites_blacks_curve
+from app.image_processor import PhotoProcessor, whites_blacks_curve
 from app.pipeline import run_pipeline
 from app.professional_color import black_white_float
 from tests.synthetic_assets import photo_like
@@ -59,6 +60,24 @@ def test_black_white_output_is_gray_in_8_and_16_bit():
 def test_color_grading_can_tone_a_black_and_white_conversion():
     out = np.asarray(run_pipeline(photo_like(), {"black_white": True, "cg_highlights_hue": 40, "cg_highlights_intensity": 60}), dtype=np.int16)
     assert np.abs(out[..., 0] - out[..., 2]).max() > 5
+
+
+def test_invert_adjustment_is_exact_and_off_by_default():
+    image = Image.new("RGB", (2, 1))
+    image.putdata([(0, 64, 255), (31, 127, 200)])
+    assert np.array_equal(np.asarray(run_pipeline(image, {})), np.asarray(image))
+    assert np.array_equal(
+        np.asarray(run_pipeline(image, {"invert": True})),
+        255 - np.asarray(image),
+    )
+
+
+def test_invert_adjustment_preserves_high_precision_values():
+    processor = PhotoProcessor.from_image(Image.new("RGB", (1, 1)))
+    processor.enable_high_precision(np.array([[[0.125, 0.5, 0.875]]], dtype=np.float32))
+    processor.apply_invert()
+    assert processor.hdr is not None
+    assert processor.hdr == pytest.approx(np.array([[[0.875, 0.5, 0.125]]], dtype=np.float32))
 
 
 def test_cli_flags():
