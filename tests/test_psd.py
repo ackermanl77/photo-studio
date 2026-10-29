@@ -6,6 +6,7 @@ import io
 import json
 import struct
 import zlib
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -177,15 +178,69 @@ def test_16_bit_and_grayscale_documents():
 def test_unsupported_files_are_refused_cleanly():
     with pytest.raises(PsdError):
         read_psd(b"not a psd")
-    psb = bytearray(_document(2, 2, []))
-    psb[4:6] = b"\0\2"
-    with pytest.raises(PsdError, match="PSB"):
-        read_psd(bytes(psb))
-    cmyk = _document(2, 2, [], composite=np.zeros((2, 2, 1), dtype=np.uint8), mode=1)
-    with pytest.raises(PsdError):
-        read_psd(cmyk[:12] + struct.pack(">HIIHH", 4, 2, 2, 8, 4) + cmyk[26:])
+    unknown_version = bytearray(_document(2, 2, []))
+    unknown_version[4:6] = b"\0\3"
+    with pytest.raises(PsdError, match="version"):
+        read_psd(bytes(unknown_version))
+    base = _document(2, 2, [], composite=np.zeros((2, 2, 1), dtype=np.uint8), mode=1)
+    for mode, name in ((2, "Indexed"), (0, "Bitmap"), (7, "Multichannel")):
+        with pytest.raises(PsdError, match=name):
+            read_psd(base[:12] + struct.pack(">HIIHH", 1, 2, 2, 8, mode) + base[26:])
+    with pytest.raises(PsdError, match="32-bit"):
+        read_psd(base[:12] + struct.pack(">HIIHH", 1, 2, 2, 32, 1) + base[26:])
     with pytest.raises(PsdError, match="truncated"):
         read_psd(_document(12, 10, [_layer("L", (0, 0, 9, 9), _solid(9, 9, (1, 2, 3, 4)), 0)])[:200])
+
+
+# --- real files saved by Photoshop 2026 (tests/assets/psd/make_psd_fixtures.jsx) ------------------------
+
+REAL_PSDS = Path(__file__).parent / "assets" / "psd"
+# Each holds, bottom to top: Background (white), "Red box" (multiply, 50 %), "Inside group" in
+# "My group" (blue), "Masked green" (its mask reveals the left half), a "Hello PSD" text layer
+# (MyriadPro, 10 px, RGB 10/20/30) and a Hue/Saturation adjustment layer. Converting the mode
+# made Photoshop drop the adjustment layer in the CMYK, Lab and grey copies.
+REAL_FILES = {
+    "rgb8_layers.psd": dict(adjustment=True, exact=True),
+    "rgb16_layers.psd": dict(adjustment=True, exact=True),
+    "rgb8_layers.psb": dict(adjustment=True, exact=True, large=True),
+    "gray16_layers.psd": dict(adjustment=False, grey=True),
+    "cmyk8_layers.psd": dict(adjustment=False),
+    "lab8_layers.psd": dict(adjustment=False),
+}
+
+
+@pytest.mark.parametrize("name", sorted(REAL_FILES))
+def test_real_photoshop_files_keep_their_layers_groups_text_and_colours(name):
+    expected = REAL_FILES[name]
+    document = read_psd((REAL_PSDS / name).read_bytes())
+    assert (document.width, document.height) == (64, 48) and document.composite.size == (64, 48)
+    assert document.large == expected.get("large", False)
+    layers = {layer.name: layer for layer in document.layers}
+    assert list(layers)[1:] == ["Red box", "Inside group", "Masked green", "Hello PSD"]  # [0]: the localized Background
+    assert document.skipped_adjustments == (["Hue/Saturation"] if expected["adjustment"] else [])
+    red, inside, green, text = layers["Red box"], layers["Inside group"], layers["Masked green"], layers["Hello PSD"]
+    assert (red.left, red.top, red.image.size) == (4, 4, (26, 20))
+    assert red.blend_mode == "multiply" and red.opacity == pytest.approx(0.5, abs=0.01)
+    assert inside.group == "My group" and red.group == "" and (inside.left, inside.top) == (34, 4)
+    # The mask reveals x 4..32 of the green layer: opaque on the left, transparent on the right.
+    assert green.image.getpixel((5, 8))[3] == 255 and green.image.getpixel((40, 8))[3] == 0
+    assert text.text["contents"] == "Hello PSD" and text.text["font"] == "MyriadPro-Regular"
+    assert text.text["size_px"] == pytest.approx(10.0)
+    red_pixel, blue_pixel = red.image.getpixel((10, 10))[:3], inside.image.getpixel((10, 8))[:3]
+    if expected.get("exact"):
+        assert red_pixel == (255, 0, 0) and blue_pixel == (0, 0, 255) and text.text["color"] == (10, 20, 30)
+    elif expected.get("grey"):
+        assert len(set(red_pixel)) == 1 and red_pixel[0] < 160 and len(set(text.text["color"])) == 1
+    else:  # CMYK and Lab go through the plain formulas, so close to the RGB values, not equal
+        assert red_pixel[0] > 230 and max(red_pixel[1:]) < 60 and blue_pixel[2] > 230 and max(blue_pixel[:2]) < 60
+        assert max(text.text["color"]) < 40
+
+
+def test_a_16_bit_photoshop_file_keeps_its_layers():
+    """Photoshop stores a 16-bit document's layers in an "Lr16" block, not the layer info section:
+    reading only the latter imported no layers at all."""
+    document = read_psd((REAL_PSDS / "rgb16_layers.psd").read_bytes())
+    assert len(document.layers) == 5
 
 
 def test_a_psd_opens_as_its_composite_photo():
@@ -214,7 +269,8 @@ def test_psd_layers_become_image_layers_on_the_canvas():
         _layer("Logo", (2, 4, 6, 8), _solid(4, 4, (255, 0, 0, 255)), opacity=128, blend=b"scrn", flags=8 | 2),
     ]
     content = _document(20, 10, layers)
-    dicts, skipped = psd_layer_dicts(content, skip_bottom=True)
+    dicts, skipped, adjustments = psd_layer_dicts(content, skip_bottom=True)
+    assert adjustments == []
     assert skipped == 0 and len(dicts) == 1
     logo = dicts[0]
     assert (logo["name"], logo["blend_mode"], logo["visible"], logo["stretch"]) == ("Logo", "screen", False, True)
@@ -222,6 +278,30 @@ def test_psd_layers_become_image_layers_on_the_canvas():
     on_photo = layer_dict_to_image(logo, (40, 20))  # stretched from the 20x10 document to a 40x20 frame
     assert on_photo.getpixel((12, 6))[3] == 255 and on_photo.getpixel((2, 2))[3] == 0
     assert len(psd_layer_dicts(content, skip_bottom=False)[0]) == 2
+
+
+def test_a_real_psd_imports_text_as_an_editable_text_layer_and_names_groups():
+    from app.ui.layers import layer_dict_to_image, psd_layer_dicts
+
+    content = (REAL_PSDS / "rgb8_layers.psd").read_bytes()
+    dicts, skipped, adjustments = psd_layer_dicts(content, skip_bottom=True, editable_text=True)
+    assert adjustments == ["Hue/Saturation"] and skipped == 1
+    by_name = {layer["name"]: layer for layer in dicts}
+    assert "My group / Inside group" in by_name
+    text = by_name["Hello PSD"]
+    assert text["kind"] == "text" and text["text"] == "Hello PSD" and text["font"] == "MyriadPro-Regular"
+    assert text["color"] == "#0A141E" and text["font_size_pct"] == pytest.approx(10 / 48 * 100, abs=0.01)
+    # Centred where Photoshop drew it: the layer's pixels span x 6..47, y 8..16 of the 64x48 document.
+    assert text["x_pct"] == pytest.approx((6 + 41 / 2) / 64 * 100, abs=0.01)
+    assert text["y_pct"] == pytest.approx((8 + 8 / 2) / 48 * 100, abs=0.01)
+    assert layer_dict_to_image(text, (64, 48)).getchannel("A").getbbox() is not None  # it renders
+    rasterized, _skipped, _adjustments = psd_layer_dicts(content, skip_bottom=True, editable_text=False)
+    assert {layer["kind"] for layer in rasterized} == {"image"}
+
+
+def test_a_psb_opens_as_its_composite_photo():
+    image = open_bytes((REAL_PSDS / "rgb8_layers.psb").read_bytes(), "art.psb")
+    assert image.size == (64, 48) and ".psb" in SUPPORTED_EXTENSIONS
 
 
 def test_layered_export_has_the_background_and_each_layer(monkeypatch):

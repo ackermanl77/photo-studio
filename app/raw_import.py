@@ -11,8 +11,8 @@ RAW_EXTENSIONS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".rw2", ".orf", ".dng"
 # that accepts a photo derives from (the main uploader, the Batch uploader, the Library scan, the
 # CLI's --input-dir) -- they used to keep separate hand-written lists, so the main uploader refused
 # Fuji/Panasonic/Olympus/Pentax/Samsung RAW files the decoder supports and Batch took only JPG/PNG.
-# .psd opens as its composite image (F22, app.psd; its layers go to the Layers tab separately).
-STANDARD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".psd"}
+# .psd/.psb open as their composite image (F22, app.psd; their layers go to the Layers tab separately).
+STANDARD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".psd", ".psb"}
 
 
 def _register_extra_openers() -> set[str]:
@@ -120,8 +120,8 @@ def _decode_raw(source) -> Image.Image:
 
 
 def _decode_psd(content: bytes) -> Image.Image:
-    """A Photoshop file's composite ("maximize compatibility") image: app.psd reads 8/16-bit RGB and
-    Grayscale, Pillow is the fallback for anything else it can open."""
+    """A Photoshop file's composite ("maximize compatibility") image: app.psd reads PSD and PSB at 8 or
+    16 bits in RGB, Grayscale, CMYK, Lab and Duotone; Pillow is the fallback for anything else it can open."""
     from app.psd import PsdError, read_psd
 
     try:
@@ -133,7 +133,7 @@ def _decode_psd(content: bytes) -> Image.Image:
 
 def open_image(path: str | Path) -> Image.Image:
     source = Path(path)
-    if source.suffix.lower() == ".psd":
+    if source.suffix.lower() in (".psd", ".psb"):
         return _decode_psd(source.read_bytes())
     if not is_raw_path(source):
         return _decode_standard(source)

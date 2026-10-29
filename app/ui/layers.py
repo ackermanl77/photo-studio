@@ -423,33 +423,55 @@ def render_pen_path_editor(source: Image.Image, key_prefix: str, points: list[di
 MAX_PSD_LAYERS = 64
 
 
-def psd_layer_dicts(content: bytes, skip_bottom: bool) -> tuple[list[dict], int]:
-    """A PSD's raster layers (app.psd, bottom first) as Image layer dicts for the Layers stack, each
-    placed on the document's canvas and stretched to the photo's frame, plus how many layers had no
-    pixels to import. `skip_bottom` leaves out the lowest layer -- usually the photo itself."""
+def psd_layer_dicts(content: bytes, skip_bottom: bool, editable_text: bool = False) -> tuple[list[dict], int, list[str]]:
+    """A PSD's layers (app.psd, bottom first) as layer dicts for the Layers stack, plus how many layers
+    had no pixels to import and the names of the adjustment layers among them. Raster layers become
+    Image layers placed on the document's canvas and stretched to the photo's frame; with
+    `editable_text`, text layers become Text layers (words, font, size, colour) centred where
+    Photoshop drew them. `skip_bottom` leaves out the lowest layer -- usually the photo itself."""
     from app.psd import read_psd
 
     document = read_psd(content)
     psd_layers = document.layers[1:] if skip_bottom else document.layers
+    short_edge = min(document.width, document.height)
     dicts = []
     for psd_layer in psd_layers[:MAX_PSD_LAYERS]:
+        name = (f"{psd_layer.group} / {psd_layer.name}" if psd_layer.group else psd_layer.name)[:80] or "Layer"
+        common = {"id": uuid.uuid4().hex, "name": name, "opacity": round(psd_layer.opacity, 3),
+                  "blend_mode": psd_layer.blend_mode, "visible": psd_layer.visible}
+        text = psd_layer.text
+        if editable_text and text and text["contents"].strip() and text.get("size_px"):
+            red, green, blue = text["color"] or (0, 0, 0)
+            width, height = psd_layer.image.size
+            dicts.append({
+                **common, "kind": "text", "text": text["contents"], "font": text["font"],
+                "font_size_pct": round(min(50.0, max(0.5, text["size_px"] / short_edge * 100)), 2),
+                "color": f"#{red:02X}{green:02X}{blue:02X}", "align": "left",
+                "x_pct": round((psd_layer.left + width / 2) / document.width * 100, 2),
+                "y_pct": round((psd_layer.top + height / 2) / document.height * 100, 2),
+            })
+            continue
         buffer = io.BytesIO()
         psd_layer.on_canvas((document.width, document.height)).save(buffer, format="PNG")
         dicts.append({
-            "id": uuid.uuid4().hex, "kind": "image", "name": psd_layer.name[:80] or "Layer",
-            "image_b64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+            **common, "kind": "image", "image_b64": base64.b64encode(buffer.getvalue()).decode("ascii"),
             "x_pct": 50.0, "y_pct": 50.0, "scale_pct": 100.0, "rotation_deg": 0.0, "stretch": True,
-            "opacity": round(psd_layer.opacity, 3), "blend_mode": psd_layer.blend_mode, "visible": psd_layer.visible,
         })
-    return dicts, document.skipped
+    return dicts, document.skipped, document.skipped_adjustments
 
 
 def import_psd_layers(layers: list[dict]) -> None:
     """➕ Add a layer → PSD (F22): every raster layer of a Photoshop file, once per uploaded file."""
-    st.caption(t("Adds each layer of a Photoshop (.psd) file as an Image layer, with its name, opacity, blend mode and visibility. "
-                 "Text, shapes and smart objects arrive rasterized; adjustment layers, layer effects and vector masks aren't imported."))
+    st.caption(t("Adds each layer of a Photoshop file (.psd or .psb; RGB, grayscale, CMYK or Lab, 8 or 16 bits) as an Image layer, "
+                 "with its name, opacity, blend mode and visibility; a layer inside a group keeps the group in its name. "
+                 "Shapes and smart objects arrive rasterized; adjustment layers, layer effects and vector masks aren't imported."))
     skip_bottom = st.checkbox(t("Skip the bottom layer (the photo itself)"), value=True, key="l-psd-skip-bottom")
-    psd_file = st.file_uploader(t("Photoshop file"), type=["psd"], key="l-new-psd")
+    editable_text = st.checkbox(
+        t("Import text layers as editable text"), value=True, key="l-psd-editable-text",
+        help=t("A text layer becomes a Text layer you can edit: its words, font, size and colour. The font must be installed "
+               "here (or added under 🔤 Fonts) to look the same; untick to keep Photoshop's own rendering as an image instead."),
+    )
+    psd_file = st.file_uploader(t("Photoshop file"), type=["psd", "psb"], key="l-new-psd")
     if psd_file is None:
         return
     file_id = getattr(psd_file, "file_id", psd_file.name)
@@ -459,14 +481,17 @@ def import_psd_layers(layers: list[dict]) -> None:
     from app.psd import PsdError
 
     try:
-        new_layers, skipped = psd_layer_dicts(psd_file.getvalue(), skip_bottom)
+        new_layers, skipped, adjustments = psd_layer_dicts(psd_file.getvalue(), skip_bottom, editable_text)
     except PsdError as error:
         st.error(t("⚠️ {0}").format(t(str(error))))
         return
     layers.extend(new_layers)
     message = t("Added {0} layer(s) from {1}.").format(len(new_layers), psd_file.name)
-    if skipped:
-        message += " " + t("{0} layer(s) without pixels (adjustments, empty layers) were skipped.").format(skipped)
+    if adjustments:
+        message += " " + t("{0} adjustment layer(s) were skipped ({1}): their effect is in the PSD composite, not in these layers.").format(
+            len(adjustments), ", ".join(dict.fromkeys(adjustments)))
+    if skipped > len(adjustments):
+        message += " " + t("{0} layer(s) without pixels (adjustments, empty layers) were skipped.").format(skipped - len(adjustments))
     st.session_state["_psd_import_message"] = message
     request_rerun()
 

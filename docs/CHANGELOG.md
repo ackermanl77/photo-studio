@@ -7,6 +7,23 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-28 -- PSD import: 16-bit layers, PSB, CMYK/Lab, groups, editable text
+
+Tested against real files saved by Photoshop 2026 (27.11), now in `tests/assets/psd/` with the
+ExtendScript that made them (`make_psd_fixtures.jsx`).
+
+- **Fix: a 16-bit PSD imported no layers.** Photoshop keeps a 16-bit document's layers in an `Lr16`
+  block after the (empty) layer info; `app/psd.py` only read the latter. It now reads the document's
+  tagged blocks too.
+- **PSB** (Large Document Format): 8-byte section and channel lengths, 4-byte RLE row counts, up to
+  300,000 px; opens as a photo and imports as layers.
+- **CMYK, Lab and Duotone** documents, converted to RGB with the textbook formulas (no ICC profile).
+- **Groups:** each layer records its group path; the import names it "Group / Layer".
+- **Text layers:** the `TySh` descriptor is parsed for the text, font, size (times the text
+  transform) and colour (from the rendered pixels in non-RGB documents); the Layers tab imports them
+  as editable Text layers (the new **Import text layers as editable text** option, on by default).
+- **Adjustment layers** are still skipped, but now named in the import message.
+
 ## 2026-10-28 -- Ship readiness: notices, update check, dependency audit
 
 - **`THIRD_PARTY_NOTICES.md`**: the license of every bundled package with its full text, the
