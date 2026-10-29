@@ -72,8 +72,10 @@ jobs:
       - name: Build release
         shell: pwsh
         run: |
-          $extra = @()
-          if ("${{ github.event.inputs.gpu_pack }}" -eq "true") { $extra = @("-GpuPack", "-ExtraIndexUrl", "https://download.pytorch.org/whl/cu130") }
+          # -FilterHost: the .8bf plug-in host (PSFilterHost + tools\filter_host); git and the .NET SDK
+          # come with windows-latest.
+          $extra = @("-FilterHost")
+          if ("${{ github.event.inputs.gpu_pack }}" -eq "true") { $extra += @("-GpuPack", "-ExtraIndexUrl", "https://download.pytorch.org/whl/cu130") }
           .\scripts\build_release.ps1 -Version "${{ steps.version.outputs.value }}" @extra
 
       - name: Upload build artifacts
