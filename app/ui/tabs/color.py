@@ -129,6 +129,62 @@ def lut_section(ctx) -> None:
                     st.session_state["_pending_restore"] = {"lut": name}
                     request_rerun()
         section_reset_button("lut", "LUT")
+    # The Adjustments run right after the LUT in the pipeline, so they sit right after it here too
+    # (and called from here keeps app/frontend_unified_app.py under its size limit).
+    adjustments_section(ctx)
+
+
+def adjustments_section(ctx) -> None:
+    """🧪 Adjustments (PS1, app.adjustments): Photoshop's Image > Adjustments not covered by the other
+    sections. Every control renders on every run (disabled while its adjustment is off), so none
+    loses its state."""
+    values = ctx.values
+    with st.expander(t(section_label("🧪 Adjustments", "adjust")), expanded=False, key="sec-adjust"):
+        st.caption(t("Photoshop's Image › Adjustments that the other sections don't cover, applied after the LUT and in this order."))
+        exposure_col, gamma_col = st.columns(2)
+        values["exposure_offset"] = render_control("exposure_offset", exposure_col)
+        values["exposure_gamma"] = render_control("exposure_gamma", gamma_col)
+
+        values["levels_enabled"] = render_control("levels_enabled")
+        off = not values["levels_enabled"]
+        in_col, out_col = st.columns(2)
+        with in_col:
+            for key in ("levels_in_black", "levels_in_white", "levels_gamma"):
+                values[key] = render_control(key, disabled=off)
+        with out_col:
+            for key in ("levels_out_black", "levels_out_white"):
+                values[key] = render_control(key, disabled=off)
+
+        values["mixer_enabled"] = render_control("mixer_enabled")
+        off = not values["mixer_enabled"]
+        for column, out in zip(st.columns(3), ("r", "g", "b")):
+            with column:
+                for src in ("r", "g", "b"):
+                    values[f"mixer_{out}_{src}"] = render_control(f"mixer_{out}_{src}", disabled=off)
+
+        filter_col, density_col = st.columns(2)
+        values["photo_filter"] = render_control("photo_filter", filter_col)
+        off = values["photo_filter"] == "None"
+        values["photo_filter_density"] = render_control("photo_filter_density", density_col, disabled=off)
+        values["photo_filter_luminosity"] = render_control("photo_filter_luminosity", disabled=off)
+
+        values["colorize_enabled"] = render_control("colorize_enabled")
+        off = not values["colorize_enabled"]
+        for column, key in zip(st.columns(3), ("colorize_hue", "colorize_saturation", "colorize_lightness")):
+            values[key] = render_control(key, column, disabled=off)
+
+        values["gradient_map_amount"] = render_control("gradient_map_amount")
+        off = not values["gradient_map_amount"]
+        shadow_col, highlight_col = st.columns(2)
+        values["gradient_map_shadow"] = render_control("gradient_map_shadow", shadow_col, disabled=off)
+        values["gradient_map_highlight"] = render_control("gradient_map_highlight", highlight_col, disabled=off)
+
+        values["posterize_levels"] = render_control("posterize_levels")
+        threshold_col, level_col = st.columns(2)
+        values["threshold_enabled"] = render_control("threshold_enabled", threshold_col)
+        values["threshold_level"] = render_control("threshold_level", level_col, disabled=not values["threshold_enabled"])
+        values["equalize"] = render_control("equalize")
+        section_reset_button("adjust", "Adjustments")
 
 
 def soft_proof_section(ctx) -> None:

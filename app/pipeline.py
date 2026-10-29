@@ -310,6 +310,9 @@ def run_pipeline(
             processor.apply_channel_curves(options["curve_channels"])
         # LUT (F17): last in the colour chain, so the look sits on top of the photo's own grade.
         processor.apply_lut(options.get("lut"), options.get("lut_amount", 100))
+        # Photoshop's remaining adjustments (PS1): Levels, Channel Mixer, Photo Filter, Colorize,
+        # Gradient Map, Posterize, Threshold, Equalize, Exposure offset/gamma -- on top of the grade.
+        processor.apply_adjustments(options)
         if options.get("invert"):
             processor.apply_invert()
 

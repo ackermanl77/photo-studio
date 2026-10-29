@@ -44,6 +44,7 @@ SECTION_PLACES = {
     "tone": Place(BASIC), "color": Place(BASIC), "presence": Place(BASIC),
     "curve": Place(COLOR, expander="sec-curve"), "hsl": Place(COLOR), "bw": Place(COLOR, expander="sec-bw"),
     "grading": Place(COLOR, expander="sec-grading"), "lut": Place(COLOR, expander="sec-lut"),
+    "adjust": Place(COLOR, expander="sec-adjust"),
     "detail": Place(DETAIL), "effects": Place(EFFECTS), "relight": Place(EFFECTS), "background": Place(EFFECTS),
     "portrait": Place(LOCAL, sub_tab=PORTRAIT), "mask_targets": Place(LOCAL, sub_tab=MASKS),
     "repair": Place(LOCAL, sub_tab=REPAIR),

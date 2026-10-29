@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.adjustments import PHOTO_FILTERS
 from app.geometry import ROTATIONS
 from app.lens_corrections import LENS_PROFILES
 from app.presets import PRESETS
@@ -280,6 +281,52 @@ CONTROLS: tuple[Control, ...] = (
             help="A 3D LUT (.cube) -- a film emulation or creative look -- applied after the other colour and curve adjustments."),
     _slider("lut_amount", "lut-amount", "LUT strength", 0, 100, 100, section="lut", option=True, stage=_D,
             help="How much of the LUT's look to apply: 100 is the LUT as designed, lower blends it with the photo."),
+    # --- Adjustments (PS1, app.adjustments): Photoshop's Image > Adjustments not covered above, applied
+    #     after the LUT and before Invert ---------------------------------------------------------------
+    _slider("exposure_offset", "adj-exp-offset", "Exposure offset", -0.5, 0.5, 0.0, step=0.005, section="adjust", option=True, stage=_D,
+            help="Photoshop's Exposure Offset: lifts (positive) or deepens (negative) the shadows and midtones, barely touching the highlights."),
+    _slider("exposure_gamma", "adj-exp-gamma", "Gamma correction", 0.1, 9.99, 1.0, step=0.01, section="adjust", option=True, stage=_D,
+            help="Photoshop's Gamma Correction: above 1 brightens the midtones, below 1 darkens them; black and white stay put."),
+    _check("levels_enabled", "adj-levels", "Levels", section="adjust", option=True, stage=_D,
+           help="Set the input black and white points, the midtone gamma and the output range, like Photoshop's Levels."),
+    _slider("levels_in_black", "adj-lv-in-black", "Input black", 0, 253, 0, section="adjust", option=True, stage=_D,
+            help="Tones at or below this level become black."),
+    _slider("levels_in_white", "adj-lv-in-white", "Input white", 2, 255, 255, section="adjust", option=True, stage=_D,
+            help="Tones at or above this level become white."),
+    _slider("levels_gamma", "adj-lv-gamma", "Midtones (gamma)", 0.1, 9.99, 1.0, step=0.01, section="adjust", option=True, stage=_D,
+            help="Above 1 brightens the midtones, below 1 darkens them."),
+    _slider("levels_out_black", "adj-lv-out-black", "Output black", 0, 255, 0, section="adjust", option=True, stage=_D,
+            help="The darkest level the result uses: raising it fades the blacks."),
+    _slider("levels_out_white", "adj-lv-out-white", "Output white", 0, 255, 255, section="adjust", option=True, stage=_D,
+            help="The brightest level the result uses: lowering it dims the whites."),
+    _check("mixer_enabled", "adj-mixer", "Channel Mixer", section="adjust", option=True, stage=_D,
+           help="Build each output colour channel from a mix of the source Red, Green and Blue, like Photoshop's Channel Mixer."),
+    *(_slider(f"mixer_{out}_{src}", f"adj-mix-{out}{src}", f"{out_name} from {src_name}", -200, 200, 100 if out == src else 0,
+              section="adjust", option=True, stage=_D)
+      for out, out_name in (("r", "Red"), ("g", "Green"), ("b", "Blue"))
+      for src, src_name in (("r", "Red"), ("g", "Green"), ("b", "Blue"))),
+    _choice("photo_filter", "adj-photo-filter", "Photo Filter", ("None", *PHOTO_FILTERS), "None", section="adjust", option=True, stage=_D,
+            help="Photoshop's Photo Filter: the photo seen through a coloured lens filter, e.g. Warming (85) or Cooling (80)."),
+    _slider("photo_filter_density", "adj-pf-density", "Density", 1, 100, 25, section="adjust", option=True, stage=_D,
+            help="How strongly the filter's colour shows."),
+    _check("photo_filter_luminosity", "adj-pf-luminosity", "Preserve luminosity", True, section="adjust", option=True, stage=_D,
+           help="Keep each pixel's brightness, so the filter only changes the colour."),
+    _check("colorize_enabled", "adj-colorize", "Colorize", section="adjust", option=True, stage=_D,
+           help="Hue/Saturation's Colorize: tint the whole photo in one hue, keeping its light and shade -- e.g. a sepia or cyanotype look."),
+    _slider("colorize_hue", "adj-col-hue", "Hue", 0, 360, 30, section="adjust", option=True, stage=_D),
+    _slider("colorize_saturation", "adj-col-sat", "Saturation", 0, 100, 25, section="adjust", option=True, stage=_D),
+    _slider("colorize_lightness", "adj-col-light", "Lightness", -100, 100, 0, section="adjust", option=True, stage=_D),
+    _slider("gradient_map_amount", "adj-gm-amount", "Gradient Map", 0, 100, 0, section="adjust", option=True, stage=_D,
+            help="Map the photo's brightness onto a gradient from the shadow colour to the highlight colour; 0 is off."),
+    Control("gradient_map_shadow", "adj-gm-shadow", "Shadow colour", "color", "#1B1446", section="adjust", option="gradient_map_shadow", stage=_D),
+    Control("gradient_map_highlight", "adj-gm-highlight", "Highlight colour", "color", "#FFD27A", section="adjust", option="gradient_map_highlight", stage=_D),
+    _slider("posterize_levels", "adj-posterize", "Posterize", 0, 64, 0, section="adjust", option=True, stage=_D,
+            help="Reduce each channel to this many tone levels, for a flat poster look; 0 is off."),
+    _check("threshold_enabled", "adj-threshold", "Threshold", section="adjust", option=True, stage=_D,
+           help="Turn the photo into pure black and white: everything darker than the level becomes black."),
+    _slider("threshold_level", "adj-threshold-level", "Threshold level", 1, 255, 128, section="adjust", option=True, stage=_D),
+    _check("equalize", "adj-equalize", "Equalize", section="adjust", option=True, stage=_D,
+           help="Spread the photo's brightness evenly across the whole range, like Photoshop's Equalize."),
     # --- HSL color mixer (feeds "hsl_bands") --------------------------------------------------------------
     *(_slider(f"hsl_{band.lower()}_{channel}", f"hsl-{band.lower()}-{channel[0]}", label, -100, 100, section="hsl", composite="hsl_bands")
       for band in HSL_BAND_ORDER for channel, label in (("hue", "Hue"), ("sat", "Saturation"), ("lum", "Luminance"))),

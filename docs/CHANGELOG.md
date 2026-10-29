@@ -7,6 +7,13 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-29 -- Adjustments (PS1)
+
+- **`app/adjustments.py`** and **Curves & Color → 🧪 Adjustments**: Exposure Offset/Gamma, Levels,
+  Channel Mixer, Photo Filter (Photoshop's named filters), Colorize, Gradient Map, Posterize,
+  Threshold and Equalize -- 32 registry controls (section `adjust`), one pipeline step after the
+  LUT, float in 16-bit mode. `tests/test_adjustments.py`.
+
 ## 2026-10-29 -- Invert adjustment
 
 - **Tone → Invert**: a reversible recipe control that inverts RGB channels in the shared processing

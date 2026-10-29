@@ -49,7 +49,8 @@ def test_every_recipe_control_reaches_the_pipeline_options(key):
 
 
 def test_every_pipeline_option_is_read_by_the_pipeline():
-    source = "".join(Path(f"app/{name}.py").read_text(encoding="utf-8") for name in ("pipeline", "geometry"))
+    # app.adjustments reads its own options (PS1): run_pipeline() hands it the whole options dict.
+    source = "".join(Path(f"app/{name}.py").read_text(encoding="utf-8") for name in ("pipeline", "geometry", "adjustments"))
     unread = [key for key, spec in OPTION_SPECS.items() if spec.stage != "request" and f'"{key}"' not in source]
     assert unread == []
 

@@ -72,7 +72,7 @@ Like Photoshop, the window belongs to the photo:
   | Tab | What's in it |
   |---|---|
   | **☼ Basic** | ✨ Auto Enhance, 🎞️ Preset Look, Tone (exposure, contrast, highlights, shadows, whites, blacks), Color (white balance, saturation, vibrance, 🎯 Pick White Balance) and Presence (texture, clarity, dehaze) |
-  | **🎨 Curves & Color** | RGB Tone Curve, Color Mixer (HSL), Black & White, Color Grading, LUT, Soft Proof |
+  | **🎨 Curves & Color** | RGB Tone Curve, Color Mixer (HSL), Black & White, Color Grading, LUT, Adjustments, Soft Proof |
   | **🔬 Detail** | Denoise, Color Noise, Sharpen |
   | **⛶ Geometry** | Rotate & Straighten, Lens Corrections, 🌀 Liquify, Crop / Aspect Ratio |
   | **◉ Local** | three sub-tabs: ◉ Masks, 🩹 Repair, ◌ Portrait |
@@ -237,6 +237,12 @@ tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color
   darkens the gray that colour turns into (darken Blue for a dramatic sky, brighten Orange for
   lighter skin). Color Grading still applies afterwards, so it can tone the result (sepia, split
   toning). CLI: `--black-white Blue=-60,Orange=20`.
+- **🧪 Adjustments** — Photoshop's remaining Image › Adjustments, applied after the LUT, each off
+  until you turn it on: **Exposure Offset / Gamma**, **Levels** (input black/white, midtone gamma,
+  output range), **Channel Mixer** (how much of each source channel goes into each output),
+  **Photo Filter** (Photoshop's named filters, density, preserve luminosity), **Colorize** (one hue
+  and saturation over the photo's light and shade), **Gradient Map** (shadow and highlight colours,
+  amount), **Posterize**, **Threshold** and **Equalize**. They work the same in 16-bit exports.
 - **🎞️ LUT** — apply a 3D LUT (`.cube`, the format Resolve, Premiere, Photoshop and LUT packs use): a
   film emulation or a creative look. **Import a LUT (.cube)** copies the file into the app's data
   folder, where it stays listed in the **LUT** choice for every photo; **LUT strength** blends it

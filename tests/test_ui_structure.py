@@ -16,6 +16,18 @@ from tests.test_frontend_unified_app import _stub_backend  # noqa: F401  (autous
 # Saved state, presets, projects and the AppTest suite address widgets by these keys: they must
 # never change (the HSL keys, hsl-<band>-<h|s|l>, are checked by pattern below).
 PINNED_WIDGET_KEYS = {
+    # Adjustments (PS1).
+    "exposure_offset": "adj-exp-offset", "exposure_gamma": "adj-exp-gamma", "levels_enabled": "adj-levels",
+    "levels_in_black": "adj-lv-in-black", "levels_in_white": "adj-lv-in-white", "levels_gamma": "adj-lv-gamma",
+    "levels_out_black": "adj-lv-out-black", "levels_out_white": "adj-lv-out-white", "mixer_enabled": "adj-mixer",
+    "mixer_r_r": "adj-mix-rr", "mixer_r_g": "adj-mix-rg", "mixer_r_b": "adj-mix-rb", "mixer_g_r": "adj-mix-gr",
+    "mixer_g_g": "adj-mix-gg", "mixer_g_b": "adj-mix-gb", "mixer_b_r": "adj-mix-br", "mixer_b_g": "adj-mix-bg",
+    "mixer_b_b": "adj-mix-bb", "photo_filter": "adj-photo-filter", "photo_filter_density": "adj-pf-density",
+    "photo_filter_luminosity": "adj-pf-luminosity", "colorize_enabled": "adj-colorize", "colorize_hue": "adj-col-hue",
+    "colorize_saturation": "adj-col-sat", "colorize_lightness": "adj-col-light",
+    "gradient_map_amount": "adj-gm-amount", "gradient_map_shadow": "adj-gm-shadow",
+    "gradient_map_highlight": "adj-gm-highlight", "posterize_levels": "adj-posterize",
+    "threshold_enabled": "adj-threshold", "threshold_level": "adj-threshold-level", "equalize": "adj-equalize",
     # Creative filters (F26).
     "effects_lens_blur": "fx-lens-blur", "effects_lens_blur_focus": "fx-lens-focus", "effects_motion_blur": "fx-motion-blur",
     "effects_motion_angle": "fx-motion-angle", "effects_bloom": "fx-bloom", "effects_bloom_threshold": "fx-bloom-threshold",

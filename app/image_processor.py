@@ -297,6 +297,17 @@ class PhotoProcessor:
         self.image = enhancer.enhance(value)
         return self
 
+    def apply_adjustments(self, options: dict) -> "PhotoProcessor":
+        """Photoshop's remaining Image > Adjustments (app.adjustments, PS1) that `options` turns on."""
+        from app.adjustments import adjustments_active, apply_adjustments
+
+        if not adjustments_active(options):
+            return self
+        if self.hdr is not None:
+            return self._set_hdr(apply_adjustments(self.hdr, options))
+        self.image = from_float_rgb(apply_adjustments(to_float_rgb(self.image), options))
+        return self
+
     def apply_invert(self) -> "PhotoProcessor":
         if self.hdr is not None:
             return self._set_hdr(1.0 - self.hdr)
