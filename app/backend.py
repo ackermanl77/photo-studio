@@ -338,6 +338,35 @@ def ai_mask():
     return send_file(buffer, mimetype="image/png")
 
 
+@app.post("/plugin_filter/configure")
+def plugin_filter_configure():
+    """Photoshop filter plug-ins (PS20, app.filter_plugins): show a plug-in's own dialog on the
+    uploaded image and return its chosen settings as {"step": {...}}, for the recipe's
+    plugin_filters. Blocks until the dialog closes; 409 when it was cancelled."""
+    from app.filter_plugins import FilterCancelled, FilterPluginError, configure
+
+    try:
+        step = json.loads(request.form.get("step", ""))
+    except ValueError:
+        return jsonify({"error": "step must be JSON"}), 400
+    if not isinstance(step, dict) or not isinstance(step.get("file"), str) or not str(step["file"]).lower().endswith(".8bf") \
+            or not isinstance(step.get("entry"), str) or not step["entry"]:
+        return jsonify({"error": 'step must be {"file": "...8bf", "entry": "...", "title": "..."}'}), 400
+    image_file = request.files.get("image")
+    if image_file is None:
+        return jsonify({"error": "No image uploaded"}), 400
+    try:
+        image = Image.open(BytesIO(image_file.read()))
+        check_pixel_count(*image.size)
+        configured = configure(image.convert("RGB"), {"file": step["file"], "entry": step["entry"],
+                                                      "title": str(step.get("title") or "")[:120]})
+    except FilterCancelled as error:
+        return jsonify({"error": str(error)}), 409
+    except (FilterPluginError, *CLIENT_ERRORS) as error:
+        return jsonify({"error": str(error)}), 400
+    return jsonify({"step": configured})
+
+
 @app.post("/process")
 def process():
     try:

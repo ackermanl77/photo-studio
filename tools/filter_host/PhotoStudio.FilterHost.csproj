@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Built by scripts/build_filter_host.ps1, which first builds PSFilterHost (pinned commit) and
+       passes its output folder as PSFilterHostDir. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>PhotoStudio.FilterHost</AssemblyName>
+    <RootNamespace>PhotoStudio.FilterHost</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Product>Photo Studio filter plug-in host</Product>
+    <Company>MELEJ</Company>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="PresentationCore" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="PSFilterHost">
+      <HintPath>$(PSFilterHostDir)\PSFilterHost.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

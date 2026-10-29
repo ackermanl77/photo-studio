@@ -59,3 +59,7 @@ Desktop.ini
 
 # graphify knowledge-graph output (regenerated locally)
 graphify-out/
+
+# .NET build output of toolsilter_host (scripts/build_filter_host.ps1 writes the real build to buildilter_host)
+tools/**/obj/
+tools/**/bin/

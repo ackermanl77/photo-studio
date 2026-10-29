@@ -166,7 +166,7 @@ def canvas_header(ctx) -> None:
         with top_reset:
             # The same recipe fields Undo/Redo cover; layers and the opened photo stay.
             if st.button(t("↺ Reset"), key="hist-reset-btn", help=t("Reset all adjustments to defaults"), use_container_width=True):
-                st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": [], "liquify_strokes": []}
+                st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": [], "liquify_strokes": [], "plugin_filters": []}
                 request_rerun()
         with top_snap:
             _snapshots_popover(history)

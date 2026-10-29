@@ -302,6 +302,20 @@ tone curve, HSL mixer, color grading and soft proof are on **🎨 Curves & Color
     **Subject** chooses what to keep. With the GPU pack it uses the Subject/Person AI mask;
     without it, a classical cut-out (GrabCut) that works best on one subject in the middle of the
     frame. It runs on the cropped frame, before the other effects.
+  - **🧩 Photoshop plug-in filters** (Windows) — runs third-party Photoshop filter plug-ins (`.8bf`,
+    64-bit) on the photo, such as G'MIC, Nik-style filter packs or any filter Photoshop itself
+    loads from `C:\Program Files\Common Files\Adobe\Plug-ins`:
+    - **Plug-ins folder** — where your `.8bf` files are (subfolders included); remembered.
+    - **Filter** + **🧩 Apply…** — opens the filter's own window on the current photo. Choose its
+      settings there and confirm; the filter is added to the list below. Cancelling changes nothing.
+    - The settings are kept and **replayed on every render and export**, after Film Grain, in the
+      listed order, so the filter stays part of your edit (and of presets and projects). **✖** removes
+      one. A filter's result is cached, so re-rendering unchanged pixels doesn't run it again.
+    - Adobe's own filters (Liquify, Lens Blur…) only run inside Photoshop and aren't listed.
+    - Filters run in a separate helper (PSFilterHost, Ms-PL), so a crashing plug-in can't close
+      Photo Studio. They work on 8-bit pixels and see the preview-sized photo in their window; a
+      filter whose look depends on pixel size (a blur radius, say) looks a little different at full
+      resolution.
 
 ## 8. Repair — object removal (◉ Local → 🩹 Repair)
 

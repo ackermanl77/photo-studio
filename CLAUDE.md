@@ -23,7 +23,8 @@ $env:PHOTO_PERF_TESTS="1"; python -m pytest -q -m perf
 $env:PHOTO_BROWSER_TESTS="1"; python -m pytest -q tests/test_browser_smoke.py
 $env:PHOTO_REGENERATE_GOLDEN="1"; python -m pytest -q tests/test_parity_golden.py   # after an intended algorithm change
 python -m app --input photo.jpg --output out.jpg --exposure-ev 0.5                 # CLI over run_pipeline()
-.\scripts\build_release.ps1 -Version "0.1.0" [-GpuPack -ExtraIndexUrl ...] [-Installer] [-Sign]
+.\scripts\build_release.ps1 -Version "0.1.0" [-GpuPack -ExtraIndexUrl ...] [-Installer] [-FilterHost] [-Sign]
+.\scripts\build_filter_host.ps1                     # .8bf plug-in host (PSFilterHost + tools\filter_host) -> build\filter_host
 ```
 
 The dev venv is `.venv` (never pip install into it ad hoc). CI and release workflows: see

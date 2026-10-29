@@ -65,6 +65,9 @@ def effects_section(ctx) -> None:
     section_reset_button("effects", "Effects")
     relight_section(ctx)
     background_section(ctx)
+    from app.ui.plugin_filters import plugin_filters_section
+
+    plugin_filters_section(ctx)
 
 
 def relight_section(ctx) -> None:

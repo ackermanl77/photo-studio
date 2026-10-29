@@ -363,6 +363,9 @@ def build_options(ctx) -> dict:
     options["aspect"] = ctx.aspect_code
     options["crop_box"] = list(ctx.crop_box) if ctx.crop_box else None
     options["liquify"] = list(st.session_state.get("liquify_strokes", [])) or None
+    from app.ui.plugin_filters import pipeline_steps
+
+    options["plugin_filters"] = pipeline_steps()
     return options
 
 

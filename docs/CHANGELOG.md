@@ -7,6 +7,21 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-28 -- Photoshop filter plug-ins (.8bf)
+
+- **`tools/filter_host/`**: `PhotoStudio.FilterHost.exe`, a .NET Framework 4.8 console helper on
+  PSFilterHost (Ms-PL, pinned at c2cfc7c, built by `scripts/build_filter_host.ps1`; `build_release.ps1
+  -FilterHost` runs it and `PhotoStudio.spec` bundles the result as `filterhost\`). `list` returns
+  a folder's filters as JSON; `run` applies one to a PNG, with the plug-in's dialog (`--ui`) or by
+  replaying saved settings. Saved settings are read back with a type allow-list (PSFilterHost's own
+  types and plain data), since recipes and projects are shared.
+- **`app/filter_plugins.py`** + the `plugin_filters` option: steps of {file, entry, title, params}
+  replayed after Film Grain in `run_pipeline`, through the helper in its own process, with a small
+  result cache. `POST /plugin_filter/configure` shows a plug-in's dialog on the current photo (409
+  when cancelled). The recipe keeps the steps as a list (`plugin_filters`), like Liquify's strokes.
+- **✨ Effects → 🧩 Photoshop plug-in filters**: the plug-ins folder, the filter list, Apply… and the
+  applied filters. Tested with G'MIC-8bf 4.0.4.
+
 ## 2026-10-28 -- PSD import: 16-bit layers, PSB, CMYK/Lab, groups, editable text
 
 Tested against real files saved by Photoshop 2026 (27.11), now in `tests/assets/psd/` with the

@@ -105,6 +105,8 @@ Photo Studio is MIT-licensed (see LICENSE). The packaged app also contains the s
 - **Microsoft Edge WebView2 Runtime (Fixed Version)**, in the `WebView2Runtime` folder next to the exe. Microsoft software, redistributed under the WebView2 Runtime license terms: https://developer.microsoft.com/microsoft-edge/webview2/
 - **The optional GPU pack** adds PyTorch (BSD-3-Clause) and the packages in `requirements-gpu-pack.txt`. Run this script with the GPU pack's Python to list them.
 - AI model weights (SCUNet, upscalers, mask models) are downloaded on first use, not bundled; each keeps its publisher's license.
+- **PSFilterHost** (Photoshop filter plug-in hosting), in the `filterhost` folder when the build includes it: Copyright (c) 2012-2022 Nicholas Hayes, Microsoft Public License (Ms-PL), with portions derived from Paint.NET under the Paint.NET License (MIT). Both licence texts ship next to it (`PSFilterHost-License.txt`, `PSFilterHost-License-pdn.txt`); source: https://github.com/0xC0000054/PSFilterHost (commit c2cfc7c28d41aacd929781fc99d3dafd3fdcd871).
+- Third-party `.8bf` plug-ins the user runs are not part of Photo Studio and keep their own licences.
 
 ## Python runtime
 

@@ -67,6 +67,10 @@ for _name in sorted(sys.stdlib_module_names):
 # release folder; the desktop launcher passes the same settings as command-line flags anyway
 # (app/desktop.py::_streamlit_server_flags), since its children run in the per-user data folder.
 datas += [("app", "app"), (".streamlit/config.toml", ".streamlit")]
+# The Photoshop filter plug-in host (PS20, app/filter_plugins.py), when scripts/build_filter_host.ps1
+# has built it: PhotoStudio.FilterHost.exe, PSFilterHost.dll and their licences, as filterhost\.
+if os.path.isfile(os.path.join(SPECPATH, "build", "filter_host", "PhotoStudio.FilterHost.exe")):
+    datas += [(os.path.join("build", "filter_host"), "filterhost")]
 
 # Optional AI Upscale deps (requirements-gpu.txt) -- the all-in-one gpu profile only; the default
 # release ships them as the separate GPU pack instead. Only bundled when the interpreter running

@@ -261,6 +261,27 @@ def ai_mask_via_backend(image_bytes: bytes, kind: str, timeout: float = 600) -> 
     return response.content
 
 
+def configure_plugin_filter_via_backend(image_bytes: bytes, step: dict, timeout: float = 3600) -> dict | None:
+    """POST /plugin_filter/configure (PS20): show a Photoshop plug-in's own dialog on `image_bytes`
+    and return the step with its chosen settings, or None if the dialog was cancelled. Blocks while
+    the user works in that dialog, hence the long timeout."""
+    headers = {TOKEN_HEADER: backend_token()} if backend_token() else {}
+    try:
+        response = requests.post(f"{BACKEND_URL}/plugin_filter/configure", data={"step": json.dumps(step)},
+                                 files={"image": ("image.png", image_bytes)}, headers=headers, timeout=timeout)
+    except requests.RequestException as error:
+        raise RuntimeError(f"Could not reach the local processing backend: {error}") from error
+    if response.status_code == 409:
+        return None
+    try:
+        payload = response.json()
+    except ValueError:
+        raise RuntimeError(response.text) from None
+    if not response.ok:
+        raise RuntimeError(payload.get("error", response.text))
+    return payload["step"]
+
+
 def export_via_backend(
     image_bytes: bytes,
     filename: str,

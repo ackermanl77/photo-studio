@@ -94,6 +94,8 @@ _OTHER_OPTION_SPECS: dict[str, OptionSpec] = {
     "local_adjustments": OptionSpec("local_adjustments", nullable=True),
     # Liquify (F23): parametric warp strokes (app.liquify), applied last in the Geometry step.
     "liquify": OptionSpec("liquify", nullable=True, stage="detail"),
+    # Photoshop filter plug-ins (PS20, app.filter_plugins): replayed after Film Grain, in order.
+    "plugin_filters": OptionSpec("plugin_filters", nullable=True),
     # Crop
     "aspect": OptionSpec("aspect", nullable=True),
     "crop_box": OptionSpec("crop_box", nullable=True),
@@ -259,6 +261,13 @@ def _check_value(key: str, spec: OptionSpec, value):
         if len(strokes) != len(value):
             raise OptionsError('liquify strokes must be {"tool", "size", "strength", "points": [[x, y], ...]}')
         return strokes or None
+    if kind == "plugin_filters":
+        from app.filter_plugins import clean_steps
+
+        try:
+            return clean_steps(value) or None
+        except ValueError as error:
+            raise OptionsError(str(error)) from None
     if kind == "export":
         from app.export import validate_export_settings
 
@@ -310,7 +319,7 @@ RECIPE_CONTROLS: dict[str, RecipeControl] = {
 
 # Recipe entries that aren't single widgets -- lists of per-selection/per-layer dicts, validated
 # structurally by sanitize_recipe() rather than clamped.
-RECIPE_LIST_KEYS = ("mask_layers", "removal_mask_layers", "curve_extra_points", "layers", "liquify_strokes")
+RECIPE_LIST_KEYS = ("mask_layers", "removal_mask_layers", "curve_extra_points", "layers", "liquify_strokes", "plugin_filters")
 SELECTION_KINDS = ("Luminance", "Color", "Horizontal gradient", "Vertical gradient", "Radial", "Painted", "Magic Wand")
 
 
@@ -407,6 +416,19 @@ def sanitize_recipe(recipe) -> dict:
             from app.liquify import clean_strokes
 
             clean[key] = clean_strokes(value)
+        elif key == "plugin_filters":
+            # Each valid step keeps its UI id (a string); an invalid list is dropped whole rather than
+            # half-kept, since the filters run in order.
+            from app.filter_plugins import clean_steps
+
+            entries = value if isinstance(value, list) else []
+            try:
+                cleaned = clean_steps([{k: v for k, v in entry.items() if k != "id"} for entry in entries if isinstance(entry, dict)])
+            except ValueError:
+                cleaned = []
+            ids = [entry.get("id") for entry in entries if isinstance(entry, dict)]
+            clean[key] = [{**step, **({"id": ids[index]} if isinstance(ids[index], str) else {})}
+                          for index, step in enumerate(cleaned)] if len(cleaned) == len(ids) else []
     return clean
 
 

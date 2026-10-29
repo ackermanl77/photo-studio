@@ -457,6 +457,15 @@ def run_pipeline(
     if options.get("effects_grain_amount"):
         processor.apply_film_grain(options["effects_grain_amount"])
 
+    # Photoshop filter plug-ins (PS20): each replays the settings chosen in its own dialog, in a
+    # helper process (app.filter_plugins). They work on the 8-bit pixels; in high-precision mode the
+    # image setter carries their change over to the float data, like any other 8-bit step.
+    if options.get("plugin_filters"):
+        checkpoint()
+        from app.filter_plugins import apply_filters
+
+        processor.image = apply_filters(processor.image, options["plugin_filters"])
+
     # AI Upscale -- the one deliberate exception to the CPU-first, no-ML design (see "Known
     # Issues" in docs/PROJECT_STATUS.md). Last, so nothing re-processes the enlarged result at the
     # original resolution. ai_upscale_available() is checked here too so a stray option on a

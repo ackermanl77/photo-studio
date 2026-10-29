@@ -38,6 +38,9 @@ param(
     # folder, passing -Version through so the installer's version matches the build. Needs ISCC.exe
     # (Inno Setup 6) on PATH or in its default install location.
     [switch]$Installer,
+    # Also build the Photoshop filter plug-in host (scripts\build_filter_host.ps1: PSFilterHost at a
+    # pinned commit + tools\filter_host) so the package includes filterhost\. Needs git and the .NET SDK.
+    [switch]$FilterHost,
     # Keep PyInstaller's build-release\ and dist-release\ folders after a successful build instead of
     # deleting them. build-release\ is PyInstaller's analysis cache, so keeping it makes the next
     # rebuild faster at the cost of a few hundred MB; dist-release\ is empty either way, since its
@@ -223,6 +226,10 @@ try {
         if (Test-Path $constraints) { $headless += @("-c", $constraints) }
         & $VenvPython -m pip install @headless
         if ($LASTEXITCODE -ne 0) { throw "Reinstalling opencv-python-headless failed (exit code $LASTEXITCODE)." }
+    }
+    if ($FilterHost) {
+        # PhotoStudio.spec bundles build\filter_host\ as filterhost\ whenever it exists.
+        & (Join-Path $PSScriptRoot "build_filter_host.ps1")
     }
     # THIRD_PARTY_NOTICES.md lists the packages actually being bundled; the spec ships it.
     & $VenvPython scripts\third_party_notices.py

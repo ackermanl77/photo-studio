@@ -31,7 +31,7 @@ from app.i18n import t
 RECIPE_DEFAULTS = recipe_defaults()
 # The recipe's list entries, kept in plain session_state lists (not widgets).
 RECIPE_LIST_STATE = {"mask_layers": "mask_layers", "removal_mask_layers": "removal_mask_layers", "curve_extra_points": "curve_extra_points",
-                     "liquify_strokes": "liquify_strokes"}
+                     "liquify_strokes": "liquify_strokes", "plugin_filters": "plugin_filters"}
 
 
 def build_recipe() -> dict:

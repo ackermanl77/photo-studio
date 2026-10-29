@@ -11,7 +11,7 @@ MAX_HISTORY_STEPS = 200
 
 # History list labels (F13) for the recipe's list-valued entries, which have no registry control.
 _LIST_LABELS = {"mask_layers": "Masks", "removal_mask_layers": "Repair", "curve_extra_points": "Curve points", "layers": "Layers",
-                "liquify_strokes": "Liquify"}
+                "liquify_strokes": "Liquify", "plugin_filters": "Plug-in filters"}
 
 
 def describe_change(before: dict[str, Any] | None, after: dict[str, Any]) -> str:
