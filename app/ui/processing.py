@@ -281,14 +281,17 @@ def render_layered_psd(
         image = layer.image.convert("RGBA")
         if layers_canvas and image.size != tuple(layers_canvas):
             image = image.resize(tuple(layers_canvas), Image.Resampling.LANCZOS)
-        if layer.mask is not None:
-            alpha = np.asarray(image.getchannel("A"), dtype=np.uint16) * np.asarray(layer.mask.convert("L").resize(image.size), dtype=np.uint16) // 255
-            image.putalpha(Image.fromarray(alpha.astype(np.uint8)))
+        mask = layer.mask.convert("L").resize(image.size, Image.Resampling.BILINEAR) if layer.mask is not None else None
         if rect:
             image = image.crop(rect)
+            mask = mask.crop(rect) if mask is not None else None
         if image.size != background.size:
             image = image.resize(background.size, Image.Resampling.LANCZOS)
-        psd_layers.append(PsdLayer(layer.name, image, 0, 0, layer.opacity, layer.blend_mode, layer.visible))
+            mask = mask.resize(background.size, Image.Resampling.BILINEAR) if mask is not None else None
+        psd_layers.append(PsdLayer(
+            layer.name, image, 0, 0, layer.opacity, layer.blend_mode, layer.visible,
+            group=layer.group, mask=mask,
+        ))
     return write_psd(composite, [PsdLayer("Background", background.convert("RGBA")), *psd_layers])
 
 

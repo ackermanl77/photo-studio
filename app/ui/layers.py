@@ -132,6 +132,10 @@ ADJUSTMENT_LAYER_FIELDS = {
     "temperature": ("Temperature (Cool/Warm)", -100.0, 100.0, 1.0, None),
     "tint": ("Tint (Green/Magenta)", -100.0, 100.0, 1.0, None),
     "clarity": ("Clarity", -100.0, 100.0, 1.0, None),
+    "exposure_offset": ("Exposure offset", -0.5, 0.5, 0.005, None),
+    "exposure_gamma": ("Gamma correction", 0.1, 3.0, 0.05, None),
+    "posterize_levels": ("Posterize levels (0 = off)", 0.0, 64.0, 1.0, None),
+    "threshold_level": ("Threshold level (0 = off)", 0.0, 255.0, 1.0, None),
 }
 
 
@@ -141,8 +145,9 @@ def render_adjustment_layer(layer: dict, layer_id: str) -> None:
     st.caption(t("Changes everything below this layer. Limit it with a layer mask in ⚙️ Settings."))
     columns = st.columns(2)
     for index, (name, (label, low, high, step, help_text)) in enumerate(ADJUSTMENT_LAYER_FIELDS.items()):
+        default = 1.0 if name == "exposure_gamma" else 0.0
         with columns[index % 2]:
-            adjustments[name] = st.slider(t(label), low, high, float(adjustments.get(name, 0.0)), step,
+            adjustments[name] = st.slider(t(label), low, high, float(adjustments.get(name, default)), step,
                                           key=f"l-adj-{name}-{layer_id}", help=t(help_text) if help_text else None)
 
 
@@ -438,7 +443,7 @@ def psd_layer_dicts(content: bytes, skip_bottom: bool, editable_text: bool = Fal
     for psd_layer in psd_layers[:MAX_PSD_LAYERS]:
         name = (f"{psd_layer.group} / {psd_layer.name}" if psd_layer.group else psd_layer.name)[:80] or "Layer"
         common = {"id": uuid.uuid4().hex, "name": name, "opacity": round(psd_layer.opacity, 3),
-                  "blend_mode": psd_layer.blend_mode, "visible": psd_layer.visible}
+                  "blend_mode": psd_layer.blend_mode, "visible": psd_layer.visible, "group": psd_layer.group}
         text = psd_layer.text
         if editable_text and text and text["contents"].strip() and text.get("size_px"):
             red, green, blue = text["color"] or (0, 0, 0)
@@ -526,7 +531,7 @@ def render_layer_stack(source: Image.Image) -> str | None:
             if st.button(t("Add Adjustment Layer"), key="l-add-adjustment-btn"):
                 layers.append({
                     "id": uuid.uuid4().hex, "kind": "adjustment", "name": f"Adjustment {len(layers) + 1}",
-                    "adjustments": {name: 0.0 for name in ADJUSTMENT_LAYER_FIELDS},
+                    "adjustments": {name: 1.0 if name == "exposure_gamma" else 0.0 for name in ADJUSTMENT_LAYER_FIELDS},
                     "opacity": 1.0, "blend_mode": "normal", "visible": True,
                 })
                 request_rerun()
@@ -910,6 +915,7 @@ def build_layers_payload(signature: str, canvas_size: tuple[int, int], scale: fl
             layer["opacity"], layer["blend_mode"], layer["visible"],
             _layer_mask(layer, canvas_size, mask_builder),
             dict(layer.get("adjustments") or {}) if layer.get("kind") == "adjustment" else None,
+            str(layer.get("group", "")),
         )
         for layer in layers
     ]

@@ -78,6 +78,7 @@ class PsdLayer:
     # A text layer's own text, for importing it as editable text: {"contents", "font", "size_px",
     # "color" (r, g, b)}. The pixels above are what Photoshop rendered for it.
     text: dict | None = None
+    mask: Image.Image | None = None
 
     def on_canvas(self, size: tuple[int, int]) -> Image.Image:
         """The layer placed on a transparent canvas of the document's size."""
@@ -549,26 +550,35 @@ def write_psd(composite: Image.Image, layers: list[PsdLayer]) -> bytes:
     if not (0 < width <= MAX_DIMENSION and 0 < height <= MAX_DIMENSION):
         raise ValueError("A PSD can be at most 30000 pixels on a side.")
     records, channel_data = [], []
-    for layer in layers:
+
+    def layer_record(layer: PsdLayer) -> tuple[bytes, list[bytes]]:
         image = layer.image.convert("RGBA")
         left, top = layer.left, layer.top
+        original_size = image.size
+        mask = layer.mask.convert("L").resize(original_size, Image.Resampling.BILINEAR) if layer.mask else None
         bbox = image.getchannel("A").getbbox()
         if bbox is None:
             image, left, top = Image.new("RGBA", (1, 1), (0, 0, 0, 0)), max(0, left), max(0, top)
+            mask = mask.crop((0, 0, 1, 1)) if mask else None
         else:
             image = image.crop(bbox)
             left, top = left + bbox[0], top + bbox[1]
+            mask = mask.crop(bbox) if mask else None
         w, h = image.size
         array = np.asarray(image)
         channels = []
-        for channel_id, index in ((-1, 3), (0, 0), (1, 1), (2, 2)):
-            data = struct.pack(">H", 0) + np.ascontiguousarray(array[:, :, index]).tobytes()
-            channels.append((channel_id, data))
+        for channel_id, plane in ((-1, array[:, :, 3]), (0, array[:, :, 0]), (1, array[:, :, 1]), (2, array[:, :, 2])):
+            channels.append((channel_id, struct.pack(">H", 0) + np.ascontiguousarray(plane).tobytes()))
+        mask_data = b""
+        if mask is not None:
+            mask_plane = np.asarray(mask)
+            channels.append((-2, struct.pack(">H", 0) + np.ascontiguousarray(mask_plane).tobytes()))
+            mask_data = struct.pack(">iiiiBBxx", top, left, top + h, left + w, 0, 0)
         name = layer.name or "Layer"
-        luni = struct.pack(">I", len(name)) + name.encode("utf-16-be")
+        luni = struct.pack(">I", len(name.encode("utf-16-be")) // 2) + name.encode("utf-16-be")
         extra = (
-            struct.pack(">I", 0)  # no layer mask
-            + struct.pack(">I", 0)  # no blending ranges
+            struct.pack(">I", len(mask_data)) + mask_data
+            + struct.pack(">I", 0)
             + _pascal_bytes(name, 4)
             + b"8BIMluni" + struct.pack(">I", len(luni)) + luni
         )
@@ -580,9 +590,54 @@ def write_psd(composite: Image.Image, layers: list[PsdLayer]) -> bytes:
             + struct.pack(">BBBB", round(max(0.0, min(1.0, layer.opacity)) * 255), 0, flags, 0)
             + struct.pack(">I", len(extra)) + extra
         )
-        records.append(record)
-        channel_data.extend(data for _id, data in channels)
-    layer_info = struct.pack(">h", len(layers)) + b"".join(records) + b"".join(channel_data) if layers else b""
+        return record, [data for _channel_id, data in channels]
+
+    def group_record(name: str, section: int) -> bytes:
+        encoded = name.encode("utf-16-be")
+        luni = struct.pack(">I", len(encoded) // 2) + encoded
+        blend = b"pass" if section == 1 else b"norm"
+        divider = struct.pack(">I", section) + b"8BIM" + blend
+        extra = (
+            struct.pack(">II", 0, 0) + _pascal_bytes(name, 4)
+            + b"8BIMluni" + struct.pack(">I", len(luni)) + luni
+            + b"8BIMlsct" + struct.pack(">I", len(divider)) + divider
+        )
+        return (
+            struct.pack(">iiiiH", 0, 0, 0, 0, 0) + b"8BIM" + blend
+            + struct.pack(">BBBB", 255, 0, 8, 0) + struct.pack(">I", len(extra)) + extra
+        )
+
+    roots, stack, previous_path = [], [], []
+    for layer in layers:
+        path = [part.strip() for part in layer.group.split("/") if part.strip()]
+        common = 0
+        while common < min(len(path), len(previous_path)) and path[common] == previous_path[common]:
+            common += 1
+        del stack[common:]
+        parent = stack[-1]["children"] if stack else roots
+        for part in path[common:]:
+            node = {"name": part, "children": []}
+            parent.append(node)
+            stack.append(node)
+            parent = node["children"]
+        parent.append(layer)
+        previous_path = path
+
+    def append_records(nodes) -> None:
+        for node in nodes:
+            if isinstance(node, PsdLayer):
+                record, data = layer_record(node)
+                records.append(record)
+                channel_data.extend(data)
+            else:
+                records.append(group_record("</Layer group>", 3))
+                append_records(node["children"])
+                records.append(group_record(node["name"], 1))
+
+    append_records(roots)
+    if len(records) > 32767:
+        raise ValueError("A PSD can contain at most 32767 layer records.")
+    layer_info = struct.pack(">h", len(records)) + b"".join(records) + b"".join(channel_data) if records else b""
     layer_info += b"\0" * (len(layer_info) % 2)
     layer_section = (struct.pack(">I", len(layer_info)) + layer_info if layers else b"") + struct.pack(">I", 0)
     if not layers:

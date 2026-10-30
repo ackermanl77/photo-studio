@@ -124,6 +124,22 @@ def test_written_psd_round_trips_and_pillow_reads_its_layers():
     assert [bbox for _name, _mode, bbox, _tiles in pillow.layers] == [(5, 6, 25, 16), (30, 20, 50, 40)]
 
 
+def test_written_psd_preserves_user_masks_and_nested_groups():
+    masked = Image.new("RGBA", (8, 6), (0, 255, 0, 255))
+    mask = Image.new("L", masked.size, 255)
+    mask.paste(0, (0, 0, 4, 6))
+    content = write_psd(
+        Image.new("RGB", masked.size, (20, 30, 40)),
+        [PsdLayer("Masked", masked, group="Outer / Inner", mask=mask)],
+    )
+    document = read_psd(content)
+    assert len(document.layers) == 1
+    layer = document.layers[0]
+    assert layer.name == "Masked" and layer.group == "Outer / Inner"
+    alpha = np.asarray(layer.image.getchannel("A"))
+    assert alpha[:, :4].max() == 0 and alpha[:, 4:].min() == 255
+
+
 def test_every_blend_mode_survives_a_round_trip():
     from app.major_features import BLEND_MODE_LABELS
 
@@ -320,7 +336,10 @@ def test_layered_export_has_the_background_and_each_layer(monkeypatch):
 
     star = Image.new("RGBA", (200, 100), (0, 0, 0, 0))
     star.paste((255, 255, 0, 255), (0, 0, 100, 100))
-    payload = layers_to_json([WorkspaceLayer("Star", star, 0.75, "overlay", True)]).encode("utf-8")
+    payload = layers_to_json([
+        WorkspaceLayer("Star", star, 0.75, "overlay", True, Image.new("L", star.size, 255),
+                       group="Imported / Group")
+    ]).encode("utf-8")
     monkeypatch.setattr(backend_client, "export_via_backend", fake_export)
     monkeypatch.setattr(processing, "_producer_layers", lambda *args: payload)
     content = processing.render_layered_psd(b"src", "photo.jpg", {"aspect": "2:1"}, Image.new("RGB", (200, 100)), None, None, "[]", None, (200, 100), {})
@@ -330,6 +349,7 @@ def test_layered_export_has_the_background_and_each_layer(monkeypatch):
     background, star_layer = document.layers
     assert background.image.getpixel((0, 0)) == (10, 10, 10, 255)
     assert star_layer.blend_mode == "overlay" and star_layer.opacity == pytest.approx(0.75, abs=0.01)
+    assert star_layer.group == "Imported / Group"
     # Rasterized at the 200x100 frame, then scaled to the 100x50 export: the left half.
     assert (star_layer.left, star_layer.top, star_layer.image.height) == (0, 0, 50)
     assert 50 <= star_layer.image.width <= 54  # plus the resampling filter's soft edge

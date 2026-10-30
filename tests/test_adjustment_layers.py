@@ -21,9 +21,9 @@ def _square_layer():
     return WorkspaceLayer("Square", image)
 
 
-def _adjustment(ev=1.0, mask=None, opacity=1.0, visible=True):
+def _adjustment(ev=1.0, mask=None, opacity=1.0, visible=True, **extra_adjustments):
     return WorkspaceLayer("Brighten", Image.new("RGBA", (1, 1)), opacity, "normal", visible, mask,
-                          clean_adjustment_set({"exposure_ev": ev}))
+                          clean_adjustment_set({"exposure_ev": ev, **extra_adjustments}))
 
 
 def test_it_adjusts_the_photo_and_the_layers_below_but_not_above():
@@ -55,7 +55,30 @@ def test_wire_format_round_trip_and_cleaning():
     assert restored[0].is_adjustment and restored[0].adjustments["exposure_ev"] == 0.5
     assert not restored[1].is_adjustment
     assert clean_adjustment_set({"exposure_ev": 99, "contrast": "x", "bogus": 1}) == {
-        "exposure_ev": 5.0, "contrast": 0.0, "saturation": 0.0, "temperature": 0.0, "tint": 0.0, "clarity": 0.0}
+        "exposure_ev": 5.0, "contrast": 0.0, "saturation": 0.0, "temperature": 0.0, "tint": 0.0,
+        "clarity": 0.0, "exposure_offset": 0.0, "exposure_gamma": 1.0,
+        "posterize_levels": 0.0, "threshold_level": 0.0,
+    }
+
+
+def test_ps1_adjustments_are_available_through_adjustment_layers_and_masks():
+    mask = Image.new("L", (80, 60), 0)
+    mask.paste(255, (40, 0, 80, 60))
+    plain = np.asarray(run_pipeline(_photo(), parse_options({}), layers=[_square_layer()])).astype(int)
+    threshold = np.asarray(run_pipeline(
+        _photo(), parse_options({}), layers=[_adjustment(ev=0.0, mask=mask, threshold_level=80)]
+    )).astype(int)
+    assert threshold[30, 60, 0] == 255 and threshold[30, 20, 0] == plain[30, 20, 0]
+
+    posterized = np.asarray(run_pipeline(
+        _photo(), parse_options({}), layers=[_adjustment(ev=0.0, posterize_levels=2)]
+    ))
+    assert posterized[30, 60, 0] == 0
+
+    offset = np.asarray(run_pipeline(
+        _photo(), parse_options({}), layers=[_adjustment(ev=0.0, exposure_offset=0.25)]
+    ))
+    assert offset[30, 60, 0] > plain[30, 60, 0]
 
 
 def test_payload_builder_and_psd_export_skip_pixels():

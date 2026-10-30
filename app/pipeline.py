@@ -372,6 +372,7 @@ def run_pipeline(
                 tint=adjustment["tint"],
                 clarity=adjustment["clarity"],
             )
+            processor.apply_masked_ps_adjustments(coverage, adjustment)
         flush_pixel_layers()
 
     checkpoint()
@@ -400,6 +401,7 @@ def run_pipeline(
             tint=adjustment["tint"],
             clarity=adjustment["clarity"],
         )
+        processor.apply_masked_ps_adjustments(_fit(mask, processor.image.size), adjustment)
 
     # Portrait
     if options.get("portrait_smoothing", 0.0) > 0:

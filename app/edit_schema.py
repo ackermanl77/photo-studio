@@ -129,7 +129,10 @@ OPTION_SPECS: dict[str, OptionSpec] = {
 LOCAL_ADJUSTMENT_SPECS = {
     "exposure_ev": _num(-5, 5), "contrast": _num(-100, 100), "saturation": _num(-100, 100),
     "temperature": _num(-100, 100), "tint": _num(-100, 100), "clarity": _num(-100, 100),
+    "exposure_offset": _num(-0.5, 0.5), "exposure_gamma": _num(0.1, 3.0),
+    "posterize_levels": _num(0, 64), "threshold_level": _num(0, 255),
 }
+LOCAL_ADJUSTMENT_DEFAULTS = {name: 1.0 if name == "exposure_gamma" else 0.0 for name in LOCAL_ADJUSTMENT_SPECS}
 MAX_LOCAL_ADJUSTMENTS = 32
 
 
@@ -138,8 +141,9 @@ def clean_adjustment_set(value) -> dict:
     value = value if isinstance(value, dict) else {}
     out = {}
     for name, spec in LOCAL_ADJUSTMENT_SPECS.items():
-        raw = value.get(name, 0)
-        out[name] = float(min(max(raw, spec.minimum), spec.maximum)) if _is_number(raw) else 0.0
+        default = LOCAL_ADJUSTMENT_DEFAULTS[name]
+        raw = value.get(name, default)
+        out[name] = float(min(max(raw, spec.minimum), spec.maximum)) if _is_number(raw) else default
     return out
 
 DETAIL_STAGE_OPTION_KEYS = tuple(key for key, spec in OPTION_SPECS.items() if spec.stage == "detail")
@@ -247,7 +251,10 @@ def _check_value(key: str, spec: OptionSpec, value):
         for index, entry in enumerate(value):
             if not isinstance(entry, dict) or set(entry) - set(LOCAL_ADJUSTMENT_SPECS):
                 raise OptionsError(f"local_adjustments[{index}] must be an object with only {', '.join(LOCAL_ADJUSTMENT_SPECS)}")
-            result.append({name: _check_value(f"local_adjustments[{index}].{name}", spec, entry.get(name, 0)) for name, spec in LOCAL_ADJUSTMENT_SPECS.items()})
+            result.append({
+                name: _check_value(f"local_adjustments[{index}].{name}", spec, entry.get(name, LOCAL_ADJUSTMENT_DEFAULTS[name]))
+                for name, spec in LOCAL_ADJUSTMENT_SPECS.items()
+            })
         return result
     if kind == "aspect":
         parse_aspect(value)

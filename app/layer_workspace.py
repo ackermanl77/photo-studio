@@ -83,6 +83,7 @@ class WorkspaceLayer:
     # app.edit_schema.LOCAL_ADJUSTMENT_SPECS) is applied to everything below it in the stack,
     # through `mask` and `opacity`. None = an ordinary pixel layer.
     adjustments: dict | None = None
+    group: str = ""
 
     @property
     def is_adjustment(self) -> bool:
@@ -104,6 +105,7 @@ def _layer_to_dict(layer: WorkspaceLayer) -> dict:
         "blend_mode": layer.blend_mode,
         "visible": layer.visible,
         "mask": mask,
+        "group": layer.group,
     }
     if layer.adjustments is not None:
         data["adjustments"] = dict(layer.adjustments)
@@ -119,7 +121,7 @@ def _layer_from_dict(data: dict) -> WorkspaceLayer:
 
         adjustments = clean_adjustment_set(adjustments)
     return WorkspaceLayer(data["name"], image, data.get("opacity", 1.0), data.get("blend_mode", "normal"), data.get("visible", True), mask,
-                          adjustments)
+                          adjustments, str(data.get("group", "")))
 
 
 def layers_to_json(layers: list[WorkspaceLayer]) -> str:
@@ -157,7 +159,11 @@ class LayerWorkspace:
 
     def duplicate(self, name: str) -> "LayerWorkspace":
         original = self._find(name)
-        self.layers.append(WorkspaceLayer(f"{name} copy", original.image.copy(), original.opacity, original.blend_mode, original.visible, original.mask.copy() if original.mask else None))
+        self.layers.append(WorkspaceLayer(
+            f"{name} copy", original.image.copy(), original.opacity, original.blend_mode, original.visible,
+            original.mask.copy() if original.mask else None,
+            dict(original.adjustments) if original.adjustments is not None else None, original.group,
+        ))
         return self
 
     def move(self, name: str, offset: int) -> "LayerWorkspace":

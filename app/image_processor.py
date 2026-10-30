@@ -505,6 +505,37 @@ class PhotoProcessor:
         self.image = Image.fromarray(np.clip(original * (1.0 - blend) + edited * blend, 0, 255).astype(np.uint8), mode="RGB")
         return self
 
+    def apply_masked_ps_adjustments(
+        self, mask: np.ndarray | Image.Image | str | Path, adjustments: dict,
+    ) -> "PhotoProcessor":
+        """Blend the PS1 adjustment subset used by adjustment layers through a layer mask."""
+        if not any((
+            adjustments.get("exposure_offset", 0.0),
+            adjustments.get("exposure_gamma", 1.0) != 1.0,
+            adjustments.get("posterize_levels", 0),
+            adjustments.get("threshold_level", 0),
+        )):
+            return self
+        from app.adjustments import apply_adjustments
+
+        mask_array = self._mask_array(mask).astype(np.float32)[..., None] / 255.0
+        ps_options = {
+            "exposure_offset": adjustments.get("exposure_offset", 0.0),
+            "exposure_gamma": adjustments.get("exposure_gamma", 1.0),
+            "posterize_levels": adjustments.get("posterize_levels", 0),
+            "threshold_enabled": adjustments.get("threshold_level", 0) > 0,
+            "threshold_level": adjustments.get("threshold_level", 128),
+        }
+        if self.hdr is not None:
+            original = self.hdr
+            edited = apply_adjustments(original, ps_options)
+            return self._set_hdr(original * (1.0 - mask_array) + edited * mask_array)
+        original = np.asarray(self.image.convert("RGB"), dtype=np.float32) / 255.0
+        edited = apply_adjustments(original, ps_options)
+        blended = original * (1.0 - mask_array) + edited * mask_array
+        self.image = Image.fromarray(np.clip(np.rint(blended * 255.0), 0, 255).astype(np.uint8), mode="RGB")
+        return self
+
     @classmethod
     def from_image(cls, image: Image.Image) -> "PhotoProcessor":
         processor = cls.__new__(cls)
