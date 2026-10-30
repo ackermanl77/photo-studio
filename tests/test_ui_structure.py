@@ -374,6 +374,9 @@ def test_tool_tabs_icon_strip_names_every_tab_and_escapes_text():
         icon, name = label.split(" ", 1)
         assert f'[data-key="{index}"] p::before {{ content: "{icon}"; }}' in style
         assert f'[aria-selected="true"])::after {{ content: "{name}"; }}' in style
+    # UI11: a sidebar widened to 520 px shows the labels themselves instead of bare icons.
+    assert ".st-key-tool-tab { container-type: inline-size; }" in style
+    assert "@container (min-width: 520px)" in style
     assert r'content: "say \"hi\" \\ there"' in icon_tabs_style("x", [("i", r'say "hi" \ there')])
 
 
@@ -447,3 +450,35 @@ def test_the_phone_layout_puts_the_photo_first_and_the_tools_in_a_bottom_sheet()
     assert wide.index("min-width: 420px") < wide.index("}")
     phone = css[css.index("@media (max-width: 640px) {\n    [data-testid=\"stSidebar\"]"):]
     assert "bottom: 0" in phone[:600] and "height: 58vh" in phone[:600]
+
+
+def test_find_a_tool_has_a_keyboard_shortcut():
+    # UI15: Ctrl+K (or "/") opens Find a tool; the script targets the box by its widget key and the
+    # placeholder and the shortcut list name the key.
+    from app.ui.canvas import SHORTCUTS
+    from app.ui.tool_search import _KEYS_SCRIPT, FIND_KEY
+
+    assert f".st-key-{FIND_KEY} input" in _KEYS_SCRIPT
+    assert "e.key === 'k'" in _KEYS_SCRIPT and "e.key === '/'" in _KEYS_SCRIPT
+    assert ("Ctrl+K or /", "Find a tool") in SHORTCUTS
+
+
+@pytest.mark.slow
+def test_the_canvas_header_is_one_row_with_reset_and_view_options_in_popovers():
+    """UI13: everything above the photo is one row of columns (the Photo/tool switch included);
+    Reset sits in the History popover, Split View / Original / Guides & Grid in the View popover."""
+    import inspect
+
+    from app.ui import canvas
+
+    source = inspect.getsource(canvas.canvas_header)
+    assert source.count("st.columns(") == 1 and "canvas_editor_choice(editors)" in source
+    assert 'key="hist-reset-btn"' in inspect.getsource(canvas._snapshots_popover)
+    view = inspect.getsource(canvas._view_popover)
+    assert 'key="cv-split"' in view and 'key="cv-orig"' in view and "guides_panel()" in view
+    at = run_with_uploaded_image()
+    for key in ("hist-reset-btn", "kb-zoom-btn", "kb-orig-btn", "kb-grid-btn"):
+        assert at.button(key=key) is not None
+    assert at.checkbox(key="cv-split").value is False and at.selectbox(key="grid-type").value == "None"
+    at.checkbox(key="cv-split").check().run(timeout=30)
+    assert at.checkbox(key="cv-split").value is True

@@ -169,6 +169,12 @@ def _streamlit_server_flags() -> list[str]:
         "--global.developmentMode", "false",
         "--server.fileWatcherType", "none",
         "--theme.base", "dark",
+        # As in .streamlit/config.toml: stated colours stop the browser-console warnings about
+        # empty sidebar colours (UI14).
+        "--theme.primaryColor", "#ff4b4b",
+        "--theme.textColor", "#fafafa",
+        "--theme.sidebar.primaryColor", "#ff4b4b",
+        "--theme.sidebar.textColor", "#fafafa",
         "--browser.gatherUsageStats", "false",
         "--server.maxUploadSize", str(max(1, MAX_UPLOAD_BYTES // (1024 * 1024))),
         "--client.toolbarMode", "minimal",

@@ -88,9 +88,9 @@ Like Photoshop, the window belongs to the photo:
   Every section shows **● modified** next to its title (or a ● in its expander's title) as soon as
   one of its controls differs from the default, so you can see at a glance where a photo has been
   edited; most sections also have their own **↺ Reset** button.
-- **The page** — the photo, fitted to the window, with two rows of controls above it (Undo,
-  Redo, Reset, History, ⌨️ keyboard shortcuts; zoom, 1:1, Before/After, Grid, Split View, Original)
-  and the histogram, a clipping warning and the Save button below it, whichever tool tab is open.
+- **The page** — the photo, fitted to the window, with one row of controls above it (the tab's
+  Photo/tool switch, Undo, Redo, History, zoom, 1:1, Before/After, Grid, View, ⌨️ keyboard
+  shortcuts; hover any of them for its name and key) and the histogram, a clipping warning and the Save button below it, whichever tool tab is open.
 - **Color profile notice** — a photo with an embedded profile other than sRGB (Adobe RGB, Display
   P3, ProPhoto…) gets a line above it naming the profile: Photo Studio edits in sRGB, so colors
   outside sRGB are clipped (export as Display P3 to keep more of them). **Show clipped colors**
@@ -600,15 +600,19 @@ report.
 
 ## Canvas Controls
 
-Always visible above/below the preview, on every tab:
+Always visible above/below the preview, on every tab. The row above the photo uses icons; hover one
+for its name and keyboard shortcut.
 
+- **Photo / Liquify / Crop…** — when the open tab has tools that work on the photo, this switch at the
+  start of the row picks one (or just the photo).
 - **↶ Undo** / **↷ Redo** — step backward/forward through your edit history (the last 200 steps).
   Also available via **Ctrl+Z** (undo) and **Ctrl+Shift+Z** (redo); the tooltips name the shortcuts.
-- **📌 History** (History & Snapshots) — the **History** list shows the last 30 steps, newest first, each named
+- **History** (the clock icon) — **↺ Reset all adjustments** at the top, then the **History** list shows the last 30 steps, newest first, each named
   after what it changed ("Exposure (EV) 0.3", "Masks", "Contrast, Clarity"); click one to jump
   there, exactly as if you pressed Undo/Redo until it (the later steps stay until you make a new
   edit). **Named Snapshots** bookmark the current look under a name.
-- **↺ Reset** — restores every adjustment to its default. Deliberately leaves an attached layer or
+- **↺ Reset all adjustments** (in History) — restores every adjustment to its default; Undo brings
+  them back. Deliberately leaves an attached layer or
   RAW source alone — only the slider/checkbox values reset.
 - **Zoom View** — **Fit** (the whole photo), **100% (1:1)** — the photo's real pixels, the view to
   judge sharpening, noise, grain and mask edges in (rendered at full resolution even for a large
@@ -620,8 +624,8 @@ Always visible above/below the preview, on every tab:
   zoom buttons reads "Rendering full resolution…" and the preview is replaced by a full-resolution
   render ("✨ Full-resolution view"); touching a control goes back to the fast preview. Save then
   reuses that render instead of computing it again.
-- **🔍 1:1 / Fit (Z)**, **👁 Before / After (B)**, **# Grid (G)** — one-click toggles, also on the
-  keyboard.
+- **1:1 (Z)**, **Before / After (B)**, **Grid (G)** — one-click toggles, also on the keyboard.
+- **View** — Split View, Original and Guides & Grid, below. Shows **●** while any of them is on.
 - **⇄ Split View** — a before/after comparison over the same zoomed/panned view: drag on the photo
   (or the slider) to move the divider; **↕** splits it top and bottom instead of side by side
   (**↔** goes back), remembered in this browser.

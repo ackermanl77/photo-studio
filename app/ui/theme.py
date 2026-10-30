@@ -120,6 +120,15 @@ def icon_tabs_style(tabs_key: str, tabs: list[tuple[str, str]]) -> str:
         f"{row}::after {{ position: absolute; top: calc(100% + 0.15rem); left: 0.2rem; font-size: 0.78rem;"
         " font-weight: 700; color: var(--ps-text-muted); }",
     ]
+    # A sidebar widened to 520 px or more has room for the names: each tab shows its own label
+    # (icon and name, small, wrapping) instead of the bare icon (UI11), and the hover and open-tab
+    # names are dropped as redundant.
+    rules += [
+        f".st-key-{tabs_key} {{ container-type: inline-size; }}",
+        f"@container (min-width: 520px) {{ {tab} p {{ font-size: 0.68rem !important; line-height: 1.2;"
+        " white-space: normal; text-align: center; }"
+        f" {tab} p::before, {tab}:hover::after, {row}::after {{ content: none !important; }} }}",
+    ]
     for index, (icon, name) in enumerate(tabs):
         rules.append(f'{tab}[data-key="{index}"] p::before {{ content: {_css_string(icon)}; }}')
         rules.append(f'{tab}[data-key="{index}"]:hover::after {{ content: {_css_string(name)}; }}')

@@ -26,7 +26,10 @@ GEOMETRY_KEYS = (*section_keys("geometry"), *(key for key in section_keys("lens"
 def rotate_section(ctx) -> None:
     section_header("Rotate & Straighten", "geometry")
     values = ctx.values
-    rot_left_col, rot_right_col, rot_value_col = st.columns([1, 1, 1.2])
+    # The two buttons share a row and the angle gets its own: three across cut "Rotate right" to
+    # "Rotate r…" at the default sidebar width (UI12).
+    rot_left_col, rot_right_col = st.columns(2)
+    rot_value_col = st.container()
     current_rotation = int(st.session_state.get("geo-rotate", 0))
     if rot_left_col.button(t("⟲ Rotate left"), key="geo-rot-left-btn", use_container_width=True, help=t("Rotate 90° counter-clockwise")):
         st.session_state["_pending_restore"] = {"rotate": (current_rotation - 90) % 360}

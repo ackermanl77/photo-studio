@@ -60,6 +60,13 @@ def test_desktop_streamlit_children_get_theme_telemetry_and_upload_flags():
     flags = _streamlit_server_flags()
     pairs = dict(zip(flags[::2], flags[1::2]))
     assert pairs["--theme.base"] == "dark"
+    # Explicit colours (UI14), the same as .streamlit/config.toml's.
+    import tomllib
+    from pathlib import Path
+
+    theme = tomllib.loads((Path(__file__).resolve().parents[1] / ".streamlit" / "config.toml").read_text(encoding="utf-8"))["theme"]
+    assert pairs["--theme.primaryColor"] == theme["primaryColor"] == pairs["--theme.sidebar.primaryColor"]
+    assert pairs["--theme.textColor"] == theme["textColor"] == theme["sidebar"]["textColor"]
     assert pairs["--browser.gatherUsageStats"] == "false"
     assert pairs["--server.maxUploadSize"] == str(MAX_UPLOAD_BYTES // (1024 * 1024))
 

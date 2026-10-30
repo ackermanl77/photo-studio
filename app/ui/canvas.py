@@ -55,9 +55,15 @@ def _toggle_grid() -> None:
 
 def _snapshots_popover(history) -> None:
     with st.popover(
-        t("📌 History"), use_container_width=True,
-        help=t("History and Named Snapshots -- jump to any earlier step, or bookmark the current look under a name"),
+        t("History"), icon=":material/history:", key="history-popover", use_container_width=True,
+        help=t("Reset, History and Named Snapshots -- jump to any earlier step, or bookmark the current look under a name"),
     ):
+        # The same recipe fields Undo/Redo cover; layers and the opened photo stay. In here rather
+        # than on the header row (UI13): it's rare, and one stray click wipes every adjustment.
+        if st.button(t("↺ Reset all adjustments"), key="hist-reset-btn", help=t("Reset all adjustments to defaults (Undo brings them back)"), use_container_width=True):
+            st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": [], "liquify_strokes": [], "plugin_filters": []}
+            request_rerun()
+        st.divider()
         st.markdown(t("**Named Snapshots**"))
         st.caption(
             t("Bookmark the current look under a name and jump back to it any time -- unlike "
@@ -104,6 +110,7 @@ SHORTCUTS = (
     ("[ / ]", "Brush size (Paint, Repair brush)"), ("Ctrl+Z", "Undo the last stroke (Paint, Repair brush)"),
     ("Arrows", "Nudge the crop box, a Pen point, the Liquify brush, the last radial or gradient (Shift: x10)"),
     ("Space", "Liquify: apply the brush where it is"), ("Delete", "Pen: remove the selected point"),
+    ("Ctrl+K or /", "Find a tool"),
     ("1-5 / 0", "Library: rate / clear the rating"), ("6-9", "Library: color label"), ("X", "Library: reject"),
     ("← / →", "Library: previous / next photo"),
 )
@@ -140,60 +147,77 @@ def _history_list(history) -> None:
         st.caption(t("{0} older step(s) -- reachable with Undo.").format(t(first_shown)))
 
 
-def canvas_header(ctx) -> None:
+def canvas_header(ctx, editors: list) -> str:
+    """One row above the photo, like Photoshop's options bar (UI13): the file, the "On the photo"
+    tool choice (when the open tab has photo editors), Undo/Redo and History, then the view --
+    zoom, 1:1, before/after, grid and a View popover with Split, Original and Guides & Grid.
+    Returns the "On the photo" choice. Short labels with the full name and key in the tooltip;
+    the buttons' native key hints are hidden here (theme.css) -- they printed over the labels.
+    Keyed for the stylesheet: on a phone its columns wrap into a compact grid, not one per line."""
     history = ctx.history
-    # Two rows above the image, like Photoshop's options bar (the tools live in the sidebar): the
-    # file and the edit history, then the view. Each control has room for its label -- squeezed
-    # into one row, the buttons shrank to ~30 px and the native shortcut hints printed over them.
-    # Keyed for the stylesheet: on a phone its columns wrap into a compact grid, not one per line.
+    # Icon buttons: the word stays as the button's text for screen readers, hidden on screen
+    # (theme.css), with the name and key in the tooltip.
+    widths = [1.5] + ([0.95 * (len(editors) + 1)] if editors else []) + [0.42, 0.42, 0.62, 0.95, 0.48, 0.42, 0.42, 0.78, 0.55]
     with st.container(key="canvas-controls"):
-        top_c1, top_undo, top_redo, top_reset, top_snap, top_keys = st.columns([1.7, 0.7, 0.7, 0.75, 0.8, 0.42], gap="small", vertical_alignment="center")
-        with top_c1:
+        columns = iter(st.columns(widths, gap="small", vertical_alignment="center"))
+        with next(columns):
             # html.escape(): the file name is user-controlled and lands in an attribute and in markup.
             live_view_label = html.escape(f"{ctx.upload_name} ({ctx.output_size[0]}×{ctx.output_size[1]})")
             st.markdown(
                 t("<div class=\"panel-header-title canvas-live-view\" title=\"{0}\">🖼️ Live View: <span>{1}</span></div>").format(t(live_view_label), t(live_view_label)),
                 unsafe_allow_html=True,
             )
-        with top_undo:
-            if st.button(t("↶ Undo"), key="hist-undo-btn", disabled=not history.can_undo, help=t("Undo (Ctrl+Z)"), use_container_width=True, shortcut="Ctrl+Z"):
+        choice = CANVAS_PHOTO
+        if editors:
+            with next(columns):
+                choice = canvas_editor_choice(editors)
+        with next(columns):
+            if st.button(t("Undo"), icon=":material/undo:", key="hist-undo-btn", disabled=not history.can_undo, help=t("Undo (Ctrl+Z)"), use_container_width=True, shortcut="Ctrl+Z"):
                 st.session_state["_pending_restore"] = history.undo() or {}
                 request_rerun()
-        with top_redo:
-            if st.button(t("↷ Redo"), key="hist-redo-btn", disabled=not history.can_redo, help=t("Redo (Ctrl+Shift+Z)"), use_container_width=True, shortcut="Ctrl+Shift+Z"):
+        with next(columns):
+            if st.button(t("Redo"), icon=":material/redo:", key="hist-redo-btn", disabled=not history.can_redo, help=t("Redo (Ctrl+Shift+Z)"), use_container_width=True, shortcut="Ctrl+Shift+Z"):
                 st.session_state["_pending_restore"] = history.redo() or {}
                 request_rerun()
-        with top_reset:
-            # The same recipe fields Undo/Redo cover; layers and the opened photo stay.
-            if st.button(t("↺ Reset"), key="hist-reset-btn", help=t("Reset all adjustments to defaults"), use_container_width=True):
-                st.session_state["_pending_restore"] = {**RECIPE_DEFAULTS, "mask_layers": [], "removal_mask_layers": [], "curve_extra_points": [], "liquify_strokes": [], "plugin_filters": []}
-                request_rerun()
-        with top_snap:
+        with next(columns):
             _snapshots_popover(history)
-        with top_keys:
-            _shortcuts_popover()
 
         # Keyboard shortcuts (native, F11): Z = 1:1 / Fit, B = before/after, G = grid. Ctrl+Z /
         # Ctrl+Shift+Z are on Undo/Redo, Ctrl+E on the Save button.
-        zoom_c, key_c1, key_c2, key_c3, split_c, orig_c = st.columns([0.95, 0.85, 1.05, 0.7, 0.9, 0.85], gap="small", vertical_alignment="center")
-        with zoom_c:
+        with next(columns):
             # Fit shows the whole photo; 100 % is a true 1:1 view of its pixels (full resolution even
             # for a proxy-previewed photo); 200 %/400 % enlarge those pixels.
             st.selectbox(
                 t("Zoom View"), [0.0, 1.0, 2.0, 4.0], key="cv-zoom", label_visibility="collapsed",
-                format_func=t_format(lambda z: "🔍 Fit" if z < 1 else ("🔍 100% (1:1)" if z == 1 else f"🔍 {int(z * 100)}%")),
+                format_func=t_format(lambda z: "Fit" if z < 1 else f"{int(z * 100)}%"),
+                help=t("Zoom: Fit shows the whole photo, 100% is a true 1:1 view of its pixels"),
             )
-        key_c1.button(t("🔍 1:1 / Fit"), key="kb-zoom-btn", on_click=_toggle_one_to_one, shortcut="Z", use_container_width=True, help=t("Toggle a true 1:1 view (Z)"))
-        key_c2.button(t("👁 Before / After"), key="kb-orig-btn", on_click=_toggle_original, shortcut="B", use_container_width=True, help=t("Show the original (B)"))
-        key_c3.button(t("# Grid"), key="kb-grid-btn", on_click=_toggle_grid, shortcut="G", use_container_width=True, help=t("Toggle the composition grid (G)"))
-        with split_c:
-            compare_mode = st.checkbox(t("⇄ Split View"), value=False, key="cv-split", help=t("Drag on the photo to compare before/after; ↕ in the view splits it top and bottom"))
-        with orig_c:
-            st.checkbox(t("👁️ Original"), value=False, key="cv-orig", disabled=compare_mode)
+        next(columns).button(t("1:1"), key="kb-zoom-btn", on_click=_toggle_one_to_one, shortcut="Z", use_container_width=True, help=t("Toggle a true 1:1 view (Z)"))
+        next(columns).button(t("Before / After"), icon=":material/compare:", key="kb-orig-btn", on_click=_toggle_original, shortcut="B", use_container_width=True, help=t("Show the original (B)"))
+        next(columns).button(t("Grid"), icon=":material/grid_on:", key="kb-grid-btn", on_click=_toggle_grid, shortcut="G", use_container_width=True, help=t("Toggle the composition grid (G)"))
+        with next(columns):
+            _view_popover()
+        with next(columns):
+            _shortcuts_popover()
 
     # Refine-on-pause status (P1): a fragment that polls only while a full-resolution render is
     # pending for a proxy preview, so a settled photo costs nothing.
     st.fragment(refine_status_view, run_every=REFINE_POLL_SECONDS if ctx.refine_tracker.pending() else None)()
+    return choice
+
+
+def _view_popover() -> None:
+    """View options (UI13): Split View, Original, and Guides & Grid -- marked "●" while any is on.
+    Keyed, so the popover stays open when that mark appears or goes."""
+    on = (st.session_state.get("cv-split", False) or st.session_state.get("cv-orig", False)
+          or st.session_state.get("cv-mirror", False) or st.session_state.get("grid-type", "None") != "None"
+          or bool(st.session_state.get("guides")))
+    with st.popover(t("View" + (" ●" if on else "")), key="view-popover", use_container_width=True,
+                    help=t("Split view, the original, guides and grid")):
+        compare_mode = st.checkbox(t("⇄ Split View"), value=False, key="cv-split", help=t("Drag on the photo to compare before/after; ↕ in the view splits it top and bottom"))
+        st.checkbox(t("👁️ Original"), value=False, key="cv-orig", disabled=compare_mode)
+        st.divider()
+        guides_panel()
 
 
 def _show_clipped_colors() -> None:
@@ -227,33 +251,32 @@ def guides_panel() -> None:
     if "guides" not in st.session_state:
         st.session_state.guides = []
     guides = st.session_state.guides
-    grid_on = st.session_state.get("grid-type", "None") != "None" or bool(guides) or st.session_state.get("cv-mirror", False)
-    with st.expander(t("🧭 Guides & Grid" + (" ●" if grid_on else "")), expanded=False, key="sec-guides"):
-        st.caption(t("View-only -- never affects the exported image. The free-form Crop tool's corner handles snap to these lines."))
-        # Photoshop's View > Flip Horizontal: a fresh look at a composition's balance.
-        st.checkbox(t("⇋ Flip the view (mirror)"), key="cv-mirror",
-                    help=t("Shows the photo mirrored left to right, to judge its composition with fresh eyes. View-only: the edit and the export aren't flipped. Not applied to the zoomed (100 %+) view."))
-        st.selectbox(t("Grid overlay"), list(GRID_PRESETS), key="grid-type", format_func=t_option)
-        for guide in guides:
-            guide.setdefault("id", uuid.uuid4().hex)
-        add_col1, add_col2, add_col3 = st.columns([1, 1.4, 0.8])
-        with add_col1:
-            new_guide_orientation = st.selectbox(t("Orientation"), ["Horizontal", "Vertical"], key="guide-new-orientation", label_visibility="collapsed", format_func=t_option)
-        with add_col2:
-            new_guide_position = st.slider(t("Position %"), 0.0, 100.0, 50.0, key="guide-new-position", label_visibility="collapsed")
-        with add_col3:
-            if st.button(t("➕ Add"), key="guide-add-btn"):
-                guides.append({"id": uuid.uuid4().hex, "orientation": new_guide_orientation.lower(), "position_pct": new_guide_position})
+    st.markdown(t("**🧭 Guides & Grid**"))
+    st.caption(t("View-only -- never affects the exported image. The free-form Crop tool's corner handles snap to these lines."))
+    # Photoshop's View > Flip Horizontal: a fresh look at a composition's balance.
+    st.checkbox(t("⇋ Flip the view (mirror)"), key="cv-mirror",
+                help=t("Shows the photo mirrored left to right, to judge its composition with fresh eyes. View-only: the edit and the export aren't flipped. Not applied to the zoomed (100 %+) view."))
+    st.selectbox(t("Grid overlay"), list(GRID_PRESETS), key="grid-type", format_func=t_option)
+    for guide in guides:
+        guide.setdefault("id", uuid.uuid4().hex)
+    add_col1, add_col2, add_col3 = st.columns([1, 1.4, 0.8])
+    with add_col1:
+        new_guide_orientation = st.selectbox(t("Orientation"), ["Horizontal", "Vertical"], key="guide-new-orientation", label_visibility="collapsed", format_func=t_option)
+    with add_col2:
+        new_guide_position = st.slider(t("Position %"), 0.0, 100.0, 50.0, key="guide-new-position", label_visibility="collapsed")
+    with add_col3:
+        if st.button(t("➕ Add"), key="guide-add-btn"):
+            guides.append({"id": uuid.uuid4().hex, "orientation": new_guide_orientation.lower(), "position_pct": new_guide_position})
+            request_rerun()
+    for idx, guide in enumerate(guides):
+        guide_col1, guide_col2 = st.columns([3, 1])
+        with guide_col1:
+            st.caption(t("{0} guide at {1:.0f}%").format(t(guide['orientation'].capitalize()), t(guide['position_pct'])))
+        with guide_col2:
+            if st.button(t("🗑️ Remove"), key=f"guide-rm-{guide['id']}"):
+                guides.pop(idx)
                 request_rerun()
-        for idx, guide in enumerate(guides):
-            guide_col1, guide_col2 = st.columns([3, 1])
-            with guide_col1:
-                st.caption(t("{0} guide at {1:.0f}%").format(t(guide['orientation'].capitalize()), t(guide['position_pct'])))
-            with guide_col2:
-                if st.button(t("🗑️ Remove"), key=f"guide-rm-{guide['id']}"):
-                    guides.pop(idx)
-                    request_rerun()
-                    break
+                break
 
 
 def canvas_view(edited_image: Image.Image, oriented_source: Image.Image) -> None:
@@ -429,11 +452,9 @@ def canvas_editor_choice(editors: list) -> str:
 
 
 def render_canvas_column(ctx, oriented_source: Image.Image) -> None:
-    canvas_header(ctx)
-    profile_notice(ctx)
-    guides_panel()
     editors = take_canvas_editors()
-    choice = canvas_editor_choice(editors)
+    choice = canvas_header(ctx, editors)
+    profile_notice(ctx)
     if choice == CANVAS_PHOTO:
         run_fragment(canvas_view, ctx.edited_image, oriented_source)
     else:

@@ -141,14 +141,37 @@ def find_tool_box() -> None:
     """The search box, and the scroll a jump asked for."""
     st.selectbox(
         t("Find a tool"), list(PLACES), index=None, key=FIND_KEY, on_change=_on_find, label_visibility="collapsed",
-        placeholder=t("🔎 Find a tool…"), format_func=lambda name: f"{t(name)} · {t(PLACES[name].tab)}",
+        placeholder=t("🔎 Find a tool… (Ctrl+K)"), format_func=lambda name: f"{t(name)} · {t(PLACES[name].tab)}",
         help=t("Type a tool's name: it opens its tab and scrolls to it."),
     )
+    with st.container(key="find-keys"):
+        components.html(_KEYS_SCRIPT, height=0)
     target = st.session_state.pop(_SCROLL_KEY, None)
     if target and (target["anchor"] or target["expander"]):
         with st.container(key="find-scroll"):
             components.html(_SCROLL_SCRIPT.replace("__TARGET__", json.dumps(target)), height=0)
 
+
+# Ctrl+K (Cmd+K), or "/" when not typing in a field, focuses and opens the search box (UI15) -- bound
+# once per page; same-origin (srcdoc), like the scroll script below.
+_KEYS_SCRIPT = """<script>
+(function() {
+  const page = window.parent;
+  if (page._photoStudioFindKeysBound) return;
+  page._photoStudioFindKeysBound = true;
+  page.document.addEventListener('keydown', function(e) {
+    const active = page.document.activeElement;
+    const typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+    const ctrlK = (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'k' || e.key === 'K');
+    if (!ctrlK && !(e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey)) return;
+    const input = page.document.querySelector('[data-testid="stSidebar"] .st-key-find-tool input');
+    if (!input || input.offsetParent === null) return;
+    e.preventDefault();
+    input.focus();
+    input.click();
+  });
+})();
+</script>"""
 
 # Same-origin (srcdoc), so it reaches the page: wait for the tab's content, open the expander, scroll
 # the place into the middle of the sidebar and flash it (.ps-find-flash in theme.css).

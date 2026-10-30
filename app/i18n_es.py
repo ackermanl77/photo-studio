@@ -260,9 +260,11 @@ ES = {
 
     # --- Canvas, history, snapshots, guides --------------------------------------------------------
     "**History**": "**Historial**",
-    "🔍 1:1 / Fit": "🔍 1:1 / Ajustar",
+    "1:1": "1:1",
     "Toggle a true 1:1 view (Z)": "Alternar una vista real 1:1 (Z)",
-    "👁 Before / After": "👁 Antes / después",
+    "Before / After": "Antes / después",
+    "Grid": "Cuadrícula",
+    "Fit": "Ajustar",
     "Show the original (B)": "Mostrar el original (B)",
     "Toggle the composition grid (G)": "Alternar la cuadrícula de composición (G)",
     "Original Untouched": "Original sin editar",
@@ -276,8 +278,11 @@ ES = {
         "Marca también los tonos a esta cantidad de niveles del negro o el blanco puros (0 = solo los píxeles recortados del todo).",
     "Blue = shadows clipped to black, Red = highlights clipped to white":
         "Azul = sombras recortadas a negro, rojo = altas luces recortadas a blanco",
-    "History and Named Snapshots -- jump to any earlier step, or bookmark the current look under a name":
-        "Historial e instantáneas con nombre: vuelve a cualquier paso anterior o guarda el aspecto actual con un nombre",
+    "Reset, History and Named Snapshots -- jump to any earlier step, or bookmark the current look under a name":
+        "Restablecer, historial e instantáneas con nombre: vuelve a cualquier paso anterior o guarda el aspecto actual con un nombre",
+    "↺ Reset all adjustments": "↺ Restablecer todos los ajustes",
+    "Reset all adjustments to defaults (Undo brings them back)":
+        "Restablecer todos los ajustes a sus valores predeterminados (Deshacer los recupera)",
     "**Named Snapshots**": "**Instantáneas con nombre**",
     "Bookmark the current look under a name and jump back to it any time -- unlike Undo/Redo, restoring a snapshot never discards it (or any other saved snapshot).":
         "Guarda el aspecto actual con un nombre y vuelve a él cuando quieras; a diferencia de Deshacer/Rehacer, restaurar una instantánea nunca la descarta (ni a ninguna otra guardada).",
@@ -287,11 +292,10 @@ ES = {
     "No edits yet.": "Todavía no hay ediciones.",
     "Undo (Ctrl+Z)": "Deshacer (Ctrl+Z)",
     "Redo (Ctrl+Shift+Z)": "Rehacer (Ctrl+Mayús+Z)",
-    "Reset all adjustments to defaults": "Restablecer todos los ajustes a sus valores predeterminados",
-    "↶ Undo": "↶ Deshacer",
-    "↷ Redo": "↷ Rehacer",
     "↺ Reset": "↺ Restablecer",
-    "📌 History": "📌 Historial",
+    "History": "Historial",
+    "Redo": "Rehacer",
+    "Undo": "Deshacer",
     "📂 Open another photo or project · 🌐 Language": "📂 Abrir otra foto o proyecto · 🌐 Idioma",
     "✏️ {0} on the photo": "✏️ {0} sobre la foto",
     "Opens this tool over the photo, at full size.": "Abre esta herramienta sobre la foto, a tamaño completo.",
@@ -309,7 +313,12 @@ ES = {
     "⇄ Split View": "⇄ Vista dividida",
     "Drag to compare before/after": "Arrastra para comparar antes/después",
     "👁️ Original": "👁️ Original",
-    "🧭 Guides & Grid": "🧭 Guías y cuadrícula",
+    "**🧭 Guides & Grid**": "**🧭 Guías y cuadrícula**",
+    "View": "Vista",
+    "View ●": "Vista ●",
+    "Split view, the original, guides and grid": "Vista dividida, el original, guías y cuadrícula",
+    "Zoom: Fit shows the whole photo, 100% is a true 1:1 view of its pixels":
+        "Zoom: Ajustar muestra la foto entera; 100% es una vista real 1:1 de sus píxeles",
     "View-only -- never affects the exported image. The free-form Crop tool's corner handles snap to these lines.":
         "Solo de visualización: nunca afecta a la imagen exportada. Las esquinas del recorte libre se ajustan a estas líneas.",
     "Grid overlay": "Cuadrícula superpuesta",
@@ -321,7 +330,6 @@ ES = {
     "↩️ Restore": "↩️ Restaurar",
     "Restore snapshot '{0}'": "Restaurar la instantánea '{0}'",
     "Delete snapshot '{0}'": "Eliminar la instantánea '{0}'",
-    "🔍 Fit": "🔍 Ajustar",
     "Orientation": "Orientación",
     "Horizontal": "Horizontal",
     "Vertical": "Vertical",
@@ -1047,7 +1055,7 @@ ES = {
     '🖍 Highlighter': '🖍 Resaltador',
     'A translucent stroke, like a highlighter pen -- use a wide stroke and a bright colour.': 'Un trazo translúcido, como un rotulador fluorescente: usa un trazo ancho y un color vivo.',
     'Find a tool': 'Buscar una herramienta',
-    '🔎 Find a tool…': '🔎 Buscar una herramienta…',
+    '🔎 Find a tool… (Ctrl+K)': '🔎 Buscar una herramienta… (Ctrl+K)',
     "Type a tool's name: it opens its tab and scrolls to it.": 'Escribe el nombre de una herramienta: se abre su pestaña y se desplaza hasta ella.',
     'RGB Tone Curve': 'Curva de tonos RGB',
     'Perspective (Keystone)': 'Perspectiva (trapecio)',

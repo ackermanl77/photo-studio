@@ -1,5 +1,13 @@
 [theme]
 base = "dark"
+# Streamlit's own dark-theme colours, stated outright: with only `base` set, Streamlit 1.65 logs
+# 'Invalid color passed for primaryColor/textColor in theme.sidebar: ""' about 36 times per load.
+primaryColor = "#ff4b4b"
+textColor = "#fafafa"
+
+[theme.sidebar]
+primaryColor = "#ff4b4b"
+textColor = "#fafafa"
 
 # Same values app/desktop.py passes on the desktop build's Streamlit command line (a frozen
 # build's children run in the per-user data folder, where this file isn't found) -- kept here too

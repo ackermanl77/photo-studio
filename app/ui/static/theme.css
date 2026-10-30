@@ -224,16 +224,16 @@ footer { visibility: hidden; }
 
 /* Streamlit DOM: Find a tool (app/ui/tool_search.py) -- its one-shot scroll script's iframe takes no
    room (still loaded and run: not display:none), and the tool it jumped to flashes. */
-.st-key-find-scroll, .st-key-a11y-fixes { position: absolute; width: 0; height: 0; overflow: hidden; }
+.st-key-find-scroll, .st-key-find-keys, .st-key-a11y-fixes { position: absolute; width: 0; height: 0; overflow: hidden; }
 .ps-find-flash { animation: ps-find-flash 1.8s ease-out; border-radius: 6px; }
 @keyframes ps-find-flash {
     0%, 40% { box-shadow: 0 0 0 2px var(--ps-accent); }
     100% { box-shadow: 0 0 0 2px transparent; }
 }
 
-/* Streamlit DOM: Undo/Redo keep their label at any width -- their native shortcut hint (<kbd>)
-   would crowd it out; the tooltip already names the shortcut (UI1). */
-.st-key-hist-undo-btn kbd, .st-key-hist-redo-btn kbd {
+/* Streamlit DOM: the header's buttons keep their label at any width -- their native shortcut hint
+   (<kbd>) would crowd it out; each tooltip already names the shortcut (UI1, UI13). */
+.st-key-canvas-controls kbd {
     display: none;
 }
 
@@ -271,3 +271,14 @@ footer { visibility: hidden; }
     [data-testid="stSlider"] [data-testid="stWidgetLabel"] { padding-right: 2.9rem !important; }
     [data-testid="stNumberInput"] input { padding: 0 0.2rem !important; font-size: 0.75rem !important; }
 }
+
+/* Streamlit DOM: the canvas header's icon buttons (UI13). Their word stays in the page for screen
+   readers but is clipped out of sight; the tooltip names it and its key. */
+.st-key-hist-undo-btn button [data-testid="stMarkdownContainer"],
+.st-key-hist-redo-btn button [data-testid="stMarkdownContainer"],
+.st-key-kb-orig-btn button [data-testid="stMarkdownContainer"],
+.st-key-kb-grid-btn button [data-testid="stMarkdownContainer"],
+.st-key-history-popover [data-testid="stPopoverButton"] [data-testid="stMarkdownContainer"] {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+.st-key-canvas-controls button { padding-left: 0.35rem; padding-right: 0.35rem; min-width: 0; }
