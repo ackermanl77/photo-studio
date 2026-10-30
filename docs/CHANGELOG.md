@@ -7,6 +7,36 @@ frontends, `app/project.py`, `app/edit_stack.py`, `app/cached_processing.py`, an
 `docs/workflows/` guides, deleted on 2026-10-03 as superseded by `docs/USER_GUIDE.md` and
 `docs/PROJECT_STATUS.md`).
 
+## 2026-10-29 -- Adjustment layers, layer groups, PSD masks and groups (PS1, PS6, PS18)
+
+- **Adjustment layers** (and masked local adjustments) take Exposure offset and gamma, Posterize
+  levels and a Threshold level, blended through the layer mask
+  (`PhotoProcessor.apply_masked_ps_adjustments()`). A missing value defaults per field (gamma 1.0)
+  instead of 0. Levels, Channel Mixer and the rest of 🧪 Adjustments are still whole-photo only.
+- **Layer groups:** every layer carries a group name, kept by Duplicate and in saved workspaces.
+  A group has no opacity or blend mode of its own yet.
+- **PSD export** writes each layer's mask and its groups (section dividers). The Unicode layer
+  name's length now counts UTF-16 code units, so names with emoji or other non-BMP characters are
+  written correctly. `tests/test_adjustment_layers.py`, `tests/test_psd.py`.
+
+## 2026-10-29 -- UI pass (UI11-UI15)
+
+From the 2026-10-29 UI REA audit (improvement report UI11-UI15). Widget keys are unchanged.
+
+- **UI11 tab labels.** A sidebar widened to 520 px or more shows each tool tab's label under the
+  icon row (a CSS container query); at the default width the icons stay, with hover names.
+- **UI12 no cut-off labels.** Rotate left / Rotate right share a row and the angle picker has its
+  own (Geometry tab).
+- **UI13 one canvas header row.** File, Photo/tool switch, Undo, Redo, History, zoom, 1:1,
+  Before/After, Grid, View and shortcuts sit in one row above the photo, which now starts at about
+  88 px instead of 218 (1440x900). Reset moved into the History popover; Split View, Original and
+  Guides & Grid into a View popover (● when on). Icon buttons keep their word for screen readers.
+- **UI14 theme colours.** `primaryColor`/`textColor` are stated in `.streamlit/config.toml`
+  (`[theme]` and `[theme.sidebar]`) and on the desktop build's command line, with Streamlit's own
+  dark values: about 36 browser-console warnings per load before, none after.
+- **UI15 Ctrl+K.** Ctrl+K (Cmd+K), or / when not typing, focuses Find a tool; the placeholder and
+  the shortcut list name the key.
+
 ## 2026-10-29 -- Adjustments (PS1)
 
 - **`app/adjustments.py`** and **Curves & Color → 🧪 Adjustments**: Exposure Offset/Gamma, Levels,
